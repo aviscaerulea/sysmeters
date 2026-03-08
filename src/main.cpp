@@ -19,9 +19,9 @@ static std::string get_config_path() {
     wchar_t exe_path[MAX_PATH];
     GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
 
-    std::wstring ws = (fs::path(exe_path).parent_path() / L"system-meters.toml").wstring();
+    std::wstring ws = (fs::path(exe_path).parent_path() / L"sysmeters.toml").wstring();
     int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (len <= 0) return "system-meters.toml";
+    if (len <= 0) return "sysmeters.toml";
     std::string out(len - 1, '\0');
     WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, out.data(), len, nullptr, nullptr);
     return out;
@@ -29,7 +29,7 @@ static std::string get_config_path() {
 
 int main() {
     // 多重起動の排他（Named Mutex）
-    HANDLE mutex = CreateMutexW(nullptr, FALSE, L"system-meters-mutex");
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, L"sysmeters-mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // 既存プロセスのウィンドウを探して終了要求
         HWND prev = FindWindowW(L"SystemMetersWnd", nullptr);
@@ -66,7 +66,7 @@ int main() {
     AppWindow window;
     if (!window.create(hinst, cfg)) {
         MessageBoxW(nullptr, L"ウィンドウの作成に失敗しました。\n管理者権限で実行してください。",
-                    L"system-meters", MB_ICONERROR);
+                    L"sysmeters", MB_ICONERROR);
         CoUninitialize();
         ReleaseMutex(mutex);
         CloseHandle(mutex);

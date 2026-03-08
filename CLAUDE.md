@@ -24,7 +24,7 @@ task clean
 task release
 ```
 
-ビルド出力先：`out/system-meters.exe`
+ビルド出力先：`out/sysmeters.exe`
 
 ## アーキテクチャ
 
@@ -35,7 +35,7 @@ src/
 ├── main.cpp                WinMain、メッセージループ、1秒タイマー
 ├── window.hpp/.cpp         ウィンドウ管理（カスタムタイトルバー、ドラッグ、タスクトレイ）
 ├── renderer.hpp/.cpp       Direct2D 描画（面グラフ、縦バー、横バー、テキスト）
-├── config.hpp/.cpp         TOML 設定読み書き（system-meters.toml）
+├── config.hpp/.cpp         TOML 設定読み書き（sysmeters.toml）
 ├── metrics.hpp             全メトリクス構造体定義
 ├── ring_buffer.hpp         固定長リングバッファ（テンプレート）
 ├── collector_cpu.hpp/.cpp  CPU 使用率（PDH）+ 温度（WMI）

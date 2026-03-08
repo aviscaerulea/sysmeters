@@ -1,4 +1,4 @@
-# system-meters
+# sysmeters
 
 Windows 11 用リアルタイムシステムリソース監視 HUD アプリケーション。
 
@@ -40,14 +40,14 @@ task release
 ## 実行
 
 ```
-out\system-meters.exe
+out\sysmeters.exe
 ```
 
 タスクトレイ（通知領域）にアイコンが表示される。右クリックで設定ファイルを開くか終了できる。
 
 ## 設定
 
-`system-meters.toml` で外観（背景色、グラフ色）等をカスタマイズできる。
+`sysmeters.toml` で外観（背景色、グラフ色）等をカスタマイズできる。
 
 ## スクリーンショット
 

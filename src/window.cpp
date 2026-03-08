@@ -79,7 +79,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     // ウィンドウ作成（標準タイトルバー＋閉じるボタン、常前面、タスクバー非表示）
     hwnd_ = CreateWindowExW(
         WND_EX_STYLE,
-        L"SystemMetersWnd", L"system-meters",
+        L"SystemMetersWnd", L"sysmeters",
         WND_STYLE,
         cfg_->win_x, cfg_->win_y,
         adj.right - adj.left, adj.bottom - adj.top,
@@ -170,7 +170,7 @@ void AppWindow::add_tray_icon() {
     nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_TRAY;
     nid.hIcon            = LoadIcon(hinst_, MAKEINTRESOURCE(IDI_APP_ICON));
-    wcscpy_s(nid.szTip, L"system-meters");
+    wcscpy_s(nid.szTip, L"sysmeters");
     Shell_NotifyIconW(NIM_ADD, &nid);
 }
 
@@ -198,10 +198,10 @@ void AppWindow::show_context_menu() {
 void AppWindow::open_config_file() {
     wchar_t path[MAX_PATH];
     GetModuleFileNameW(hinst_, path, MAX_PATH);
-    // 実行ファイルのディレクトリに system-meters.toml がある
+    // 実行ファイルのディレクトリに sysmeters.toml がある
     wchar_t* last_sep = wcsrchr(path, L'\\');
     if (last_sep) { *(last_sep + 1) = L'\0'; }
-    wcscat_s(path, L"system-meters.toml");
+    wcscat_s(path, L"sysmeters.toml");
 
     ShellExecuteW(nullptr, L"open", path, nullptr, nullptr, SW_SHOW);
 }

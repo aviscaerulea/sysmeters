@@ -77,7 +77,7 @@ static json read_cache(const fs::path& path, double ttl) {
 // WinHTTP でシンプルな GET リクエストを発行し、レスポンスボディを返す
 static std::string http_get(const std::wstring& host, const std::wstring& path,
                             const std::string& token, const std::string& beta_header) {
-    HINTERNET session = WinHttpOpen(L"system-meters/1.0",
+    HINTERNET session = WinHttpOpen(L"sysmeters/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nullptr, nullptr, 0);
     if (!session) return {};
 

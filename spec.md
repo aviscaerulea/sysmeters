@@ -1,4 +1,4 @@
-# system-meters 仕様書
+# sysmeters 仕様書
 
 ## 概要
 
@@ -128,7 +128,7 @@ CPU・GPU 温度の両方に適用。
 | リンクライブラリ | d2d1.lib, dwrite.lib, pdh.lib, winhttp.lib, windowscodecs.lib, wbemuuid.lib, ole32.lib, oleaut32.lib, shell32.lib |
 | サブシステム | `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup` |
 | バージョン注入 | `/DAPP_VERSION=\"x.y.z\"` |
-| 出力先 | `out/system-meters.exe` |
+| 出力先 | `out/sysmeters.exe` |
 
 ## 外部依存ライブラリ
 

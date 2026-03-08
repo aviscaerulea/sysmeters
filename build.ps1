@@ -1,7 +1,7 @@
 # vim: set ft=ps1 fenc=utf-8 ff=unix sw=4 ts=4 et :
 # ==================================================
-# system-meters ビルドスクリプト
-# MSVC cl.exe で src/*.cpp をコンパイルし out/system-meters.exe を生成する
+# sysmeters ビルドスクリプト
+# MSVC cl.exe で src/*.cpp をコンパイルし out/sysmeters.exe を生成する
 #
 # 引数:
 #   -Version  : バージョン文字列（例: 1.0.0）
@@ -65,7 +65,7 @@ $linkFlags = @(
 )
 if ($Config -eq "Debug") { $linkFlags += "/DEBUG" }
 
-$outExe = "out\system-meters.exe"
+$outExe = "out\sysmeters.exe"
 
 Write-Host "Building $outExe ($Config, v$Version)..."
 
