@@ -24,11 +24,13 @@ tasks:
     deps: [kill]
     cmds:
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Debug
+      - cmd: pwsh.exe -NoProfile -Command "Copy-Item '{{.APP_NAME}}.toml' 'out/'"
 
   release:
     desc: リリースビルド + zip パッケージング
     deps: [clean]
     cmds:
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
-      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','{{.APP_NAME}}.toml' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force"
+      - cmd: pwsh.exe -NoProfile -Command "Copy-Item '{{.APP_NAME}}.toml' 'out/'"
+      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','out/{{.APP_NAME}}.toml' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force"
       - cmd: echo "Package out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"
