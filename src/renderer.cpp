@@ -21,11 +21,11 @@ static constexpr float DISK_GAP   = 20.f;  // Disk I/O グラフと Space バー
 static constexpr float INFO_LINE_H = 27.f;  // Space 下テキスト行高さ（容量/GB/h）
 
 // リングバッファの最大値を返す
-static auto buf_max = [](const RingBuffer<float, 60>& b) {
+static float buf_max(const RingBuffer<float, 60>& b) {
     float m = 0.f;
     for (std::size_t i = 0; i < b.size(); ++i) m = max(m, b.at(i));
     return m;
-};
+}
 
 // 0xRRGGBB → D2D1_COLOR_F 変換
 static D2D1_COLOR_F from_rgb(uint32_t rgb, float alpha = 1.f) {
@@ -134,14 +134,6 @@ void Renderer::draw_section_label_with_model(float x, float y, float ww,
         render_target_->DrawText(lbl, static_cast<UINT32>(wcslen(lbl)), font_small_,
             D2D1::RectF(x + PREFIX_W, y, x + ww, y + SECTION_H), brush_text_);
     }
-}
-
-// セクションラベル描画（例："CPU"）
-void Renderer::draw_section_label(float x, float y, const wchar_t* label, const AppConfig& cfg) {
-    set_brush_color(brush_text_, cfg.col_text, 0.6f);
-    D2D1_RECT_F r = D2D1::RectF(x, y, x + 400.f, y + SECTION_H);
-    render_target_->DrawText(label, static_cast<UINT32>(wcslen(label)),
-                             font_small_, r, brush_text_);
 }
 
 // グラフ領域にグリッド線を描画する（10 秒間隔の縦線 6 本 + 25% 間隔の横線 4 本）
@@ -307,17 +299,15 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     y += GRAPH_H_LG + GAP;
 
     // コア別縦バー（論理コア数本横並び、画面幅に合わせて動的計算）
-    {
-        const int   N_CORES = static_cast<int>(std::size(m.core_pct));
-        constexpr float GAP_BAR = 2.f;  // バー間ギャップ
-        float bar_w = (ww - GAP_BAR * (N_CORES - 1)) / N_CORES;
-        float core_x = x;
-        for (int i = 0; i < N_CORES; ++i) {
-            D2D1_RECT_F cr = D2D1::RectF(core_x, y, core_x + bar_w, y + CORE_BAR_H);
-            uint32_t core_col = (m.core_pct[i] > 95.f) ? 0xEF5350 : cfg.col_cpu_core;
-            draw_vbar(m.core_pct[i], cr, core_col);
-            core_x += bar_w + GAP_BAR;
-        }
+    const int   N_CORES = static_cast<int>(std::size(m.core_pct));
+    constexpr float GAP_BAR = 2.f;  // バー間ギャップ
+    float bar_w = (ww - GAP_BAR * (N_CORES - 1)) / N_CORES;
+    float core_x = x;
+    for (int i = 0; i < N_CORES; ++i) {
+        D2D1_RECT_F cr = D2D1::RectF(core_x, y, core_x + bar_w, y + CORE_BAR_H);
+        uint32_t core_col = (m.core_pct[i] > 95.f) ? 0xEF5350 : cfg.col_cpu_core;
+        draw_vbar(m.core_pct[i], cr, core_col);
+        core_x += bar_w + GAP_BAR;
     }
     y += CORE_BAR_H + GAP;
 
@@ -576,9 +566,12 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     render_target_->DrawText(L"Network", 7, font_normal_,
         D2D1::RectF(x, y, x + NET_LBL_W, y + LINE_H), brush_text_);
 
+    // IP アドレスは行末右寄せで描画する
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
     const wchar_t* ip_txt = m.ip_avail ? m.global_ip : L"NO INTERNET\U0001F4F5";
     render_target_->DrawText(ip_txt, static_cast<UINT32>(wcslen(ip_txt)), font_small_,
         D2D1::RectF(x + NET_LBL_W, y + 4.f, x + ww, y + LINE_H), brush_text_);
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     y += LINE_H;
 
     // 3 桁左スペースパディングで表示のガタつきを防ぐ
@@ -631,13 +624,13 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
     // 5h / 7d バー：ラベル+パーセンテージ（左）、バー（中）、リセット時刻（右）の同一行レイアウト
     // テキストは Disk I/O と同じ font_small_（18pt）
-    static constexpr float LBL_W   = 90.f;   // "5h 100.0%" が収まる幅（font_small_）
+    static constexpr float LBL_W   = 90.f;   // "5h 100%" が収まる幅（font_small_）
     static constexpr float RESET_W = 130.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count) {
         // ラベル + パーセンテージ（左寄せ、font_small_ = Disk I/O と同サイズ）
         wchar_t buf[64];
-        if (avail) swprintf_s(buf, L"%s %5.1f%%", lbl, pct);
+        if (avail) swprintf_s(buf, L"%s %3.0f%%", lbl, pct);
         else       swprintf_s(buf, L"%s   N/A",   lbl);
         uint32_t text_col = (avail && pct > expected_pct * 1.1f) ? 0xEF5350 : (avail ? cfg.col_text : 0x888888);
         set_brush_color(brush_text_, text_col);

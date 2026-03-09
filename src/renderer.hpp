@@ -50,7 +50,6 @@ private:
     void release_device_resources();
 
     // 描画プリミティブ
-    void draw_section_label(float x, float y, const wchar_t* label, const AppConfig& cfg);
 
     // グリッド線を描画する（面グラフ領域に重ねる）
     void draw_grid(D2D1_RECT_F rect);
