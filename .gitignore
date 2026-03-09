@@ -8,3 +8,6 @@ out/
 include/toml.hpp
 include/json.hpp
 .clasp.json
+**/.env
+.serena/
+.task/
