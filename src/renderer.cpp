@@ -624,7 +624,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
     // 5h / 7d バー：ラベル+パーセンテージ（左）、バー（中）、リセット時刻（右）の同一行レイアウト
     // テキストは Disk I/O と同じ font_small_（18pt）
-    static constexpr float LBL_W   = 90.f;   // "5h 100%" が収まる幅（font_small_）
+    static constexpr float LBL_W   = 72.f;   // "5h 100%" が収まる幅（font_small_）
     static constexpr float RESET_W = 130.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count) {
