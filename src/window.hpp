@@ -30,8 +30,9 @@ public:
 private:
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
-    int  min_track_x_  = 0;   // WM_GETMINMAXINFO 用：最小ウィンドウ幅（create で計算）
-    int  last_pref_h_  = 0;   // update_window_size 早期リターン用キャッシュ
+    int  min_track_x_  = 0;     // WM_GETMINMAXINFO 用：最小ウィンドウ幅（create で計算）
+    int  last_pref_h_  = 0;     // update_window_size 早期リターン用キャッシュ
+    bool topmost_      = false;  // 最前面表示フラグ（レジストリから読み込み）
 
     AppConfig*       cfg_     = nullptr;
     AllMetrics*      metrics_ = nullptr;
@@ -48,6 +49,9 @@ private:
     void remove_tray_icon();
     void show_context_menu();
     void open_config_file();
+    bool load_topmost();   // レジストリから最前面設定を読む
+    void save_topmost();   // レジストリに最前面設定を書く
+    void apply_topmost();  // SetWindowPos で最前面状態を反映
 
     static LRESULT CALLBACK wnd_proc(HWND, UINT, WPARAM, LPARAM);
     LRESULT handle_message(HWND, UINT, WPARAM, LPARAM);

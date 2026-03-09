@@ -10,5 +10,6 @@
 // コンテキストメニュー項目 ID
 #define IDM_OPEN_CONFIG 100
 #define IDM_EXIT        101
+#define IDM_TOPMOST     102
 // Claude API バックグラウンド完了通知
 #define WM_CLAUDE_DONE  (WM_USER + 2)
