@@ -80,5 +80,6 @@ private:
     float draw_disk(const DiskMetrics& c, const DiskMetrics& d,
                     const AppConfig& cfg, float y);
     float draw_net(const NetMetrics& m,  const AppConfig& cfg, float y);
+    float draw_ip(const NetMetrics& m,   const AppConfig& cfg, float y);
     float draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float y);
 };
