@@ -172,6 +172,9 @@ void Renderer::draw_area_graph(const RingBuffer<float, 60>& buf,
                                float max_val, D2D1_RECT_F rect, uint32_t color_rgb) {
     if (max_val <= 0.f) return;
 
+    // グラフ領域にクリッピング（ストロークのはみ出し防止）
+    render_target_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
     // グラフ背景（ほぼ黒）
     set_brush_color(brush_fill_, 0x0D0D0D);
     render_target_->FillRectangle(rect, brush_fill_);
@@ -179,17 +182,27 @@ void Renderer::draw_area_graph(const RingBuffer<float, 60>& buf,
     // グリッド線
     draw_grid(rect);
 
-    if (buf.empty()) return;
+    if (buf.empty()) {
+        render_target_->PopAxisAlignedClip();
+        return;
+    }
 
     float w = rect.right - rect.left;
     float h = rect.bottom - rect.top;
     float dx = w / 60.f;
 
     ID2D1PathGeometry* path = nullptr;
-    if (FAILED(d2d_factory_->CreatePathGeometry(&path))) return;
+    if (FAILED(d2d_factory_->CreatePathGeometry(&path))) {
+        render_target_->PopAxisAlignedClip();
+        return;
+    }
 
     ID2D1GeometrySink* sink = nullptr;
-    if (FAILED(path->Open(&sink))) { path->Release(); return; }
+    if (FAILED(path->Open(&sink))) {
+        path->Release();
+        render_target_->PopAxisAlignedClip();
+        return;
+    }
 
     sink->SetFillMode(D2D1_FILL_MODE_WINDING);
     sink->BeginFigure(D2D1::Point2F(rect.left, rect.bottom), D2D1_FIGURE_BEGIN_FILLED);
@@ -209,6 +222,7 @@ void Renderer::draw_area_graph(const RingBuffer<float, 60>& buf,
     if (FAILED(sink->Close())) {
         sink->Release();
         path->Release();
+        render_target_->PopAxisAlignedClip();
         return;
     }
     sink->Release();
@@ -220,6 +234,8 @@ void Renderer::draw_area_graph(const RingBuffer<float, 60>& buf,
     set_brush_color(brush_fill_, color_rgb, 1.f);
     render_target_->DrawGeometry(path, brush_fill_, 1.5f);
     path->Release();
+
+    render_target_->PopAxisAlignedClip();
 }
 
 // 横バー描画（背景 + 塗り）
@@ -476,7 +492,7 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         D2D1_RECT_F tr = D2D1::RectF(x, y, x + gw, y + LINE_H);
         render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_small_, tr, brush_text_);
 
-        float max_val = max(1.f, max(buf_max(dm.read_history), buf_max(dm.write_history)));
+        float max_val = max(1.f, dm.peak_mbps);
         D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + gw, y + LINE_H + GRAPH_H);
         draw_area_graph(dm.read_history,  max_val, gr, cfg.col_disk_read);
         draw_area_graph(dm.write_history, max_val, gr, cfg.col_disk_write);
@@ -573,7 +589,9 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     D2D1_RECT_F tr = D2D1::RectF(x, y, x + 120.f, y + LINE_H);
     render_target_->DrawText(labelbuf, static_cast<UINT32>(wcslen(labelbuf)), font_small_, tr, brush_text_);
 
-    float max_val = max(1.f, max(buf_max(m.send_history), buf_max(m.recv_history)));
+    float max_val = (m.link_kbps > 0.f)
+        ? m.link_kbps
+        : max(1.f, max(buf_max(m.send_history), buf_max(m.recv_history)));
 
     D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + ww, y + LINE_H + GRAPH_H);
     draw_area_graph(m.recv_history, max_val, gr, cfg.col_net_recv);

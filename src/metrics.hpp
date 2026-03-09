@@ -42,6 +42,7 @@ struct VramMetrics {
 
 // Disk：I/O（Read/Write 面グラフ）+ 空き容量（横バー）+ S.M.A.R.T.
 struct DiskMetrics {
+    float peak_mbps = 0.f;               // セッション中の Read/Write 合算最大値（MB/s）
     RingBuffer<float, 60> read_history;  // Read MB/s
     RingBuffer<float, 60> write_history; // Write MB/s
     float read_mbps  = 0.f;
@@ -60,6 +61,7 @@ struct DiskMetrics {
 
 // Network：送受信分離の面グラフ
 struct NetMetrics {
+    float link_kbps = 0.f;               // NIC リンク速度（KB/s 換算、0 は未取得）
     RingBuffer<float, 60> send_history;  // 送信 KB/s
     RingBuffer<float, 60> recv_history;  // 受信 KB/s
     float send_kbps = 0.f;
