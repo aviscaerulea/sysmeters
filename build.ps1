@@ -55,7 +55,7 @@ $libs = @(
     "winhttp.lib", "windowscodecs.lib",
     "wbemuuid.lib", "ole32.lib", "oleaut32.lib",
     "shell32.lib", "user32.lib", "gdi32.lib",
-    "comctl32.lib"
+    "comctl32.lib", "advapi32.lib"
 )
 
 # リンクオプション
