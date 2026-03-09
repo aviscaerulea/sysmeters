@@ -606,6 +606,24 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     return y;
 }
 
+float Renderer::draw_ip(const NetMetrics& m, const AppConfig& cfg, float y) {
+    float x  = PAD;
+    float ww = static_cast<float>(cfg.win_width) - PAD * 2;
+
+    // "IP" ラベル — font_normal_（セクションタイトルと同サイズ）
+    static constexpr float IP_LBL_W = 40.f;  // "IP" 2 文字分（Consolas 22pt + 余白）
+    set_brush_color(brush_text_, cfg.col_text);
+    render_target_->DrawText(L"IP", 2, font_normal_,
+        D2D1::RectF(x, y, x + IP_LBL_W, y + LINE_H), brush_text_);
+
+    // IP アドレス or OFFLINE📵 — font_small_（プラン名/Sessions と同サイズ）
+    const wchar_t* txt = m.ip_avail ? m.global_ip : L"OFFLINE\U0001F4F5";
+    render_target_->DrawText(txt, static_cast<UINT32>(wcslen(txt)), font_small_,
+        D2D1::RectF(x + IP_LBL_W, y + 4.f, x + ww, y + LINE_H), brush_text_);
+
+    return y + LINE_H;
+}
+
 float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
@@ -688,6 +706,7 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg) {
     y = draw_vram(m.vram, cfg, y);      y += SECTION_GAP;
     y = draw_disk(m.disk_c, m.disk_d, cfg, y); y += SECTION_GAP;
     y = draw_net(m.net, cfg, y);        y += SECTION_GAP;
+    y = draw_ip(m.net, cfg, y);         y += SECTION_GAP;
     y = draw_claude(m.claude, cfg, y);
 
     preferred_h_ = static_cast<int>(y + PAD);

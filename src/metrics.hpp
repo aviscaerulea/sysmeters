@@ -59,13 +59,16 @@ struct DiskMetrics {
     bool  smart_avail     = false;
 };
 
-// Network：送受信分離の面グラフ
+// Network：送受信分離の面グラフ + グローバル IP
 struct NetMetrics {
     float link_kbps = 0.f;               // NIC リンク速度（KB/s 換算、0 は未取得）
     RingBuffer<float, 60> send_history;  // 送信 KB/s
     RingBuffer<float, 60> recv_history;  // 受信 KB/s
     float send_kbps = 0.f;
     float recv_kbps = 0.f;
+    // グローバル IP（checkip.amazonaws.com から 5 分ごとに取得）
+    wchar_t global_ip[48] = {};  // IPv4 / IPv6 アドレス文字列
+    bool    ip_avail      = false;
 };
 
 // Claude Code：レートリミット + セッション数

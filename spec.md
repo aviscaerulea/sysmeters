@@ -83,6 +83,16 @@ C: と D: パーティション別に以下を表示（左 2/3：I/O グラフ�
 
 データソース：PDH（`\Network Interface(*)\Bytes Sent/sec` 等）
 
+### IP
+
+Network セクションの直下に表示：
+
+| 要素 | 表示形式 |
+|---|---|
+| グローバル IP | テキスト（例：`203.0.113.89`）、取得失敗時は `OFFLINE📵` |
+
+データソース：`https://checkip.amazonaws.com`（5 分間隔で非同期取得、IPv4/IPv6 対応）
+
 ### Claude Code
 
 | 要素 | 表示形式 |
@@ -115,6 +125,7 @@ CPU・GPU・Disk（NVMe）温度の全てに適用。
 | Claude API キャッシュ（Usage） | 360 秒 |
 | Claude API キャッシュ（Plan） | 3600 秒 |
 | S.M.A.R.T. 更新間隔 | 3600 秒（1 時間） |
+| グローバル IP 更新間隔 | 300 秒（5 分） |
 
 ## Claude API 仕様
 

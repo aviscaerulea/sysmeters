@@ -13,6 +13,7 @@ class MemCollector;
 class DiskCollector;
 class NetCollector;
 class ClaudeCollector;
+class IpCollector;
 
 // アプリケーションウィンドウの管理
 //
@@ -40,9 +41,10 @@ private:
     CpuCollector*    col_cpu_  = nullptr;
     GpuCollector*    col_gpu_  = nullptr;
     MemCollector*    col_mem_  = nullptr;
-    DiskCollector*   col_disk_ = nullptr;
-    NetCollector*    col_net_  = nullptr;
+    DiskCollector*   col_disk_   = nullptr;
+    NetCollector*    col_net_    = nullptr;
     ClaudeCollector* col_claude_ = nullptr;
+    IpCollector*     col_ip_     = nullptr;
 
     void update_window_size();
     void add_tray_icon();

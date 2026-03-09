@@ -13,3 +13,5 @@
 #define IDM_TOPMOST     102
 // Claude API バックグラウンド完了通知
 #define WM_CLAUDE_DONE  (WM_USER + 2)
+// IP 取得バックグラウンド完了通知
+#define WM_IP_DONE      (WM_USER + 3)
