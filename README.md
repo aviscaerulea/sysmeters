@@ -51,4 +51,4 @@ out\sysmeters.exe
 
 ## スクリーンショット
 
-<!-- TODO: スクリーンショットを追加 -->
+![sysmeters](docs/screenshot.png)
