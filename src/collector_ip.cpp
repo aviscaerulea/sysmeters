@@ -40,7 +40,7 @@ static std::string fetch_ip_body() {
             if (size == 0) break;
             std::string chunk(size, '\0');
             DWORD read = 0;
-            WinHttpReadData(req, chunk.data(), size, &read);
+            if (!WinHttpReadData(req, chunk.data(), size, &read)) break;
             body.append(chunk, 0, read);
         } while (size > 0);
     }
@@ -58,11 +58,13 @@ void IpCollector::do_fetch() {
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.front()))) body.erase(body.begin());
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))  body.pop_back();
 
-    // IPv4/IPv6 の文字種チェック（数字、a-f、ドット、コロンのみ許可）
+    // inet_pton で IPv4/IPv6 として解釈できるか検証する
     auto is_valid_ip = [](const std::string& s) {
-        return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) {
-            return std::isxdigit(c) || c == '.' || c == ':';
-        });
+        if (s.empty()) return false;
+        struct in_addr  a4;
+        struct in6_addr a6;
+        return inet_pton(AF_INET,  s.c_str(), &a4) == 1 ||
+               inet_pton(AF_INET6, s.c_str(), &a6) == 1;
     };
 
     {
@@ -78,7 +80,8 @@ void IpCollector::do_fetch() {
         }
     }
 
-    PostMessage(notify_wnd_, WM_IP_DONE, 0, 0);
+    // shutdown 後に PostMessage が到達しないよう atomic で取得してからチェック
+    if (HWND wnd = notify_wnd_.load()) PostMessage(wnd, WM_IP_DONE, 0, 0);
     fetching_.store(false);
 }
 
@@ -88,16 +91,23 @@ DWORD WINAPI IpCollector::fetch_thread(LPVOID param) {
 }
 
 void IpCollector::init(HWND notify_wnd) {
-    notify_wnd_ = notify_wnd;
+    notify_wnd_.store(notify_wnd);
+    NotifyIpInterfaceChange(AF_UNSPEC, on_ip_change, this, FALSE, &notify_handle_);
+}
+
+void WINAPI IpCollector::on_ip_change(PVOID context,
+    PMIB_IPINTERFACE_ROW, MIB_NOTIFICATION_TYPE type) {
+    // NIC 切断時はフェッチしても必ず失敗するためスキップする
+    if (type == MibDeleteInstance) return;
+    reinterpret_cast<IpCollector*>(context)->update();
 }
 
 void IpCollector::update() {
-    if (!fetching_.load()) {
-        fetching_.store(true);
-        HANDLE h = CreateThread(nullptr, 0, fetch_thread, this, 0, nullptr);
-        if (h) CloseHandle(h);
-        else   fetching_.store(false);
-    }
+    bool expected = false;
+    if (!fetching_.compare_exchange_strong(expected, true)) return;
+    HANDLE h = CreateThread(nullptr, 0, fetch_thread, this, 0, nullptr);
+    if (h) CloseHandle(h);
+    else   fetching_.store(false);
 }
 
 void IpCollector::apply_result(NetMetrics& out) {
@@ -107,6 +117,16 @@ void IpCollector::apply_result(NetMetrics& out) {
 }
 
 void IpCollector::shutdown() {
+    // PostMessage が破棄済み HWND に到達しないよう先に nullptr にする
+    notify_wnd_.store(nullptr);
+
+    // 通知登録を解除してからスレッド完了を待つ
+    // CancelMibChangeNotify2 は実行中コールバックの完了をブロック待機するため、
+    // 戻った後は新規コールバック呼び出しが来ないことが保証される
+    if (notify_handle_) {
+        CancelMibChangeNotify2(notify_handle_);
+        notify_handle_ = nullptr;
+    }
     // スレッドの完了を待つ（最大 15 秒：タイムアウト 3000ms × 4 フェーズ + 余裕）
     for (int i = 0; i < 150 && fetching_.load(); ++i) Sleep(100);
 }

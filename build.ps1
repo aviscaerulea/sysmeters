@@ -33,7 +33,8 @@ $commonFlags = @(
     "/utf-8", "/EHsc", "/std:c++20",
     "/I", "include",
     "/W3",
-    "/DAPP_VERSION=`"$Version`""
+    "/DAPP_VERSION=`"$Version`"",
+    "/D_WIN32_WINNT=0x0A00"  # Windows 10/11 対象（0x0A00 = Win10 以上、iphlpapi.h の Vista+ API を有効化）
 )
 
 $debugFlags   = @("/Zi", "/Od", "/DDEBUG", "/MTd")
@@ -55,7 +56,7 @@ $libs = @(
     "winhttp.lib", "windowscodecs.lib",
     "wbemuuid.lib", "ole32.lib", "oleaut32.lib",
     "shell32.lib", "user32.lib", "gdi32.lib",
-    "comctl32.lib", "advapi32.lib"
+    "comctl32.lib", "advapi32.lib", "iphlpapi.lib", "Ws2_32.lib"
 )
 
 # リンクオプション
