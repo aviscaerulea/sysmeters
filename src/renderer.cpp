@@ -2,8 +2,10 @@
 #include "renderer.hpp"
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <cwchar>
 
 // ウィンドウレイアウト定数（クライアント領域内）
@@ -626,6 +628,15 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // テキストは Disk I/O と同じ font_small_（18pt）
     static constexpr float LBL_W   = 72.f;   // "5h 100%" が収まる幅（font_small_）
     static constexpr float RESET_W = 130.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
+    // 現在時刻からリアルタイムに均等消費ペースを算出
+    auto calc_expected_now = [](time_t resets_ts, double window_secs) -> float {
+        if (resets_ts <= 0) return 0.f;  // 未取得（-1）または epoch（0）は無効
+        double remaining = static_cast<double>(resets_ts) - static_cast<double>(time(nullptr));
+        if (remaining < 0.0) remaining = 0.0;
+        if (remaining > window_secs) return 0.f;
+        return std::clamp(static_cast<float>((window_secs - remaining) / window_secs * 100.0), 0.f, 100.f);
+    };
+
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count) {
         // ラベル + パーセンテージ（左寄せ、font_small_ = Disk I/O と同サイズ）
@@ -645,12 +656,21 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
         // 等分グリッド線（消費ペースの目安：5h は 1h 間隔、7d は 1d 間隔）
         float bar_w = br.right - br.left;
-        set_brush_color(brush_fill_, 0xFFFFFF, 0.4f);
+        set_brush_color(brush_fill_, 0xFFFFFF, 0.25f);
         for (int i = 1; i < tick_count; ++i) {
             float gx = br.left + bar_w * (static_cast<float>(i) / tick_count);
             render_target_->DrawLine(
                 D2D1::Point2F(gx, br.top), D2D1::Point2F(gx, br.bottom),
                 brush_fill_, 1.0f);
+        }
+
+        // 現在時刻の均等消費ペース線（緑）
+        if (avail && expected_pct > 0.f) {
+            float ex = br.left + bar_w * (expected_pct / 100.f);
+            set_brush_color(brush_fill_, 0x2E7D32);
+            render_target_->DrawLine(
+                D2D1::Point2F(ex, br.top), D2D1::Point2F(ex, br.bottom),
+                brush_fill_, 3.5f);
         }
 
         // リセット時刻（右端、未取得時は非表示、font_small_）
@@ -666,8 +686,10 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         y += SECTION_H + GAP;
     };
 
-    draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail, m.five_h_expected_pct,  5);
-    draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail, m.seven_d_expected_pct, 7);
+    draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
+             calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5);
+    draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
+             calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7);
 
     return y;
 }

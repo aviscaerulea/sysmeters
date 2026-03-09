@@ -225,10 +225,14 @@ void ClaudeCollector::do_fetch() {
             result.five_h_pct  = static_cast<float>(fh.value("utilization", 0.0));
             result.seven_d_pct = static_cast<float>(sd.value("utilization", 0.0));
 
-            format_reset_time(fh.value("resets_at", ""), false, result.five_h_reset, _countof(result.five_h_reset));
-            format_reset_time(sd.value("resets_at", ""), true,  result.seven_d_reset, _countof(result.seven_d_reset));
-            result.five_h_expected_pct  = calc_expected_pct(fh.value("resets_at", ""), 5.0 * 3600);
-            result.seven_d_expected_pct = calc_expected_pct(sd.value("resets_at", ""), 7.0 * 24 * 3600);
+            std::string fh_resets_at = fh.value("resets_at", "");
+            std::string sd_resets_at = sd.value("resets_at", "");
+            format_reset_time(fh_resets_at, false, result.five_h_reset, _countof(result.five_h_reset));
+            format_reset_time(sd_resets_at, true,  result.seven_d_reset, _countof(result.seven_d_reset));
+            result.five_h_expected_pct  = calc_expected_pct(fh_resets_at, 5.0 * 3600);
+            result.seven_d_expected_pct = calc_expected_pct(sd_resets_at, 7.0 * 24 * 3600);
+            result.five_h_resets_ts  = parse_iso8601_utc(fh_resets_at);
+            result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
             result.avail = true;
         }
         catch (...) {}

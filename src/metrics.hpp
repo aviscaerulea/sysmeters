@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #pragma once
+#include <ctime>
 #include "ring_buffer.hpp"
 
 // 全メトリクスデータ構造体
@@ -79,6 +80,8 @@ struct ClaudeMetrics {
     wchar_t seven_d_reset[32] = {};      // L"M/D 曜 HH:MM" 形式
     float five_h_expected_pct  = 0.f;   // 5h ウィンドウの均等消費ペース（%）
     float seven_d_expected_pct = 0.f;   // 7d ウィンドウの均等消費ペース（%）
+    time_t five_h_resets_ts  = -1;     // 5h ウィンドウの resets_at（UTC time_t、未取得時 -1）
+    time_t seven_d_resets_ts = -1;     // 7d ウィンドウの resets_at（UTC time_t、未取得時 -1）
     char  plan_label[16]    = {};       // "Max5", "Pro" 等
     int   session_count = 0;
     bool  avail         = false;
