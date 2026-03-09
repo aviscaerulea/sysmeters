@@ -7,13 +7,21 @@ vars:
   ARCH: x64
 
 tasks:
+  kill:
+    desc: 実行中の sysmeters.exe を強制終了（起動していない場合は無視）
+    cmds:
+      - cmd: taskkill /IM {{.APP_NAME}}.exe /F
+        ignore_error: true
+
   clean:
     desc: out/ 以下のファイルを削除
+    deps: [kill]
     cmds:
       - cmd: pwsh.exe -NoProfile -Command "if (Test-Path out) { Remove-Item -Recurse -Force out }"
 
   build:
     desc: デバッグビルド（out/sysmeters.exe）
+    deps: [kill]
     cmds:
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Debug
 
@@ -22,4 +30,4 @@ tasks:
     deps: [clean]
     cmds:
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
-      - cmd: 'pwsh.exe -NoProfile -Command "$zip = ''{{.APP_NAME}}-{{.VERSION}}-{{.ARCH}}.zip''; Compress-Archive -Path ''out/{{.APP_NAME}}.exe'',''{{.APP_NAME}}.toml'' -DestinationPath $zip -Force; Write-Host ''Package:'' $zip"'
+      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','{{.APP_NAME}}.toml' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force; Write-Host 'Package: out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip'"
