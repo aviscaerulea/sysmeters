@@ -12,6 +12,7 @@
 #define IDM_EXIT        101
 #define IDM_TOPMOST     102
 #define IDM_OPEN_LOG    103
+#define IDM_GITHUB       104
 // Claude API バックグラウンド完了通知
 #define WM_CLAUDE_DONE  (WM_USER + 2)
 // IP 取得バックグラウンド完了通知

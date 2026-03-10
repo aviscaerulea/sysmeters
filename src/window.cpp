@@ -20,6 +20,13 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dwmapi.lib")
 
+#ifndef APP_VERSION
+#define APP_VERSION "dev"
+#endif
+
+// GitHub リポジトリ URL
+static constexpr LPCWSTR GITHUB_URL = L"https://github.com/aviscaerulea/sysmeters";
+
 static constexpr int TIMER_CPU        = 1;  // CPU 専用タイマー ID
 static constexpr int TIMER_FAST       = 2;  // 高速タイマー ID（GPU/Disk/Net）
 static constexpr int TIMER_SLOW       = 3;  // 低速タイマー ID（RAM/VRAM）
@@ -208,7 +215,13 @@ void AppWindow::remove_tray_icon() {
 }
 
 void AppWindow::show_context_menu() {
+    // メニュー最上部に「アプリ名 vX.Y.Z」を表示
+    wchar_t label[64];
+    swprintf_s(label, L"sysmeters v%hs", APP_VERSION);
+
     HMENU menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, IDM_GITHUB, label);
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (topmost_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_TOPMOST, L"常に最前面に表示");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -408,6 +421,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             apply_topmost();
             save_topmost();
             break;
+        case IDM_GITHUB:       ShellExecuteW(nullptr, L"open", GITHUB_URL, nullptr, nullptr, SW_SHOW); break;
         case IDM_OPEN_CONFIG: open_config_file(); break;
         case IDM_OPEN_LOG:    open_log_file(); break;
         case IDM_EXIT:        DestroyWindow(hwnd); break;
