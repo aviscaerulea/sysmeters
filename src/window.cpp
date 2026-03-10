@@ -219,7 +219,6 @@ void AppWindow::show_context_menu() {
 
     POINT pt;
     GetCursorPos(&pt);
-    SetForegroundWindow(hwnd_);
     TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
     DestroyMenu(menu);
 }
@@ -395,9 +394,12 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     // タスクトレイイベント
-    case WM_TRAY:
-        if (lp == WM_RBUTTONUP || lp == WM_CONTEXTMENU) show_context_menu();
+    case WM_TRAY: {
+        const UINT notif = LOWORD(lp);
+        if (notif == WM_LBUTTONUP || notif == WM_RBUTTONUP) SetForegroundWindow(hwnd_);
+        if (notif == WM_RBUTTONUP) show_context_menu();
         return 0;
+    }
 
     case WM_COMMAND:
         switch (LOWORD(wp)) {
