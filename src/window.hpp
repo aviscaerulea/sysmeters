@@ -51,6 +51,7 @@ private:
     void remove_tray_icon();
     void show_context_menu();
     void open_config_file();
+    void open_log_file();
     bool load_topmost();   // レジストリから最前面設定を読む
     void save_topmost();   // レジストリに最前面設定を書く
     void apply_topmost();  // SetWindowPos で最前面状態を反映

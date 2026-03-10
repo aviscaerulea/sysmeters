@@ -38,6 +38,8 @@ AppConfig load_config(const std::string& path) {
         cfg.col_net_send   = get_u32("color", "net_send",   cfg.col_net_send);
         cfg.col_claude_bar = get_u32("color", "claude_bar", cfg.col_claude_bar);
         cfg.col_cpu_core   = get_u32("color", "cpu_core",   cfg.col_cpu_core);
+
+        cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
     }
     catch (...) {}  // パース失敗時はデフォルト値を使用
 

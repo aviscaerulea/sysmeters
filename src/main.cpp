@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "config.hpp"
+#include "logger.hpp"
 #include "window.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_DCOM
@@ -61,10 +62,14 @@ int main() {
         nullptr, EOAC_NONE, nullptr);
 
     AppConfig cfg = load_config(get_config_path());
+    log_init(cfg.log_dir);
+    log_info("sysmeters %s started", APP_VERSION);
 
     HINSTANCE hinst = GetModuleHandleW(nullptr);
     AppWindow window;
     if (!window.create(hinst, cfg)) {
+        log_error("window creation failed");
+        log_shutdown();
         MessageBoxW(nullptr, L"ウィンドウの作成に失敗しました。\n管理者権限で実行してください。",
                     L"sysmeters", MB_ICONERROR);
         CoUninitialize();
@@ -74,6 +79,8 @@ int main() {
     }
 
     window.run();
+    log_info("sysmeters shutting down");
+    log_shutdown();
     CoUninitialize();
     ReleaseMutex(mutex);
     CloseHandle(mutex);

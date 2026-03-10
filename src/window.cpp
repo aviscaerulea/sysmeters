@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "window.hpp"
+#include "logger.hpp"
 #include "resource.h"
 #include "config.hpp"
 #include "metrics.hpp"
@@ -212,6 +213,7 @@ void AppWindow::show_context_menu() {
                 IDM_TOPMOST, L"常に最前面に表示");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG, L"設定ファイルを開く");
+    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"ログを開く");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_EXIT, L"終了");
 
@@ -229,6 +231,27 @@ void AppWindow::open_config_file() {
     wchar_t* last_sep = wcsrchr(path, L'\\');
     if (last_sep) { *(last_sep + 1) = L'\0'; }
     wcscat_s(path, L"sysmeters.toml");
+
+    ShellExecuteW(nullptr, L"open", path, nullptr, nullptr, SW_SHOW);
+}
+
+// 当日のログファイルをエディタで開く
+//
+// log_get_dir() で解決済みのログディレクトリを取得し、
+// 当日の sysmeters_YYYYMMDD.log を ShellExecuteW で開く。
+// ファイルが存在しない場合（まだ何も記録されていない等）はディレクトリを開く。
+void AppWindow::open_log_file() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%s\\sysmeters_%04d%02d%02d.log",
+               log_get_dir(), st.wYear, st.wMonth, st.wDay);
+
+    // ファイルが存在しない場合はディレクトリを開く
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
+        ShellExecuteW(nullptr, L"open", log_get_dir(), nullptr, nullptr, SW_SHOW);
+        return;
+    }
 
     ShellExecuteW(nullptr, L"open", path, nullptr, nullptr, SW_SHOW);
 }
@@ -384,6 +407,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             save_topmost();
             break;
         case IDM_OPEN_CONFIG: open_config_file(); break;
+        case IDM_OPEN_LOG:    open_log_file(); break;
         case IDM_EXIT:        DestroyWindow(hwnd); break;
         }
         return 0;

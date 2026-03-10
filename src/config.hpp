@@ -21,6 +21,9 @@ struct AppConfig {
     uint32_t col_net_send   = 0xCC923E;  // アンバー（同上）
     uint32_t col_claude_bar = 0xCC923E;  // アンバー（同上）
     uint32_t col_cpu_core   = 0xCC923E;  // アンバー（同上）
+
+    // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
+    std::string log_dir = "logs";
 };
 
 // TOML ファイルから設定を読み込む。ファイルが存在しない場合はデフォルト値を使用する。
