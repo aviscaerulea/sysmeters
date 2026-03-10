@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "collector_disk.hpp"
+#include "logger.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winioctl.h>   // IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, IOCTL_STORAGE_QUERY_PROPERTY
@@ -92,7 +93,10 @@ bool DiskCollector::init(char drive_c, char drive_d) {
     impl_->drives[0] = drive_c;
     impl_->drives[1] = drive_d;
 
-    if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) return false;
+    if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) {
+        log_error("Disk PDH init failed");
+        return false;
+    }
 
     const wchar_t* templates[4] = {
         L"\\LogicalDisk(%c:)\\Disk Read Bytes/sec",
@@ -111,6 +115,8 @@ bool DiskCollector::init(char drive_c, char drive_d) {
     PdhCollectQueryData(impl_->query);  // 初回サンプリング
     impl_->phys_drives[0] = get_phys_drive(drive_c);
     impl_->phys_drives[1] = get_phys_drive(drive_d);
+    log_info("Disk collector initialized (C: phys=%d, D: phys=%d)",
+             impl_->phys_drives[0], impl_->phys_drives[1]);
     return true;
 }
 
