@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "collector_ip.hpp"
+#include "logger.hpp"
 #include "resource.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -75,6 +76,7 @@ void IpCollector::do_fetch() {
             pending_avail_ = true;
         }
         else {
+            log_error("IP fetch failed");
             pending_ip_[0] = L'\0';
             pending_avail_ = false;
         }

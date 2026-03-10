@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "collector_cpu.hpp"
+#include "logger.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <pdh.h>
@@ -32,17 +33,19 @@ struct CpuCollector::Impl {
     char cpu_name[48] = {};  // CPUID ブランド文字列
 };
 
-// 0xRRGGBB 形式の uint32_t を D2D1_COLOR_F に変換（ここでは使わないが一貫性のため保持）
-
 bool CpuCollector::init() {
     impl_ = new Impl();
 
     // --- PDH 初期化 ---
-    if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) return false;
+    if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) {
+        log_error("CPU PDH init failed");
+        return false;
+    }
 
     // 全体使用率カウンタ
     if (PdhAddEnglishCounterW(impl_->query, L"\\Processor(_Total)\\% Processor Time",
                               0, &impl_->counter_total) != ERROR_SUCCESS) {
+        log_error("CPU PDH: Failed to add total counter");
         return false;
     }
 
@@ -112,12 +115,20 @@ bool CpuCollector::init() {
     // CoInitializeEx は main で呼ばれている前提
     HRESULT hr = CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER,
                                   IID_IWbemLocator, reinterpret_cast<void**>(&impl_->wbem_locator));
-    if (FAILED(hr)) return true;  // PDH は OK なので true を返す
+    if (FAILED(hr)) {
+        log_error("CPU WMI CoCreateInstance failed (hr=0x%08x)", static_cast<unsigned>(hr));
+        return true;  // PDH は OK なので true を返す
+    }
 
     hr = impl_->wbem_locator->ConnectServer(
         _bstr_t(L"ROOT\\WMI"), nullptr, nullptr, nullptr, 0, nullptr, nullptr,
         &impl_->wbem_services);
-    if (FAILED(hr)) { impl_->wbem_locator->Release(); impl_->wbem_locator = nullptr; return true; }
+    if (FAILED(hr)) {
+        log_error("CPU WMI ConnectServer failed (hr=0x%08x)", static_cast<unsigned>(hr));
+        impl_->wbem_locator->Release();
+        impl_->wbem_locator = nullptr;
+        return true;
+    }
 
     hr = CoSetProxyBlanket(impl_->wbem_services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE,
                            nullptr, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
@@ -131,6 +142,7 @@ bool CpuCollector::init() {
     }
 
     impl_->wmi_ok = true;
+    log_info("CPU collector initialized: %s (WMI: OK)", impl_->cpu_name);
     return true;
 }
 

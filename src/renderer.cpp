@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "renderer.hpp"
+#include "logger.hpp"
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #include <algorithm>
@@ -29,6 +30,10 @@ static float buf_max(const RingBuffer<float, 60>& b) {
     return m;
 }
 
+// COM インターフェイスポインタを Release して nullptr にする
+template<typename T>
+static void safe_release(T** p) { if (*p) { (*p)->Release(); *p = nullptr; } }
+
 // 0xRRGGBB → D2D1_COLOR_F 変換
 static D2D1_COLOR_F from_rgb(uint32_t rgb, float alpha = 1.f) {
     return D2D1::ColorF(
@@ -48,11 +53,17 @@ bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
     hwnd_ = hwnd;
 
     // D2D ファクトリ作成
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2d_factory_))) return false;
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2d_factory_))) {
+        log_error("D2D factory creation failed");
+        return false;
+    }
 
     // DirectWrite ファクトリ作成
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-        __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&dwrite_factory_)))) return false;
+        __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&dwrite_factory_)))) {
+        log_error("DWrite factory creation failed");
+        return false;
+    }
 
     // フォント作成（失敗時は false を返す）
     // CPU/GPU 以外のセクションで使用（要求により 2 倍サイズ）
@@ -97,7 +108,6 @@ void Renderer::create_device_resources(const AppConfig& cfg) {
 }
 
 void Renderer::release_device_resources() {
-    auto safe_release = [](auto** p) { if (*p) { (*p)->Release(); *p = nullptr; } };
     safe_release(&brush_text_);
     safe_release(&brush_fill_);
     safe_release(&render_target_);
@@ -109,7 +119,6 @@ void Renderer::resize(UINT w, UINT h) {
 
 void Renderer::shutdown() {
     release_device_resources();
-    auto safe_release = [](auto** p) { if (*p) { (*p)->Release(); *p = nullptr; } };
     safe_release(&font_normal_);
     safe_release(&font_small_);
     safe_release(&font_large_);
@@ -642,7 +651,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         // ラベル + パーセンテージ（左寄せ、font_small_ = Disk I/O と同サイズ）
         wchar_t buf[64];
         if (avail) swprintf_s(buf, L"%s %3.0f%%", lbl, pct);
-        else       swprintf_s(buf, L"%s   N/A",   lbl);
+        else       swprintf_s(buf, L"%s     -",   lbl);
         uint32_t text_col = (avail && pct > expected_pct * 1.1f) ? 0xEF5350 : (avail ? cfg.col_text : 0x888888);
         set_brush_color(brush_text_, text_col);
         D2D1_RECT_F lr = D2D1::RectF(x, y, x + LBL_W, y + SECTION_H);

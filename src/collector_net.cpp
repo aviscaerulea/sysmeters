@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "collector_net.hpp"
+#include "logger.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <pdh.h>
@@ -16,7 +17,10 @@ struct NetCollector::Impl {
 bool NetCollector::init() {
     impl_ = new Impl();
 
-    if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) return false;
+    if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) {
+        log_error("Net PDH init failed");
+        return false;
+    }
 
     // _Total で全 NIC 合算
     PdhAddEnglishCounterW(impl_->query,
@@ -30,6 +34,7 @@ bool NetCollector::init() {
         0, &impl_->counter_bw);
 
     PdhCollectQueryData(impl_->query);
+    log_info("Net collector initialized");
     return true;
 }
 

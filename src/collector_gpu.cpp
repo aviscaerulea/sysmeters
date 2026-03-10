@@ -1,5 +1,6 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "collector_gpu.hpp"
+#include "logger.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <cstring>
@@ -57,11 +58,14 @@ bool GpuCollector::init() {
         // 別パスも試みる
         impl_->dll = LoadLibraryW(L"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
     }
-    if (!impl_->dll) return false;
+    if (!impl_->dll) {
+        log_error("nvml.dll not found");
+        return false;
+    }
 
 #define LOAD_FN(field, sym) \
     impl_->field = reinterpret_cast<decltype(impl_->field)>(GetProcAddress(impl_->dll, "nvml" #sym)); \
-    if (!impl_->field) { shutdown(); return false; }
+    if (!impl_->field) { log_error("NVML: failed to load nvml" #sym); shutdown(); return false; }
 
     LOAD_FN(fn_init,       Init)
     LOAD_FN(fn_shutdown,   Shutdown)
@@ -72,8 +76,16 @@ bool GpuCollector::init() {
     LOAD_FN(fn_get_name,   DeviceGetName)
 #undef LOAD_FN
 
-    if (impl_->fn_init() != NVML_SUCCESS) { shutdown(); return false; }
-    if (impl_->fn_get_handle(0, &impl_->device) != NVML_SUCCESS) { shutdown(); return false; }
+    if (impl_->fn_init() != NVML_SUCCESS) {
+        log_error("NVML init failed");
+        shutdown();
+        return false;
+    }
+    if (impl_->fn_get_handle(0, &impl_->device) != NVML_SUCCESS) {
+        log_error("NVML: device handle not found");
+        shutdown();
+        return false;
+    }
 
     // GPU 名取得
     char name_buf[96] = {};
@@ -81,6 +93,7 @@ bool GpuCollector::init() {
         strncpy_s(impl_->gpu_name, sizeof(impl_->gpu_name), name_buf, _TRUNCATE);
     }
 
+    log_info("GPU collector initialized: %s", impl_->gpu_name);
     return true;
 }
 

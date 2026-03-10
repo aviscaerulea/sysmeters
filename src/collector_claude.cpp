@@ -10,6 +10,7 @@
 #pragma comment(lib, "shell32.lib")
 
 #include <json.hpp>
+#include "logger.hpp"
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -204,15 +205,16 @@ void ClaudeCollector::do_fetch() {
                     std::ofstream ofs(cache_usage_path());
                     ofs << usage_j.dump();
                 }
-                catch (...) {}
+                catch (...) { log_error("Claude Usage API JSON parse failed"); }
             }
             else {
+                log_error("Claude Usage API HTTP failed");
                 // HTTP 失敗 → エラーキャッシュ保存
                 try {
                     std::ofstream ofs(cache_usage_path());
                     ofs << json{{"error", true}, {"_ts", now_ts()}}.dump();
                 }
-                catch (...) {}
+                catch (...) { log_error("Claude Usage API: failed to write error cache"); }
             }
         }
     }
@@ -262,15 +264,16 @@ void ClaudeCollector::do_fetch() {
                     std::ofstream ofs(cache_plan_path());
                     ofs << plan_j.dump();
                 }
-                catch (...) {}
+                catch (...) { log_error("Claude Plan API JSON parse failed"); }
             }
             else {
+                log_error("Claude Plan API HTTP failed");
                 // HTTP 失敗 → エラーキャッシュ保存
                 try {
                     std::ofstream ofs(cache_plan_path());
                     ofs << json{{"error", true}, {"_ts", now_ts()}}.dump();
                 }
-                catch (...) {}
+                catch (...) { log_error("Claude Plan API: failed to write error cache"); }
             }
         }
     }
