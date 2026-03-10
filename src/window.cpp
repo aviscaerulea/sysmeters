@@ -212,8 +212,8 @@ void AppWindow::show_context_menu() {
     AppendMenuW(menu, MF_STRING | (topmost_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_TOPMOST, L"常に最前面に表示");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG, L"設定ファイルを開く");
-    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"ログを開く");
+    AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG, L"設定ファイル");
+    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"ログファイル");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_EXIT, L"終了");
 
