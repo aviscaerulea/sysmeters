@@ -63,6 +63,8 @@ int main() {
 
     AppConfig cfg = load_config(get_config_path());
     log_init(cfg.log_dir);
+    if (!cfg.config_error.empty())
+        log_error("%s", cfg.config_error.c_str());
     log_info("sysmeters %s started", APP_VERSION);
 
     HINSTANCE hinst = GetModuleHandleW(nullptr);

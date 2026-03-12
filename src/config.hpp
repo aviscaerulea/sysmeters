@@ -8,7 +8,7 @@ struct AppConfig {
     // ウィンドウ
     int   win_x     = 20;
     int   win_y     = 20;
-    int   win_width = 500;
+    int   win_width = 480;
 
     // 配色（0xRRGGBB）
     uint32_t col_background = 0x1A1A1A;
@@ -24,7 +24,14 @@ struct AppConfig {
 
     // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
     std::string log_dir = "logs";
+
+    // 設定読み込み時のエラーメッセージ（空ならエラーなし）
+    //
+    // load_config は log_init より前に呼ばれるためログ出力できない。
+    // log_init の直後にこのフィールドを確認してログ出力すること。
+    std::string config_error;
 };
 
-// TOML ファイルから設定を読み込む。ファイルが存在しない場合はデフォルト値を使用する。
+// TOML ファイルからの設定読み込み
+// ファイルが存在しない場合はデフォルト値を返す。
 AppConfig load_config(const std::string& path);
