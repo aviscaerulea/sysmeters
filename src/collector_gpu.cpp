@@ -37,6 +37,7 @@ static constexpr nvmlReturn_t NVML_SUCCESS = 0;
 struct GpuCollector::Impl {
     HMODULE dll = nullptr;
     nvmlDevice_t device = nullptr;
+    bool nvml_initialized = false;  // nvmlInit() 成功済みフラグ
 
     PFN_nvmlInit                       fn_init           = nullptr;
     PFN_nvmlShutdown                   fn_shutdown        = nullptr;
@@ -60,6 +61,7 @@ bool GpuCollector::init() {
     }
     if (!impl_->dll) {
         log_error("nvml.dll not found");
+        shutdown();
         return false;
     }
 
@@ -81,6 +83,8 @@ bool GpuCollector::init() {
         shutdown();
         return false;
     }
+    impl_->nvml_initialized = true;
+
     if (impl_->fn_get_handle(0, &impl_->device) != NVML_SUCCESS) {
         log_error("NVML: device handle not found");
         shutdown();
@@ -155,7 +159,7 @@ void GpuCollector::update_all(GpuMetrics& gpu, VramMetrics& vram) {
 
 void GpuCollector::shutdown() {
     if (!impl_) return;
-    if (impl_->device && impl_->fn_shutdown) { impl_->fn_shutdown(); }
+    if (impl_->nvml_initialized && impl_->fn_shutdown) { impl_->fn_shutdown(); }
     if (impl_->dll) { FreeLibrary(impl_->dll); impl_->dll = nullptr; }
     impl_->device = nullptr;
     delete impl_;
