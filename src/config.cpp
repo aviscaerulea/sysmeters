@@ -1,6 +1,7 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "config.hpp"
 #include <toml.hpp>
+#include <algorithm>
 #include <fstream>
 
 AppConfig load_config(const std::string& path) {
@@ -41,7 +42,14 @@ AppConfig load_config(const std::string& path) {
 
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
     }
-    catch (...) {}  // パース失敗時はデフォルト値を使用
+    catch (...) {
+        cfg.config_error = "TOML parse failed: " + path;
+    }
+
+    // win_width のサニティチェック
+    //
+    // win_width が 0 以下だと Direct2D のレンダーターゲット作成が失敗する。
+    cfg.win_width = std::max(80, cfg.win_width);
 
     return cfg;
 }
