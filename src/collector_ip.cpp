@@ -11,7 +11,7 @@
 // checkip.amazonaws.com から IP 文字列を取得する
 //
 // 成功時はレスポンスボディ（IP アドレス文字列）を返す。失敗時は空文字列。
-// タイムアウトは shutdown() の最大待機（4 秒）より短い 3000ms に設定する。
+// タイムアウトは全フェーズ 3000ms に設定する（shutdown() 最大待機 15 秒に収まる）。
 static std::string fetch_ip_body() {
     HINTERNET session = WinHttpOpen(L"sysmeters/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nullptr, nullptr, 0);
@@ -25,7 +25,7 @@ static std::string fetch_ip_body() {
         nullptr, nullptr, nullptr, WINHTTP_FLAG_SECURE);
     if (!req) { WinHttpCloseHandle(conn); WinHttpCloseHandle(session); return {}; }
 
-    // 全フェーズのタイムアウトを設定（shutdown() の最大待機 8 秒に収まるようにする）
+    // 全フェーズのタイムアウトを設定（shutdown() の最大待機 15 秒に収まるようにする）
     DWORD timeout_ms = 3000;
     WinHttpSetOption(req, WINHTTP_OPTION_RESOLVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
     WinHttpSetOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
@@ -37,7 +37,7 @@ static std::string fetch_ip_body() {
         WinHttpReceiveResponse(req, nullptr)) {
         DWORD size = 0;
         do {
-            WinHttpQueryDataAvailable(req, &size);
+            if (!WinHttpQueryDataAvailable(req, &size)) break;
             if (size == 0) break;
             std::string chunk(size, '\0');
             DWORD read = 0;
@@ -55,11 +55,9 @@ static std::string fetch_ip_body() {
 void IpCollector::do_fetch() {
     std::string body = fetch_ip_body();
 
-    // 前後の空白（改行含む）を除去
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.front()))) body.erase(body.begin());
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))  body.pop_back();
 
-    // inet_pton で IPv4/IPv6 として解釈できるか検証する
     auto is_valid_ip = [](const std::string& s) {
         if (s.empty()) return false;
         struct in_addr  a4;
@@ -70,6 +68,8 @@ void IpCollector::do_fetch() {
 
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
+        // ASCII IP アドレスは byte == char のため size チェックで十分。
+        // "<" で NUL 終端分のバッファを確保する
         if (is_valid_ip(body) && body.size() < std::size(pending_ip_)) {
             MultiByteToWideChar(CP_UTF8, 0, body.c_str(), -1,
                                 pending_ip_, static_cast<int>(std::size(pending_ip_)));
@@ -107,9 +107,12 @@ void WINAPI IpCollector::on_ip_change(PVOID context,
 void IpCollector::update() {
     bool expected = false;
     if (!fetching_.compare_exchange_strong(expected, true)) return;
-    HANDLE h = CreateThread(nullptr, 0, fetch_thread, this, 0, nullptr);
-    if (h) CloseHandle(h);
-    else   fetching_.store(false);
+    if (fetch_thread_ && WaitForSingleObject(fetch_thread_, 0) == WAIT_OBJECT_0) {
+        CloseHandle(fetch_thread_);
+        fetch_thread_ = nullptr;
+    }
+    fetch_thread_ = CreateThread(nullptr, 0, fetch_thread, this, 0, nullptr);
+    if (!fetch_thread_) fetching_.store(false);
 }
 
 void IpCollector::apply_result(NetMetrics& out) {
@@ -130,5 +133,9 @@ void IpCollector::shutdown() {
         notify_handle_ = nullptr;
     }
     // スレッドの完了を待つ（最大 15 秒：タイムアウト 3000ms × 4 フェーズ + 余裕）
-    for (int i = 0; i < 150 && fetching_.load(); ++i) Sleep(100);
+    if (fetch_thread_) {
+        WaitForSingleObject(fetch_thread_, 15000);
+        CloseHandle(fetch_thread_);
+        fetch_thread_ = nullptr;
+    }
 }
