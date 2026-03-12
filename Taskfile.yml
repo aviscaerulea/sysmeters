@@ -3,7 +3,7 @@ version: "3"
 
 vars:
   APP_NAME: sysmeters
-  VERSION: 1.2.3
+  VERSION: 1.2.4
   ARCH: x64
 
 tasks:
