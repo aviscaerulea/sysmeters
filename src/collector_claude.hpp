@@ -9,7 +9,7 @@
 //
 // - セッション数：CreateToolhelp32Snapshot でプロセス列挙（メインスレッド）
 // - レートリミット：WinHTTP でバックグラウンドスレッドから非同期取得
-//   - ~/.claude/.credentials.json からOAuth トークン取得
+//   - ~/.claude/.credentials.json から OAuth トークン取得
 //   - Anthropic Usage API / Account API を呼び出し
 //   - $TEMP に JSON キャッシュを保存（Usage 360秒、Plan 3600秒）
 class ClaudeCollector {
@@ -27,8 +27,9 @@ public:
     ~ClaudeCollector() { shutdown(); }
 
 private:
-    HWND notify_wnd_ = nullptr;
+    std::atomic<HWND> notify_wnd_ = nullptr;
     std::atomic<bool> fetching_ = false;
+    HANDLE            fetch_thread_ = nullptr;
     std::mutex        result_mutex_;
 
     // バックグラウンドで取得した結果（仮置き）

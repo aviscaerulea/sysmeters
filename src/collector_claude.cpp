@@ -90,12 +90,13 @@ static std::string http_get(const std::wstring& host, const std::wstring& path,
         nullptr, nullptr, nullptr, WINHTTP_FLAG_SECURE);
     if (!req) { WinHttpCloseHandle(conn); WinHttpCloseHandle(session); return {}; }
 
-    // タイムアウト設定（shutdown() の 2 秒待機より短くしてスレッドが確実に完了できるようにする）
+    // 全フェーズのタイムアウトを設定（shutdown() の最大待機 8 秒に収まるようにする）
     DWORD timeout_ms = 1500;
+    WinHttpSetOption(req, WINHTTP_OPTION_RESOLVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
+    WinHttpSetOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
     WinHttpSetOption(req, WINHTTP_OPTION_SEND_TIMEOUT,    &timeout_ms, sizeof(timeout_ms));
     WinHttpSetOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
 
-    // ヘッダー追加
     std::wstring auth = L"Authorization: Bearer " + std::wstring(token.begin(), token.end());
     WinHttpAddRequestHeaders(req, auth.c_str(), -1L, WINHTTP_ADDREQ_FLAG_ADD);
 
@@ -107,13 +108,26 @@ static std::string http_get(const std::wstring& host, const std::wstring& path,
     std::string body;
     if (WinHttpSendRequest(req, nullptr, 0, nullptr, 0, 0, 0) &&
         WinHttpReceiveResponse(req, nullptr)) {
+        DWORD status_code = 0;
+        DWORD status_size = sizeof(status_code);
+        WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                            nullptr, &status_code, &status_size, nullptr);
+        if (status_code != 200) {
+            char msg[32];
+            snprintf(msg, sizeof(msg), "HTTP %lu", status_code);
+            log_error(msg);
+            WinHttpCloseHandle(req);
+            WinHttpCloseHandle(conn);
+            WinHttpCloseHandle(session);
+            return {};
+        }
         DWORD size = 0;
         do {
-            WinHttpQueryDataAvailable(req, &size);
+            if (!WinHttpQueryDataAvailable(req, &size)) break;
             if (size == 0) break;
             std::string chunk(size, '\0');
             DWORD read = 0;
-            WinHttpReadData(req, chunk.data(), size, &read);
+            if (!WinHttpReadData(req, chunk.data(), size, &read)) break;
             body.append(chunk, 0, read);
         } while (size > 0);
     }
@@ -132,6 +146,10 @@ static time_t parse_iso8601_utc(const std::string& iso) {
     if (iso.empty()) return -1;
     int year, mon, day, hour, min, sec;
     if (sscanf_s(iso.c_str(), "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &hour, &min, &sec) < 6)
+        return -1;
+    // パース値の妥当性チェック（_mkgmtime の暗黙補正を防ぐ）
+    if (mon < 1 || mon > 12 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 60)
         return -1;
     struct tm utc_t{};
     utc_t.tm_year = year - 1900; utc_t.tm_mon = mon - 1; utc_t.tm_mday = day;
@@ -185,38 +203,59 @@ static float calc_expected_pct(const std::string& iso, double window_secs) {
 
 static const char* BETA_HEADER = "oauth-2025-04-20";
 
+// キャッシュヒット or API 取得を行うヘルパー
+//
+// キャッシュ有効期間内ならキャッシュを返す。ネガティブキャッシュ（"error" フィールドあり）は nullptr。
+// キャッシュなし・期限切れなら HTTP GET を実行し、失敗時はエラーキャッシュを保存して nullptr を返す。
+// 戻り値に "_ts" が含まれていればキャッシュヒット、含まれなければ新規取得を示す。
+static json fetch_or_cache(const fs::path& cache_path, double ttl,
+                            const std::wstring& api_path, const std::string& token) {
+    json j = read_cache(cache_path, ttl);
+    if (j != nullptr) {
+        if (j.contains("error")) return nullptr;  // ネガティブキャッシュ
+        return j;
+    }
+    if (token.empty()) return nullptr;
+
+    std::string body = http_get(L"api.anthropic.com", api_path, token, BETA_HEADER);
+    if (body.empty()) {
+        try {
+            std::ofstream ofs(cache_path);
+            ofs << json{{"error", true}, {"_ts", now_ts()}}.dump();
+        }
+        catch (...) {}
+        return nullptr;
+    }
+    try {
+        return json::parse(body);
+    }
+    catch (const nlohmann::json::exception& e) {
+        log_error(e.what());
+        return nullptr;
+    }
+}
+
 // バックグラウンドで Usage API + Account API を叩く
 void ClaudeCollector::do_fetch() {
-    ClaudeMetrics result{};
+    // API エラーやキャッシュ無効期間中も前回の有効データを保持する
+    ClaudeMetrics result;
+    { std::lock_guard<std::mutex> lock(result_mutex_); result = pending_; }
+
+    std::string token = get_token();
 
     // --- Usage API ---
-    json usage_j = read_cache(cache_usage_path(), 360.0);
-    if (usage_j != nullptr && usage_j.contains("error")) {
-        usage_j = nullptr;  // ネガティブキャッシュヒット → API スキップ
+    json usage_j = fetch_or_cache(cache_usage_path(), 360.0, L"/api/oauth/usage", token);
+    if (usage_j == nullptr && !token.empty()) {
+        log_error("Claude Usage API failed");
     }
-    else if (usage_j == nullptr) {
-        std::string token = get_token();
-        if (!token.empty()) {
-            std::string body = http_get(L"api.anthropic.com", L"/api/oauth/usage", token, BETA_HEADER);
-            if (!body.empty()) {
-                try {
-                    usage_j = json::parse(body);
-                    usage_j["_ts"] = now_ts();
-                    std::ofstream ofs(cache_usage_path());
-                    ofs << usage_j.dump();
-                }
-                catch (...) { log_error("Claude Usage API JSON parse failed"); }
-            }
-            else {
-                log_error("Claude Usage API HTTP failed");
-                // HTTP 失敗 → エラーキャッシュ保存
-                try {
-                    std::ofstream ofs(cache_usage_path());
-                    ofs << json{{"error", true}, {"_ts", now_ts()}}.dump();
-                }
-                catch (...) { log_error("Claude Usage API: failed to write error cache"); }
-            }
+    if (usage_j != nullptr && !usage_j.contains("_ts")) {
+        // 新規 API 取得 → タイムスタンプを付与してキャッシュ保存
+        try {
+            usage_j["_ts"] = now_ts();
+            std::ofstream ofs(cache_usage_path());
+            ofs << usage_j.dump();
         }
+        catch (const nlohmann::json::exception& e) { log_error(e.what()); }
     }
 
     if (usage_j != nullptr) {
@@ -237,44 +276,36 @@ void ClaudeCollector::do_fetch() {
             result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
             result.avail = true;
         }
-        catch (...) {}
+        catch (const nlohmann::json::exception& e) { log_error(e.what()); }
     }
 
     // --- Account API（プランラベル）---
-    json plan_j = read_cache(cache_plan_path(), 3600.0);
-    if (plan_j != nullptr && plan_j.contains("error")) {
-        plan_j = nullptr;  // ネガティブキャッシュヒット → API スキップ
-    }
-    else if (plan_j == nullptr) {
-        std::string token = get_token();
-        if (!token.empty()) {
-            std::string body = http_get(L"api.anthropic.com", L"/api/oauth/account", token, BETA_HEADER);
-            if (!body.empty()) {
-                try {
-                    plan_j = json::parse(body);
-                    // プランラベル抽出
-                    std::string tier = plan_j["memberships"][0]["organization"]["rate_limit_tier"].get<std::string>();
-                    std::string label;
-                    if (tier.find("20x") != std::string::npos)     label = "Max20";
-                    else if (tier.find("5x") != std::string::npos) label = "Max5";
-                    else if (tier.find("max") != std::string::npos) label = "Max";
-                    else if (tier.find("pro") != std::string::npos) label = "Pro";
-
-                    plan_j = json{{"label", label}, {"_ts", now_ts()}};
-                    std::ofstream ofs(cache_plan_path());
-                    ofs << plan_j.dump();
-                }
-                catch (...) { log_error("Claude Plan API JSON parse failed"); }
+    json plan_j = fetch_or_cache(cache_plan_path(), 3600.0, L"/api/oauth/account", token);
+    if (plan_j != nullptr && !plan_j.contains("_ts")) {
+        // 新規 API 取得 → tier→label 変換してキャッシュ保存
+        try {
+            auto& ms = plan_j["memberships"];
+            if (!ms.is_array() || ms.empty()) {
+                log_error("Claude Plan API: no memberships");
+                plan_j = nullptr;
             }
             else {
-                log_error("Claude Plan API HTTP failed");
-                // HTTP 失敗 → エラーキャッシュ保存
-                try {
-                    std::ofstream ofs(cache_plan_path());
-                    ofs << json{{"error", true}, {"_ts", now_ts()}}.dump();
-                }
-                catch (...) { log_error("Claude Plan API: failed to write error cache"); }
+                std::string tier = ms[0]["organization"]["rate_limit_tier"].get<std::string>();
+                std::string label;
+                if (tier.find("20x") != std::string::npos)      label = "Max20";
+                else if (tier.find("5x") != std::string::npos)  label = "Max5";
+                else if (tier.find("max") != std::string::npos) label = "Max";
+                else if (tier.find("pro") != std::string::npos) label = "Pro";
+                else                                             label = tier;
+
+                plan_j = json{{"label", label}, {"_ts", now_ts()}};
+                std::ofstream ofs(cache_plan_path());
+                ofs << plan_j.dump();
             }
+        }
+        catch (const nlohmann::json::exception& e) {
+            log_error(e.what());
+            plan_j = nullptr;
         }
     }
 
@@ -283,15 +314,14 @@ void ClaudeCollector::do_fetch() {
             std::string label = plan_j.value("label", "");
             strncpy_s(result.plan_label, sizeof(result.plan_label), label.c_str(), _TRUNCATE);
         }
-        catch (...) {}
+        catch (const nlohmann::json::exception& e) { log_error(e.what()); }
     }
 
-    // 結果を pending_ に書き込み、メインスレッドに通知
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
         pending_ = result;
     }
-    if (notify_wnd_) PostMessage(notify_wnd_, WM_CLAUDE_DONE, 0, 0);
+    if (HWND wnd = notify_wnd_.load()) PostMessage(wnd, WM_CLAUDE_DONE, 0, 0);
     fetching_.store(false);
 }
 
@@ -301,7 +331,7 @@ DWORD WINAPI ClaudeCollector::fetch_thread(LPVOID param) {
 }
 
 void ClaudeCollector::init(HWND notify_wnd) {
-    notify_wnd_ = notify_wnd;
+    notify_wnd_.store(notify_wnd);
 }
 
 int ClaudeCollector::count_claude_sessions() {
@@ -323,12 +353,16 @@ int ClaudeCollector::count_claude_sessions() {
 void ClaudeCollector::update(ClaudeMetrics& out) {
     out.session_count = count_claude_sessions();
 
-    // バックグラウンドスレッドが走っていなければ新たに起動
     if (!fetching_.load()) {
-        fetching_.store(true);
-        HANDLE h = CreateThread(nullptr, 0, fetch_thread, this, 0, nullptr);
-        if (h) CloseHandle(h);
-        else   fetching_.store(false);  // 起動失敗時は次回タイマーで再試行できるようリセット
+        if (fetch_thread_ && WaitForSingleObject(fetch_thread_, 0) == WAIT_OBJECT_0) {
+            CloseHandle(fetch_thread_);
+            fetch_thread_ = nullptr;
+        }
+        if (!fetch_thread_) {
+            fetching_.store(true);
+            fetch_thread_ = CreateThread(nullptr, 0, fetch_thread, this, 0, nullptr);
+            if (!fetch_thread_) fetching_.store(false);  // 起動失敗時は次回タイマーで再試行できるようリセット
+        }
     }
 }
 
@@ -340,6 +374,12 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out) {
 }
 
 void ClaudeCollector::shutdown() {
-    // スレッドの完了を待つ（簡易版：最大 2 秒）
-    for (int i = 0; i < 20 && fetching_.load(); ++i) Sleep(100);
+    notify_wnd_.store(nullptr);
+
+    // スレッドの完了を待つ（最大 8 秒：タイムアウト 1500ms × 4 フェーズ + 余裕）
+    if (fetch_thread_) {
+        WaitForSingleObject(fetch_thread_, 8000);
+        CloseHandle(fetch_thread_);
+        fetch_thread_ = nullptr;
+    }
 }
