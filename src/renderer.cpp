@@ -401,12 +401,11 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
     draw_hbar(m.usage_pct, 100.f, br, bar_col);
 
     if (m.wsl_gb > 0.f && m.total_gb > 0.f) {
-        // WSL 使用量を同系色（alpha 上げた重ね塗り）で内訳表示
         float bar_w    = br.right - br.left;
         float wsl_fill = min(m.wsl_gb / m.total_gb, 1.f) * bar_w;
         if (wsl_fill > 0.f) {
             D2D1_RECT_F wr = D2D1::RectF(br.left, br.top, br.left + wsl_fill, br.bottom);
-            set_brush_color(brush_fill_, 0xCC6B3A, 0.7f);
+            set_brush_color(brush_fill_, 0xCC6B3A, 0.9f);
             render_target_->FillRectangle(wr, brush_fill_);
         }
     }
