@@ -154,7 +154,10 @@ void log_shutdown() {
         g_file = INVALID_HANDLE_VALUE;
     }
     LeaveCriticalSection(&g_cs);
-    DeleteCriticalSection(&g_cs);
+    // DeleteCriticalSection は呼ばない。
+    // バックグラウンドスレッドがシャットダウン後も log_error() を呼ぶ可能性があり、
+    // 破棄済み CRITICAL_SECTION へのアクセスによる未定義動作を防ぐ。
+    // プロセス終了時に OS がリソースを回収するため問題ない。
 }
 
 const wchar_t* log_get_dir() {
