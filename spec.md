@@ -1,176 +1,176 @@
-# sysmeters 仕様書
+# sysmeters Specification
 
-## 概要
+## Overview
 
-Windows 11 上で動作するシステムリソース監視 HUD アプリケーション。
-Direct2D で描画した常駐オーバーレイウィンドウに各種メトリクスをリアルタイム表示する。
+A system resource monitoring HUD application running on Windows 11.
+Displays various metrics in real time on a persistent overlay window rendered with Direct2D.
 
-## ウィンドウ仕様
+## Window Specification
 
-| 項目 | 仕様 |
+| Item | Specification |
 |---|---|
-| スタイル | `WS_EX_TOOLWINDOW`（タスクバー非表示）、最前面は `SetWindowPos` でトグル制御 |
-| フレーム | 細いカスタムタイトルバー + 細いボーダー（Direct2D で自前描画） |
-| 配色 | ダーク系（濃いグレー背景 + オレンジ/緑/青系グラフ） |
-| 操作 | ドラッグ移動可能 |
-| トレイ | タスクトレイにアイコン表示（Shell_NotifyIcon） |
-| メニュー | タスクトレイ右クリック：バージョン表示（クリックで GitHub を開く）、常に最前面に表示（トグル）、設定ファイル、ログファイル、終了 |
-| 最前面設定 | `HKCU\Software\sysmeters\Topmost`（REG_DWORD）に永続化、初期値は非最前面 |
+| Style | `WS_EX_TOOLWINDOW` (hidden from taskbar); always-on-top toggled via `SetWindowPos` |
+| Frame | Thin custom title bar + thin border (self-drawn with Direct2D) |
+| Color scheme | Dark theme (deep gray background + orange/green/blue graphs) |
+| Interaction | Drag to move |
+| Tray | Icon in system tray (Shell_NotifyIcon) |
+| Menu | Right-click tray: version display (click to open GitHub), always on top (toggle), config file, log file, exit |
+| Always-on-top setting | Persisted in `HKCU\Software\sysmeters\Topmost` (REG_DWORD); default is non-topmost |
 | Privileges | Admin required only for CPU temperature (WMI `ROOT\WMI` access) |
 
-## メーター仕様
+## Meter Specification
 
 ### CPU
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| 全体使用率 | 塗りつぶし面グラフ（直近 60 秒）+ パーセンテージ数値 |
-| コア別使用率 | 16 本の縦バー横並び（0-100%、論理コア数） |
-| 温度 | 横バー（0-100°C）+ 数値（°C）、3段階色分け |
+| Overall usage | Filled area graph (last 60 s) + percentage value |
+| Per-core usage | 16 vertical bars side by side (0-100%, logical core count) |
+| Temperature | Horizontal bar (0-100°C) + value (°C), 3-level color coding |
 
-データソース：PDH（使用率）、WMI `MSAcpi_ThermalZoneTemperature`（温度、管理者権限必須）
+Data source: PDH (usage), WMI `MSAcpi_ThermalZoneTemperature` (temperature, admin required)
 
 ### GPU
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| 使用率 | 塗りつぶし面グラフ（直近 60 秒）+ パーセンテージ数値 |
-| 温度 | 横バー（0-100°C）+ 数値（°C）、3段階色分け |
+| Usage | Filled area graph (last 60 s) + percentage value |
+| Temperature | Horizontal bar (0-100°C) + value (°C), 3-level color coding |
 
-データソース：NVML（動的ロード、GPU なし時は "N/A" 表示でクラッシュしない）
+Data source: NVML (dynamically loaded; displays "N/A" without crashing when no GPU is present)
 
 ### RAM
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| 使用率 | 横バー + パーセンテージ数値 |
-| 使用量 | 数値（例：24/64G） |
+| Usage rate | Horizontal bar + percentage value |
+| Used amount | Numeric (e.g., 24/64G) |
 
-データソース：GlobalMemoryStatusEx
+Data source: GlobalMemoryStatusEx
 
 ### VRAM
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| 使用率 | 塗りつぶし面グラフ（直近 60 秒）+ パーセンテージ数値 |
-| 使用量 | 数値（例：4/16G） |
+| Usage rate | Filled area graph (last 60 s) + percentage value |
+| Used amount | Numeric (e.g., 4/16G) |
 
-データソース：NVML
+Data source: NVML
 
 ### Disk I/O
 
-C: と D: パーティション別に以下を表示（左 2/3：I/O グラフ、右 1/3：Space）：
+Displayed per C: and D: partition (left 2/3: I/O graph, right 1/3: Space):
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| Read スループット | 塗りつぶし面グラフ（直近 60 秒）+ MB/s 数値 |
-| Write スループット | 塗りつぶし面グラフ（直近 60 秒）+ MB/s 数値 |
-| NVMe 温度 | I/O グラフ右上オーバーレイ（NVMe のみ、3段階色分け） |
-| Space 使用率 | 横バー + パーセンテージ |
-| 容量 | 使用量/総容量（GB） |
-| GB/h | 時間あたり書き込み量（NVMe のみ、1 時間間隔で更新） |
+| Read throughput | Filled area graph (last 60 s) + MB/s value |
+| Write throughput | Filled area graph (last 60 s) + MB/s value |
+| NVMe temperature | Top-right overlay on I/O graph (NVMe only, 3-level color coding) |
+| Space usage | Horizontal bar + percentage |
+| Capacity | Used/total (GB) |
+| GB/h | Hourly write amount (NVMe only, updated every hour) |
 
-データソース：PDH（`\LogicalDisk(C:)\Disk Read Bytes/sec` 等）、NVMe S.M.A.R.T.（`IOCTL_STORAGE_QUERY_PROPERTY`）
+Data source: PDH (`\LogicalDisk(C:)\Disk Read Bytes/sec`, etc.), NVMe S.M.A.R.T. (`IOCTL_STORAGE_QUERY_PROPERTY`)
 
 ### Network
 
-全 NIC 合算（PDH の `_Total` インスタンス）：
+All NICs aggregated (PDH `_Total` instance):
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| 送信スループット | 塗りつぶし面グラフ（直近 60 秒）+ KB/s or MB/s 数値（値に応じて単位自動切替） |
-| 受信スループット | 塗りつぶし面グラフ（直近 60 秒）+ KB/s or MB/s 数値 |
+| Send throughput | Filled area graph (last 60 s) + KB/s or MB/s value (unit auto-switched by magnitude) |
+| Receive throughput | Filled area graph (last 60 s) + KB/s or MB/s value |
 
-データソース：PDH（`\Network Interface(*)\Bytes Sent/sec` 等）
+Data source: PDH (`\Network Interface(*)\Bytes Sent/sec`, etc.)
 
 ### IP
 
-Network タイトル行の右側に表示：
+Displayed to the right of the Network title row:
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| グローバル IP | テキスト（例：`203.0.113.89`）、取得失敗時は `NO INTERNET📵` |
+| Global IP | Text (e.g., `203.0.113.89`); shows `NO INTERNET📵` on failure |
 
-データソース：`https://checkip.amazonaws.com`（5 分間隔で非同期取得、IPv4/IPv6 対応）
-変化検出：`NotifyIpInterfaceChange`（IP Helper API）でネットワーク変化を即時検出して再取得
+Data source: `https://checkip.amazonaws.com` (fetched asynchronously every 5 minutes, IPv4/IPv6 supported)
+Change detection: `NotifyIpInterfaceChange` (IP Helper API) triggers immediate re-fetch on network change
 
 ### Claude Code
 
-| 要素 | 表示形式 |
+| Element | Display |
 |---|---|
-| 5h レートリミット | 横バー + パーセンテージ + リセット時刻（HH:MM JST） |
-| 7d レートリミット | 横バー + パーセンテージ + リセット時刻（M/D 曜 HH:MM JST） |
-| プラン名 | テキスト表示（例：Max5, Max20, Pro） |
-| セッション数 | 数値表示（実行中の claude.exe プロセス数） |
+| 5h rate limit | Horizontal bar + percentage + reset time (HH:MM JST) |
+| 7d rate limit | Horizontal bar + percentage + reset time (M/D ddd HH:MM JST) |
+| Plan name | Text (e.g., Max5, Max20, Pro) |
+| Session count | Numeric (number of running claude.exe processes) |
 
-データソース：Anthropic Usage API / Account API（OAuth トークン使用）
+Data source: Anthropic Usage API / Account API (OAuth token)
 
-## 温度の色分け
+## Temperature Color Coding
 
-| 状態 | 色 |
+| State | Color |
 |---|---|
-| 0〜69°C（正常） | グレー系 |
-| 70〜89°C（注意） | オレンジ系 |
-| 90°C 以上（危険） | 赤系 |
-| データなし（取得不可） | 暗いグレー系 |
+| 0-69°C (normal) | Gray |
+| 70-89°C (caution) | Orange |
+| 90°C and above (critical) | Red |
+| No data (unavailable) | Dark gray |
 
-CPU・GPU・Disk（NVMe）温度の全てに適用。
+Applied to CPU, GPU, and Disk (NVMe) temperatures.
 
-## 更新仕様
+## Update Specification
 
-| 項目 | 値 |
+| Item | Value |
 |---|---|
-| 高速ポーリング間隔 | 1.1 秒（CPU/GPU/Disk/Net/Claude） |
-| 低速ポーリング間隔 | 3.0 秒（RAM/VRAM） |
-| グラフ履歴 | 直近 60 ポイント（リングバッファ） |
-| Claude API キャッシュ（Usage） | 360 秒 |
-| Claude API キャッシュ（Plan） | 3600 秒 |
-| S.M.A.R.T. 更新間隔 | 3600 秒（1 時間） |
-| グローバル IP 更新間隔 | 300 秒（5 分） |
+| Fast polling interval | 1.1 s (CPU/GPU/Disk/Net/Claude) |
+| Slow polling interval | 3.0 s (RAM/VRAM) |
+| Graph history | Last 60 points (ring buffer) |
+| Claude API cache (Usage) | 360 s |
+| Claude API cache (Plan) | 3600 s |
+| S.M.A.R.T. update interval | 3600 s (1 hour) |
+| Global IP update interval | 300 s (5 minutes) |
 
-## Claude API 仕様
+## Claude API Specification
 
-- **Usage API**：`https://api.anthropic.com/api/oauth/usage`
-- **Account API**：`https://api.anthropic.com/api/oauth/account`
-- **認証**：`Authorization: Bearer {token}` / `anthropic-beta: oauth-2025-04-20`
-- **トークン取得元**：`~/.claude/.credentials.json` の `claudeAiOauth.accessToken`
-- **キャッシュ保存先**：`$TEMP\claude-usage-cache.json`（Usage）、`$TEMP\claude-plan-cache.json`（Plan）
-- **API 呼び出し**：バックグラウンドスレッドで非同期実行（WinHTTP）
+- **Usage API**: `https://api.anthropic.com/api/oauth/usage`
+- **Account API**: `https://api.anthropic.com/api/oauth/account`
+- **Auth**: `Authorization: Bearer {token}` / `anthropic-beta: oauth-2025-04-20`
+- **Token source**: `claudeAiOauth.accessToken` in `~/.claude/.credentials.json`
+- **Cache location**: `$TEMP\claude-usage-cache.json` (Usage), `$TEMP\claude-plan-cache.json` (Plan)
+- **API calls**: Executed asynchronously on a background thread (WinHTTP)
 
-## ログ仕様
+## Log Specification
 
-ファイルベースのログ機能。起動情報と重要エラーを記録する。
+File-based logging that records startup information and critical errors.
 
-| 項目 | 仕様 |
+| Item | Specification |
 |---|---|
-| ファイル名 | `sysmeters_YYYYMMDD.log`（日次ローテーション） |
-| 出力先 | `sysmeters.toml` の `[log] dir`（デフォルト：`logs/`、exe 相対パス） |
-| ログレベル | `INFO`、`ERROR` の 2 段階 |
-| フォーマット | `YYYY-MM-DD HH:mm:ss [LEVEL] message` + CRLF |
-| スレッドセーフ | `CRITICAL_SECTION` による排他制御 |
-| ファイル共有 | `FILE_SHARE_READ` で開くため起動中でもエディタから閲覧可能 |
-| 自動削除 | 30 日超の `sysmeters_*.log` を起動時に削除 |
-| トレイメニュー | 「ログを開く」→当日ログを既定エディタで開く（ファイル未作成時はディレクトリを開く） |
+| File name | `sysmeters_YYYYMMDD.log` (daily rotation) |
+| Output directory | `[log] dir` in `sysmeters.toml` (default: `logs/`, relative to exe) |
+| Log levels | `INFO` and `ERROR` (2 levels) |
+| Format | `YYYY-MM-DD HH:mm:ss [LEVEL] message` + CRLF |
+| Thread safety | Mutual exclusion via `CRITICAL_SECTION` |
+| File sharing | Opened with `FILE_SHARE_READ`, viewable in editors while running |
+| Auto-deletion | Deletes `sysmeters_*.log` files older than 30 days on startup |
+| Tray menu | "Open Log" → opens today's log in the default editor (opens directory if file not yet created) |
 
-ログ出力対象：起動・終了・ウィンドウ作成失敗、各コレクタの初期化成功/失敗、Claude API の HTTP/JSON エラー、設定ファイルのパースエラー。
-毎秒のポーリング失敗（PDH クエリ、WMI クエリ等）は出力しない。
+Logged events: startup/shutdown, window creation failure, collector initialization success/failure, Claude API HTTP/JSON errors, config file parse errors.
+Per-second polling failures (PDH queries, WMI queries, etc.) are not logged.
 
-## ビルド仕様
+## Build Specification
 
-| 項目 | 値 |
+| Item | Value |
 |---|---|
-| コンパイラ | MSVC cl.exe（Visual Studio 2022 / Build Tools 2022） |
-| 言語標準 | C++20 |
-| コンパイルオプション | `/utf-8 /EHsc /std:c++20 /I include` |
-| リンクライブラリ | d2d1.lib, dwrite.lib, pdh.lib, winhttp.lib, windowscodecs.lib, wbemuuid.lib, ole32.lib, oleaut32.lib, shell32.lib, advapi32.lib |
-| サブシステム | `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup` |
-| バージョン注入 | `/DAPP_VERSION=\"x.y.z\"` |
-| 出力先 | `out/sysmeters.exe` |
+| Compiler | MSVC cl.exe (Visual Studio 2022 / Build Tools 2022) |
+| Language standard | C++20 |
+| Compile options | `/utf-8 /EHsc /std:c++20 /I include` |
+| Link libraries | d2d1.lib, dwrite.lib, pdh.lib, winhttp.lib, windowscodecs.lib, wbemuuid.lib, ole32.lib, oleaut32.lib, shell32.lib, advapi32.lib |
+| Subsystem | `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup` |
+| Version injection | `/DAPP_VERSION=\"x.y.z\"` |
+| Output | `out/sysmeters.exe` |
 
-## 外部依存ライブラリ
+## External Dependencies
 
-| ライブラリ | 用途 | 取得方法 |
+| Library | Purpose | Source |
 |---|---|---|
-| toml11（シングルヘッダ） | TOML 設定ファイルのパース | GitHub Releases |
-| nlohmann/json（シングルヘッダ） | Claude API レスポンスの JSON パース | GitHub Releases |
-| NVML（nvml.dll） | GPU/VRAM/温度取得 | NVIDIA ドライバ同梱（動的ロード） |
+| toml11 (single header) | TOML config file parsing | GitHub Releases |
+| nlohmann/json (single header) | JSON parsing for Claude API responses | GitHub Releases |
+| NVML (nvml.dll) | GPU/VRAM/temperature acquisition | Bundled with NVIDIA driver (dynamically loaded) |
