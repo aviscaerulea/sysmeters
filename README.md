@@ -44,10 +44,7 @@ out\sysmeters.exe
 ## 動作要件
 
 - Windows 11（64bit）
-- **管理者権限**（CPU 温度取得に WMI アクセスが必要）
-- Visual Studio 2022 または Build Tools 2022（ビルド時のみ）
-- NVIDIA GPU（GPU/VRAM 監視はオプション、なくても動作する）
-- Claude Code を使用する場合：`~/.claude/.credentials.json` が存在すること
+- CPU 温度を取得する場合は**管理者権限**が必要（WMI アクセスのため）
 
 ## ビルド
 
