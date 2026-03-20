@@ -172,18 +172,19 @@ void Renderer::draw_grid(D2D1_RECT_F rect) {
 
 // 面グラフ描画
 void Renderer::draw_area_graph(const RingBuffer<float, 60>& buf,
-                               float max_val, D2D1_RECT_F rect, uint32_t color_rgb) {
+                               float max_val, D2D1_RECT_F rect, uint32_t color_rgb, bool draw_bg) {
     if (max_val <= 0.f) return;
 
     // グラフ領域にクリッピング（ストロークのはみ出し防止）
     render_target_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
-    // グラフ背景（ほぼ黒）
-    set_brush_color(brush_fill_, 0x0D0D0D);
-    render_target_->FillRectangle(rect, brush_fill_);
-
-    // グリッド線
-    draw_grid(rect);
+    if (draw_bg) {
+        // グラフ背景（ほぼ黒）
+        set_brush_color(brush_fill_, 0x0D0D0D);
+        render_target_->FillRectangle(rect, brush_fill_);
+        // グリッド線
+        draw_grid(rect);
+    }
 
     if (buf.empty()) {
         render_target_->PopAxisAlignedClip();
@@ -527,10 +528,10 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         D2D1_RECT_F tr = D2D1::RectF(x, y, x + gw, y + LINE_H);
         render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_small_, tr, brush_text_);
 
-        float max_val = max(1.f, dm.peak_mbps);
+        float max_val = max(10.f, max(buf_max(dm.read_history), buf_max(dm.write_history)));
         D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + gw, y + LINE_H + GRAPH_H);
         draw_area_graph(dm.read_history,  max_val, gr, cfg.col_disk_read);
-        draw_area_graph(dm.write_history, max_val, gr, cfg.col_disk_write);
+        draw_area_graph(dm.write_history, max_val, gr, cfg.col_disk_write, false);
 
         // NVMe 温度（グラフ右上オーバーレイ、SMART 有効時のみ）
         if (dm.smart_avail) {
@@ -633,13 +634,11 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     D2D1_RECT_F tr = D2D1::RectF(x, y, x + 120.f, y + LINE_H);
     render_target_->DrawText(labelbuf, static_cast<UINT32>(wcslen(labelbuf)), font_small_, tr, brush_text_);
 
-    float max_val = (m.link_kbps > 0.f)
-        ? m.link_kbps
-        : max(1.f, max(buf_max(m.send_history), buf_max(m.recv_history)));
+    float max_val = max(100.f, max(buf_max(m.send_history), buf_max(m.recv_history)));
 
     D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + ww, y + LINE_H + GRAPH_H);
     draw_area_graph(m.recv_history, max_val, gr, cfg.col_net_recv);
-    draw_area_graph(m.send_history, max_val, gr, cfg.col_net_send);
+    draw_area_graph(m.send_history, max_val, gr, cfg.col_net_send, false);
 
     fmt_kbps(m.send_kbps, buf, 32);
     swprintf_s(labelbuf, L"▲ %s", buf);

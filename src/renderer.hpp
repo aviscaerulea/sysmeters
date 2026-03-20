@@ -55,8 +55,9 @@ private:
     void draw_grid(D2D1_RECT_F rect);
 
     // 面グラフを描画する（指定 rect に収める、color は塗りつぶし色）
+    // draw_bg が false の場合は背景・グリッド描画をスキップする（重ね描画時の上書き防止）
     void draw_area_graph(const RingBuffer<float, 60>& buf,
-                         float max_val, D2D1_RECT_F rect, uint32_t color_rgb);
+                         float max_val, D2D1_RECT_F rect, uint32_t color_rgb, bool draw_bg = true);
 
     // 横バー（0-max_val のレンジ）を描画する
     void draw_hbar(float val, float max_val, D2D1_RECT_F rect, uint32_t color_rgb);
