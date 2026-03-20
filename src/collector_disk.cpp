@@ -141,15 +141,11 @@ void DiskCollector::update(DiskMetrics& c, DiskMetrics& d) {
     c.write_mbps = get(impl_->counters[1]);
     c.read_history.push(c.read_mbps);
     c.write_history.push(c.write_mbps);
-    // セッション中の最大スループットを更新
-    c.peak_mbps = max(c.peak_mbps, max(c.read_mbps, c.write_mbps));
 
     d.read_mbps  = get(impl_->counters[2]);
     d.write_mbps = get(impl_->counters[3]);
     d.read_history.push(d.read_mbps);
     d.write_history.push(d.write_mbps);
-    // セッション中の最大スループットを更新
-    d.peak_mbps = max(d.peak_mbps, max(d.read_mbps, d.write_mbps));
 }
 
 void DiskCollector::update_space(DiskMetrics& c, DiskMetrics& d) {
