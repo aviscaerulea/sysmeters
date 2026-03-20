@@ -440,7 +440,7 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
         float wsl_fill = min(m.wsl_gb / m.total_gb, 1.f) * bar_w;
         if (wsl_fill > 0.f) {
             D2D1_RECT_F wr = D2D1::RectF(br.left, br.top, br.left + wsl_fill, br.bottom);
-            set_brush_color(brush_fill_, 0xCC6B3A, 0.9f);
+            set_brush_color(brush_fill_, 0xC06040, 0.9f);
             render_target_->FillRectangle(wr, brush_fill_);
         }
     }
