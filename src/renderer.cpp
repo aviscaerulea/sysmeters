@@ -12,7 +12,7 @@
 // ウィンドウレイアウト定数（クライアント領域内）
 static constexpr float PAD        = 11.f;   // 内側パディング
 static constexpr float SECTION_H  = 24.f;   // セクションラベル高さ（18pt 対応）
-static constexpr float GRAPH_H    = 72.f;   // 面グラフ高さ（60 * 1.2）
+static constexpr float GRAPH_H    = 60.f;   // 面グラフ高さ（Disk/Net）
 static constexpr float GRAPH_H_LG = 86.f;  // CPU/GPU 面グラフ高さ（72 * 1.2）
 static constexpr float BAR_H      = 16.f;   // 横バー高さ（20 * 0.8）
 static constexpr float CORE_BAR_H = 40.f;   // コア縦バー高さ
@@ -585,7 +585,7 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
             swprintf_s(smuf, L"%.1f GB/h", dm.smart_write_gbh);
             set_brush_color(brush_text_, cfg.col_text, 0.45f);
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            float st = gt + INFO_LINE_H;
+            float st = gt + INFO_LINE_H - 5.f;
             D2D1_RECT_F smr = D2D1::RectF(sx, st, sx + sw, st + INFO_LINE_H);
             render_target_->DrawText(smuf, static_cast<UINT32>(wcslen(smuf)), font_small_, smr, brush_text_);
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -661,16 +661,21 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     D2D1_RECT_F hlr = D2D1::RectF(x, y, x + CLAUDE_LBL_W, y + LINE_H);
     render_target_->DrawText(L"Claude", 6, font_normal_, hlr, brush_text_);
 
-    wchar_t hdr[48];
-    swprintf_s(hdr, L"%.15hs  Sessions: %d", m.plan_label, m.session_count);
     D2D1_RECT_F hsr = D2D1::RectF(x + CLAUDE_LBL_W, y + 4.f, x + ww, y + LINE_H);
-    render_target_->DrawText(hdr, static_cast<UINT32>(wcslen(hdr)), font_small_, hsr, brush_text_);
+    wchar_t plan_buf[24];
+    swprintf_s(plan_buf, L"%.15hs", m.plan_label);
+    render_target_->DrawText(plan_buf, static_cast<UINT32>(wcslen(plan_buf)), font_small_, hsr, brush_text_);
+    wchar_t sess_buf[24];
+    swprintf_s(sess_buf, L"Sessions:%3d", m.session_count);
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+    render_target_->DrawText(sess_buf, static_cast<UINT32>(wcslen(sess_buf)), font_small_, hsr, brush_text_);
+    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     y += LINE_H;
 
     // 5h / 7d バー：ラベル+パーセンテージ（左）、バー（中）、リセット時刻（右）の同一行レイアウト
     // テキストは Disk I/O と同じ font_small_（18pt）
     static constexpr float LBL_W   = 72.f;   // "5h 100%" が収まる幅（font_small_）
-    static constexpr float RESET_W = 130.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
+    static constexpr float RESET_W = 138.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
     // 現在時刻からリアルタイムに均等消費ペースを算出
     auto calc_expected_now = [](time_t resets_ts, double window_secs) -> float {
         if (resets_ts <= 0) return 0.f;  // 未取得（-1）または epoch（0）は無効
@@ -682,19 +687,22 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count) {
+        static constexpr float CLAUDE_BAR_H = BAR_H * 1.2f;  // Claude 専用バー高さ（1.2 倍）
+
         // ラベル + パーセンテージ（左寄せ、font_small_ = Disk I/O と同サイズ）
         wchar_t buf[64];
         if (avail) swprintf_s(buf, L"%s %3.0f%%", lbl, pct);
         else       swprintf_s(buf, L"%s",         lbl);
         uint32_t text_col = (avail && pct > expected_pct * 1.1f) ? 0xEF5350 : (avail ? cfg.col_text : 0x888888);
         set_brush_color(brush_text_, text_col);
+        font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         D2D1_RECT_F lr = D2D1::RectF(x, y, x + LBL_W, y + SECTION_H);
         render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_small_, lr, brush_text_);
 
         // バー（ラベル右端からリセット時刻左端まで）
         float bar_right = avail ? (x + ww - RESET_W) : (x + ww);
-        float bar_top   = y + (SECTION_H - BAR_H) / 2.f;  // 行内で縦中央揃え
-        D2D1_RECT_F br  = D2D1::RectF(x + LBL_W + 4.f, bar_top, bar_right, bar_top + BAR_H);
+        float bar_top   = y + (SECTION_H - CLAUDE_BAR_H) / 2.f;  // 行内で縦中央揃え
+        D2D1_RECT_F br  = D2D1::RectF(x + LBL_W + 4.f, bar_top, bar_right, bar_top + CLAUDE_BAR_H);
         draw_hbar(avail ? pct : 0.f, 100.f, br, cfg.col_claude_bar);
 
         // 等分グリッド線（消費ペースの目安：5h は 1h 間隔、7d は 1d 間隔）
@@ -717,15 +725,41 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         }
 
         // リセット時刻（右端、未取得時は非表示、font_small_）
+        // 7d 形式（"M/D 曜 HH:MM"）はスペース 2 つで 3 分割し曜日前後を圧縮描画する
         if (avail) {
+            static constexpr float TIME_W = 54.f;  // "HH:MM" 描画幅
+            static constexpr float DAY_W  = 22.f;  // 曜日文字（全角 1 文字）描画幅
+            static constexpr float DAY_GAP = 4.f;  // 曜日前後ギャップ（通常スペースの 70%）
             wchar_t rtbuf[40];
             swprintf_s(rtbuf, L"%.38s", reset);
             set_brush_color(brush_text_, cfg.col_text, 1.0f);
-            D2D1_RECT_F rr = D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H);
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            render_target_->DrawText(rtbuf, static_cast<UINT32>(wcslen(rtbuf)), font_small_, rr, brush_text_);
+            wchar_t tmp[40];
+            wcscpy_s(tmp, rtbuf);
+            wchar_t* ctx = nullptr;
+            wchar_t* p0 = wcstok_s(tmp,     L" ", &ctx);  // "M/D"
+            wchar_t* p1 = wcstok_s(nullptr, L" ", &ctx);  // "曜"
+            wchar_t* p2 = wcstok_s(nullptr, L" ", &ctx);  // "HH:MM"
+            if (p0 && p1 && p2) {
+                // 右から：時刻 → 曜日 → 日付 の順に描画
+                float rx = x + ww;
+                render_target_->DrawText(p2, static_cast<UINT32>(wcslen(p2)), font_small_,
+                    D2D1::RectF(rx - TIME_W, y, rx, y + SECTION_H), brush_text_);
+                rx -= TIME_W + DAY_GAP;
+                render_target_->DrawText(p1, static_cast<UINT32>(wcslen(p1)), font_small_,
+                    D2D1::RectF(rx - DAY_W, y, rx, y + SECTION_H), brush_text_);
+                rx -= DAY_W + DAY_GAP;
+                render_target_->DrawText(p0, static_cast<UINT32>(wcslen(p0)), font_small_,
+                    D2D1::RectF(x + ww - RESET_W, y, rx, y + SECTION_H), brush_text_);
+            }
+            else {
+                // 5h 形式（"HH:MM"）：通常描画
+                render_target_->DrawText(rtbuf, static_cast<UINT32>(wcslen(rtbuf)), font_small_,
+                    D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H), brush_text_);
+            }
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         }
+        font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         y += SECTION_H + GAP;
     };
 
