@@ -41,7 +41,7 @@ static constexpr int TIMER_CLAUDE_MS      = 60000;     // 60 秒
 static constexpr int TIMER_DISK_SPACE_MS  = 600000;    // 10 分
 static constexpr int TIMER_SMART_MS       = 3600000;   // 1 時間
 static constexpr int TIMER_IP_MS          = 300000;    // 5 分
-static constexpr int MIN_CLIENT_W = 450;  // 水平リサイズの最低クライアント幅（px）
+static constexpr int MIN_CLIENT_W = 461;  // 水平リサイズの最低クライアント幅（px）
 
 // ウィンドウスタイル定数（WM_GETMINMAXINFO でも参照するため定数化）
 static constexpr DWORD WND_STYLE    = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
@@ -142,7 +142,38 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
         min_track_x_ = adj_min.right - adj_min.left;
     }
 
+    // OS 情報初期取得（起動時 1 回のみ。マシン名と OS ラベルは変化しない）
+    {
+        DWORD sz = MAX_COMPUTERNAME_LENGTH + 1;
+        GetComputerNameW(metrics_->os.machine_name, &sz);
+
+        HKEY key;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_READ, &key) == ERROR_SUCCESS) {
+            wchar_t prod[64] = {}, disp[16] = {}, build[8] = {};
+            DWORD siz;
+            siz = sizeof(prod);
+            RegQueryValueExW(key, L"ProductName", nullptr, nullptr, reinterpret_cast<BYTE*>(prod), &siz);
+            siz = sizeof(disp);
+            RegQueryValueExW(key, L"DisplayVersion", nullptr, nullptr, reinterpret_cast<BYTE*>(disp), &siz);
+            siz = sizeof(build);
+            RegQueryValueExW(key, L"CurrentBuildNumber", nullptr, nullptr, reinterpret_cast<BYTE*>(build), &siz);
+
+            // ProductName が Windows 11 でも "Windows 10" を返す MS 既知仕様の補正
+            // ビルド番号 22000 以降は Windows 11
+            if (_wtoi(build) >= 22000) {
+                wchar_t* p = wcsstr(prod, L"Windows 10");
+                if (p) p[9] = L'1';  // "Windows 10" → "Windows 11"（同文字長で安全置換）
+            }
+
+            swprintf_s(metrics_->os.os_label, L"%s (%s %s)", prod, disp, build);
+            RegCloseKey(key);
+        }
+    }
+
     // 初回描画（全メトリクスを一括取得）
+    metrics_->os.uptime_ms = GetTickCount64();
     col_cpu_->update(metrics_->cpu);
     col_gpu_->update_all(metrics_->gpu, metrics_->vram);
     col_mem_->update(metrics_->mem);
@@ -349,10 +380,11 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             col_cpu_->update(metrics_->cpu);
         }
         else if (wp == TIMER_FAST) {
-            // 高速更新（1.1 秒）：GPU/Disk/Net
+            // 高速更新（1.1 秒）：GPU/Disk/Net + アップタイム
             col_gpu_->update_gpu(metrics_->gpu);
             col_disk_->update(metrics_->disk_c, metrics_->disk_d);
             col_net_->update(metrics_->net);
+            metrics_->os.uptime_ms = GetTickCount64();
         }
         else if (wp == TIMER_SLOW) {
             // 低速更新（5.0 秒）：RAM/VRAM
