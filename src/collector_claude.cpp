@@ -235,8 +235,27 @@ static json fetch_or_cache(const fs::path& cache_path, double ttl,
     }
 }
 
+// ネガティブキャッシュファイルを削除する（"error" フィールドが含まれている場合のみ）
+static void clear_negative_cache(const fs::path& path) {
+    std::ifstream ifs(path);
+    if (!ifs.is_open()) return;
+    try {
+        auto j = json::parse(ifs);
+        ifs.close();
+        if (j.contains("error")) fs::remove(path);
+    }
+    catch (...) {}
+}
+
 // バックグラウンドで Usage API + Account API を叩く
 void ClaudeCollector::do_fetch() {
+    // 初回フェッチ時はネガティブキャッシュを削除して必ず API を叩く
+    if (first_fetch_) {
+        clear_negative_cache(cache_usage_path());
+        clear_negative_cache(cache_plan_path());
+        first_fetch_ = false;
+    }
+
     // API エラーやキャッシュ無効期間中も前回の有効データを保持する
     ClaudeMetrics result;
     { std::lock_guard<std::mutex> lock(result_mutex_); result = pending_; }
@@ -275,6 +294,13 @@ void ClaudeCollector::do_fetch() {
             result.five_h_resets_ts  = parse_iso8601_utc(fh_resets_at);
             result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
             result.avail = true;
+
+            // 超過料金情報（extra_usage）
+            if (!usage_j["extra_usage"].is_null()) {
+                auto eu = usage_j["extra_usage"];
+                result.extra_enabled      = eu.value("is_enabled", false);
+                result.extra_used_dollars = static_cast<float>(eu.value("used_credits", 0.0)) / 100.f;
+            }
         }
         catch (const nlohmann::json::exception& e) { log_error(e.what()); }
     }
