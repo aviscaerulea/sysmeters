@@ -30,7 +30,7 @@ Single-line section displayed above CPU:
 | OS label | `"Windows 11 Pro (24H2 26100)"` format (font_small_, 18pt, alpha 0.6, after label) |
 | Uptime | `"N日 HH時間MM分"` or `"HH時間MM分"` (font_small_, 18pt, alpha 0.6, right-aligned) |
 
-Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` (OS label, fetched once at startup), `GetTickCount64` (uptime, updated every 1.1 s via TIMER_FAST)
+Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` (OS label, refreshed hourly via TIMER_SMART), `GetTickCount64` (uptime, updated every 60 s via TIMER_CLAUDE)
 
 ### CPU
 
@@ -132,12 +132,17 @@ Applied to CPU, GPU, and Disk (NVMe) temperatures.
 
 | Item | Value |
 |---|---|
-| Fast polling interval | 1.1 s (CPU/GPU/Disk/Net/Claude) |
-| Slow polling interval | 3.0 s (RAM/VRAM) |
+| CPU polling interval | 1.0 s |
+| Fast polling interval | 1.0 s (GPU/Disk/Net) |
+| Slow polling interval | 5.0 s (RAM/VRAM) |
+| Claude polling interval | 60 s |
+| OS uptime interval | 60 s |
+| OS version interval | 3600 s (1 hour) |
 | Graph history | Last 60 points (ring buffer) |
 | Claude API cache (Usage) | 360 s |
 | Claude API cache (Plan) | 3600 s |
 | S.M.A.R.T. update interval | 3600 s (1 hour) |
+| Disk space update interval | 300 s (5 minutes) |
 | Global IP update interval | 300 s (5 minutes) |
 
 ## Claude API Specification
