@@ -664,7 +664,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     D2D1_RECT_F hsr = D2D1::RectF(x + CLAUDE_LBL_W, y + 4.f, x + ww, y + LINE_H);
     wchar_t plan_buf[48];
     if (m.extra_enabled)
-        swprintf_s(plan_buf, L"%.15hs  ext: $%.1f", m.plan_label, m.extra_used_dollars);
+        swprintf_s(plan_buf, L"%.15hs  over $%.1f", m.plan_label, m.extra_used_dollars);
     else
         swprintf_s(plan_buf, L"%.15hs", m.plan_label);
     render_target_->DrawText(plan_buf, static_cast<UINT32>(wcslen(plan_buf)), font_small_, hsr, brush_text_);
