@@ -274,6 +274,41 @@ void Renderer::draw_vbar(float pct, D2D1_RECT_F rect, uint32_t color_rgb) {
 
 // ---- 各セクション描画 ----
 
+float Renderer::draw_os(const OsMetrics& m, const AppConfig& cfg, float y) {
+    static constexpr float UPTIME_W  = 150.f;  // "99日 23時間59分" が収まる幅
+    float x  = PAD;
+    float ww = static_cast<float>(cfg.win_width) - PAD * 2;
+
+    // OS ラベル（左端、アップタイム幅を除いた範囲、alpha 0.6）
+    if (m.os_label[0]) {
+        set_brush_color(brush_text_, cfg.col_text, 0.6f);
+        render_target_->DrawText(m.os_label, static_cast<UINT32>(wcslen(m.os_label)), font_small_,
+            D2D1::RectF(x, y, x + ww - UPTIME_W, y + SECTION_H), brush_text_);
+    }
+
+    // アップタイム（右寄せ、alpha 0.6）
+    if (m.uptime_ms > 0) {
+        ULONGLONG secs  = m.uptime_ms / 1000;
+        ULONGLONG mins  = (secs / 60) % 60;
+        ULONGLONG hours = (secs / 3600) % 24;
+        ULONGLONG days  = secs / 86400;
+
+        wchar_t ubuf[32];
+        if (days > 0)
+            swprintf_s(ubuf, L"%llu日 %02llu時間%02llu分", days, hours, mins);
+        else
+            swprintf_s(ubuf, L"%02llu時間%02llu分", hours, mins);
+
+        set_brush_color(brush_text_, cfg.col_text, 0.6f);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        render_target_->DrawText(ubuf, static_cast<UINT32>(wcslen(ubuf)), font_small_,
+            D2D1::RectF(x, y, x + ww, y + SECTION_H), brush_text_);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    }
+
+    return y + SECTION_H;
+}
+
 float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
@@ -712,6 +747,7 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg) {
     render_target_->Clear(from_rgb(cfg.col_background));
 
     float y = PAD;
+    y = draw_os(m.os, cfg, y);          y += SECTION_GAP;
     y = draw_cpu(m.cpu, cfg, y);        y += SECTION_GAP;
     y = draw_gpu(m.gpu, cfg, y);        y += SECTION_GAP;
     y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP;

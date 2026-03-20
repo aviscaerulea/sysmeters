@@ -1,9 +1,18 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #pragma once
 #include <ctime>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include "ring_buffer.hpp"
 
 // 全メトリクスデータ構造体
+
+// OS 情報：マシン名、OS バージョン、アップタイム（起動時 1 回取得 + 毎秒更新）
+struct OsMetrics {
+    wchar_t machine_name[MAX_COMPUTERNAME_LENGTH + 1] = {};
+    wchar_t os_label[64] = {};    // "Windows 11 Pro (24H2 26100)" 形式
+    ULONGLONG uptime_ms = 0;
+};
 
 // CPU：全体使用率（面グラフ）+ コア別縦バー + 温度（横バー）
 struct CpuMetrics {
@@ -89,6 +98,7 @@ struct ClaudeMetrics {
 
 // 全メトリクスを束ねる集約構造体
 struct AllMetrics {
+    OsMetrics   os;
     CpuMetrics  cpu;
     GpuMetrics  gpu;
     MemMetrics  mem;

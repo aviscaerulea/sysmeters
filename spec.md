@@ -20,6 +20,18 @@ Displays various metrics in real time on a persistent overlay window rendered wi
 
 ## Meter Specification
 
+### OS
+
+Single-line section displayed above CPU:
+
+| Element | Display |
+|---|---|
+| Section label | `"OS"` (font_normal_, 22pt, left) |
+| OS label | `"Windows 11 Pro (24H2 26100)"` format (font_small_, 18pt, alpha 0.6, after label) |
+| Uptime | `"N日 HH時間MM分"` or `"HH時間MM分"` (font_small_, 18pt, alpha 0.6, right-aligned) |
+
+Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` (OS label, fetched once at startup), `GetTickCount64` (uptime, updated every 1.1 s via TIMER_FAST)
+
 ### CPU
 
 | Element | Display |

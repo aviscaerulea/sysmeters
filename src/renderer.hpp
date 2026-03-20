@@ -72,6 +72,7 @@ private:
         const wchar_t* prefix, const char* model_name, const AppConfig& cfg);
 
     // メーター各セクションの描画
+    float draw_os(const OsMetrics& m, const AppConfig& cfg, float y);
     float draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y);
     float draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y);
     float draw_mem(const MemMetrics& m,  const AppConfig& cfg, float y);
