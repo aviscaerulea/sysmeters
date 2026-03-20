@@ -94,6 +94,8 @@ struct ClaudeMetrics {
     char  plan_label[16]    = {};       // "Max5", "Pro" 等
     int   session_count = 0;
     bool  avail         = false;
+    float extra_used_dollars = 0.f;   // 超過使用額（ドル換算：used_credits / 100）
+    bool  extra_enabled      = false; // 超過料金が有効か（is_enabled）
 };
 
 // 全メトリクスを束ねる集約構造体

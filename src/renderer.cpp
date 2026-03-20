@@ -665,6 +665,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     wchar_t plan_buf[24];
     swprintf_s(plan_buf, L"%.15hs", m.plan_label);
     render_target_->DrawText(plan_buf, static_cast<UINT32>(wcslen(plan_buf)), font_small_, hsr, brush_text_);
+    if (m.extra_enabled) {
+        wchar_t ext_buf[24];
+        swprintf_s(ext_buf, L"ext: $%.1f", m.extra_used_dollars);
+        render_target_->DrawText(ext_buf, static_cast<UINT32>(wcslen(ext_buf)), font_small_, hsr, brush_text_);
+    }
     wchar_t sess_buf[24];
     swprintf_s(sess_buf, L"Sessions:%3d", m.session_count);
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
