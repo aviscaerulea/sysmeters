@@ -36,20 +36,20 @@ text = 0xD4D4D4
 graph_fill = 0xCC923E
 
 # Disk Read グラフ色
-# デフォルト: 0xCCA366（明るいアンバー）
-disk_read = 0xCCA366
+# デフォルト: 0xDDA858（少し明るいアンバー）
+disk_read = 0xDDA858
 
 # Disk Write グラフ色
-# デフォルト: 0xCC861E（暗めアンバー）
-disk_write = 0xCC861E
+# デフォルト: 0x8C642A（暗めアンバー）
+disk_write = 0x8C642A
 
 # Network 受信グラフ色
-# デフォルト: 0xCCA366（明るいアンバー）
-net_recv = 0xCCA366
+# デフォルト: 0xDDA858（少し明るいアンバー）
+net_recv = 0xDDA858
 
 # Network 送信グラフ色
-# デフォルト: 0xCC923E（アンバー）
-net_send = 0xCC923E
+# デフォルト: 0x8C642A（暗めアンバー）
+net_send = 0x8C642A
 
 # Claude レートリミットバー色
 # デフォルト: 0xCC923E（アンバー）
