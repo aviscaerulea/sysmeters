@@ -685,7 +685,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         // ラベル + パーセンテージ（左寄せ、font_small_ = Disk I/O と同サイズ）
         wchar_t buf[64];
         if (avail) swprintf_s(buf, L"%s %3.0f%%", lbl, pct);
-        else       swprintf_s(buf, L"%s     -",   lbl);
+        else       swprintf_s(buf, L"%s",         lbl);
         uint32_t text_col = (avail && pct > expected_pct * 1.1f) ? 0xEF5350 : (avail ? cfg.col_text : 0x888888);
         set_brush_color(brush_text_, text_col);
         D2D1_RECT_F lr = D2D1::RectF(x, y, x + LBL_W, y + SECTION_H);
