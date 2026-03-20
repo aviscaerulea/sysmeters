@@ -47,6 +47,7 @@ private:
     IpCollector*     col_ip_     = nullptr;
 
     void update_window_size();
+    void update_os_label();  // OS バージョンラベルをレジストリから再取得する
     void add_tray_icon();
     void remove_tray_icon();
     void show_context_menu();
