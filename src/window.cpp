@@ -42,6 +42,7 @@ static constexpr int TIMER_DISK_SPACE_MS  = 600000;    // 10 分
 static constexpr int TIMER_SMART_MS       = 3600000;   // 1 時間
 static constexpr int TIMER_IP_MS          = 300000;    // 5 分
 static constexpr int MIN_CLIENT_W = 461;  // 水平リサイズの最低クライアント幅（px）
+static constexpr int MIN_CLIENT_H = 430;  // コンテンツ高さの最低値（px）
 
 // ウィンドウスタイル定数（WM_GETMINMAXINFO でも参照するため定数化）
 static constexpr DWORD WND_STYLE    = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
@@ -196,7 +197,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
 
 // ウィンドウ高さをコンテンツに合わせて調整する
 void AppWindow::update_window_size() {
-    int client_h = renderer_->preferred_height();
+    int client_h = max(renderer_->preferred_height(), MIN_CLIENT_H);
     if (client_h <= 10 || client_h == last_pref_h_) return;
     last_pref_h_ = client_h;
 
