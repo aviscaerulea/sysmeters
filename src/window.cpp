@@ -29,16 +29,16 @@ static constexpr LPCWSTR GITHUB_URL = L"https://github.com/aviscaerulea/sysmeter
 
 static constexpr int TIMER_CPU        = 1;  // CPU 専用タイマー ID
 static constexpr int TIMER_FAST       = 2;  // 高速タイマー ID（GPU/Disk/Net）
-static constexpr int TIMER_SLOW       = 3;  // 低速タイマー ID（RAM/VRAM）
+static constexpr int TIMER_SLOW       = 3;  // 低速タイマー ID（RAM/VRAM、2 秒）
 static constexpr int TIMER_CLAUDE     = 4;  // Claude 専用タイマー ID（5h/7d 更新）
-static constexpr int TIMER_DISK_SPACE = 5;  // Disk 空き容量タイマー ID（10 分更新）
+static constexpr int TIMER_DISK_SPACE = 5;  // Disk 空き容量タイマー ID（5 秒更新）
 static constexpr int TIMER_SMART      = 6;  // NVMe S.M.A.R.T. タイマー ID（1 時間更新）
 static constexpr int TIMER_IP         = 7;  // グローバル IP タイマー ID（5 分更新）
 static constexpr int TIMER_CPU_MS         = 1000;      // 1.0 秒
 static constexpr int TIMER_FAST_MS        = 1000;      // 1.0 秒
-static constexpr int TIMER_SLOW_MS        = 5000;      // 5.0 秒
+static constexpr int TIMER_SLOW_MS        = 2000;      // 2.0 秒
 static constexpr int TIMER_CLAUDE_MS      = 60000;     // 60 秒
-static constexpr int TIMER_DISK_SPACE_MS  = 300000;    // 5 分
+static constexpr int TIMER_DISK_SPACE_MS  = 5000;      // 5 秒
 static constexpr int TIMER_SMART_MS       = 3600000;   // 1 時間
 static constexpr int TIMER_IP_MS          = 300000;    // 5 分
 static constexpr int MIN_CLIENT_W = 461;  // 水平リサイズの最低クライアント幅（px）
@@ -393,7 +393,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             col_net_->update(metrics_->net);
         }
         else if (wp == TIMER_SLOW) {
-            // 低速更新（5.0 秒）：RAM/VRAM
+            // 低速更新（2.0 秒）：RAM/VRAM
             col_mem_->update(metrics_->mem);
             col_gpu_->update_all(metrics_->gpu, metrics_->vram);
         }
@@ -403,7 +403,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             metrics_->os.uptime_ms = GetTickCount64();
         }
         else if (wp == TIMER_DISK_SPACE) {
-            // Disk 空き容量更新（5 分）
+            // Disk 空き容量更新（5 秒）
             col_disk_->update_space(metrics_->disk_c, metrics_->disk_d);
         }
         else if (wp == TIMER_SMART) {
