@@ -16,7 +16,7 @@ Displays various metrics in real time on a persistent overlay window rendered wi
 | Tray | Icon in system tray (Shell_NotifyIcon) |
 | Menu | Right-click tray: version display (click to open GitHub), always on top (toggle), config file, log file, exit |
 | Always-on-top setting | Persisted in `HKCU\Software\sysmeters\Topmost` (REG_DWORD); default is non-topmost |
-| Privileges | No admin required; CPU temperature requires CoreTemp to be running |
+| Privileges | No admin required; CPU temperature requires PawnIO driver to be installed |
 
 ## Meter Specification
 
@@ -40,7 +40,9 @@ Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsof
 | Per-core usage | 16 vertical bars side by side (0-100%, logical core count) |
 | Temperature | Horizontal bar (0-100°C) + value (°C), 3-level color coding |
 
-Data source: PDH (usage), CoreTemp shared memory `CoreTempMappingObjectEx` (temperature, CoreTemp must be running)
+Data source: PDH (usage), PawnIO driver (`\\.\PawnIO`) for temperature (PawnIO driver must be installed; hidden when unavailable):
+- Intel: `MSR_IA32_PACKAGE_THERM_STATUS` via `IntelMSR.bin`
+- AMD: SMN register `0x59800` (THM_TCON_CUR_TMP) via `AMDFamily17.bin`
 
 ### GPU
 

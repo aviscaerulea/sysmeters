@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Windows 11（64bit）
 - MSVC cl.exe（Visual Studio 2022 または Build Tools 2022）
-- **管理者権限必須**（WMI による CPU 温度取得のため）
+- 管理者権限不要
+- CPU 温度を表示するには PawnIO ドライバのインストールが必要（`winget install namazso.PawnIO`）
 
 ## ビルドコマンド
 

@@ -44,7 +44,7 @@ out\sysmeters.exe
 ## 動作要件
 
 - Windows 11（64bit）
-- CPU 温度を表示するには **CoreTemp** が起動している必要がある
+- CPU 温度を表示するには **PawnIO ドライバ**のインストールが必要（`winget install namazso.PawnIO`）
 
 ## ビルド
 

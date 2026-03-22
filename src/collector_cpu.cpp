@@ -3,6 +3,7 @@
 #include "logger.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winioctl.h>
 #include <pdh.h>
 #include <pdhmsg.h>
 #pragma comment(lib, "pdh.lib")
@@ -12,32 +13,33 @@
 #include <cstdio>
 #include <cstring>
 
-// CoreTemp 共有メモリ構造体（CoreTempMappingObjectEx）
+// PawnIO IOCTL 定義（pawnio_um.h より）
 //
-// CoreTemp が公開する共有メモリのレイアウト。
-// 参考: https://www.alcpu.com/CoreTemp/developers.html
-#pragma pack(push, 1)
-struct CoreTempSharedDataEx {
-    UINT  uiLoad[256];       // コア別 CPU 使用率 (%)
-    UINT  uiTjMax[128];      // CPU 別 Tj Max 温度
-    UINT  uiCoreCnt;         // 全 CPU 合計コア数
-    UINT  uiCPUCnt;          // 物理 CPU 数
-    FLOAT fTemp[256];        // コア別温度（℃ or ℉、ucDeltaToTjMax に応じて解釈が異なる）
-    FLOAT fVID;
-    FLOAT fCPUSpeed;
-    FLOAT fFSBSpeed;
-    FLOAT fMultiplier;
-    CHAR  sCPUName[100];
-    BYTE  ucFahrenheit;      // 1=℉ 表示、0=℃ 表示
-    BYTE  ucDeltaToTjMax;    // 1=TjMax までの差分、0=絶対温度
-    BYTE  ucTdpSupported;
-    BYTE  ucPowerSupported;
-    UINT  uiStructVersion;   // 2 以上で以下フィールドが有効
-    UINT  uiTdp[128];
-    FLOAT fPower[128];
-    FLOAT fMultipliers[256];
+// PawnIO ドライバ（\\.\PawnIO）経由で MSR を読み取るための IOCTL コードと定数。
+// デバイスタイプ 41394 は PawnIO が使用する固有の値（k_device_type）。
+static constexpr ULONG k_pawnio_device_type = 41394;
+static constexpr ULONG IOCTL_PIO_LOAD_BINARY =
+    CTL_CODE(k_pawnio_device_type, 0x821, METHOD_BUFFERED, FILE_ANY_ACCESS);
+static constexpr ULONG IOCTL_PIO_EXECUTE_FN =
+    CTL_CODE(k_pawnio_device_type, 0x841, METHOD_BUFFERED, FILE_ANY_ACCESS);
+
+// Intel MSR アドレス（MSR_IA32_PACKAGE_THERM_STATUS, MSR_IA32_TEMPERATURE_TARGET）
+static constexpr ULONG64 MSR_IA32_TEMPERATURE_TARGET   = 0x1A2;
+static constexpr ULONG64 MSR_IA32_PACKAGE_THERM_STATUS = 0x1B1;
+
+// AMD SMN アドレス（F17H_M01H_THM_TCON_CUR_TMP - Zen 1〜5 共通）
+static constexpr ULONG64 SMN_THM_TCON_CUR_TMP = 0x00059800;
+
+// IOCTL_PIO_EXECUTE_FN 入力バッファ（PawnIOLib.cpp の pawnio_execute_nt に準拠）
+//
+// 先頭 32 バイトが関数名（ゼロ埋め）、以降が ULONG64 の入力パラメータ配列。
+static constexpr size_t FN_NAME_LENGTH = 32;
+struct PawnIOExecuteInput {
+    char    fn_name[FN_NAME_LENGTH];  // 関数名（最大 31 文字 + ヌル終端）
+    ULONG64 param;                    // 入力パラメータ（MSR/SMN アドレス）
 };
-#pragma pack(pop)
+
+enum class CpuVendor { Unknown, Intel, Amd };
 
 // PDH カウンタの実装詳細
 struct CpuCollector::Impl {
@@ -45,11 +47,39 @@ struct CpuCollector::Impl {
     PDH_HCOUNTER counter_total  = nullptr;
     std::vector<PDH_HCOUNTER> counter_cores;
 
-    // CoreTemp 共有メモリハンドルキャッシュ（起動中は保持し毎秒の OpenFileMapping を省く）
-    HANDLE hmap_coretemp = nullptr;
+    // PawnIO デバイスハンドルと状態
+    HANDLE    hdev_pawnio  = INVALID_HANDLE_VALUE;
+    bool      pawnio_avail = false;        // init() 成功フラグ
+    CpuVendor vendor       = CpuVendor::Unknown;
+    UINT32    tjmax        = 100;          // TjMax キャッシュ（Intel のみ、MSR 0x1A2 から取得）
+    HANDLE    hmutex_pci   = nullptr;      // AMD SMN 読み取り時の PCI アクセス排他ミューテックス
 
     char cpu_name[48] = {};  // CPUID ブランド文字列
 };
+
+// PawnIO モジュール関数を呼び出すヘルパー
+//
+// DeviceIoControl で IOCTL_PIO_EXECUTE_FN を呼び出し、指定した fn 関数を実行する。
+// 成功時は true を返し out_value に結果を格納する。
+static bool pawnio_call(HANDLE hdev, const char* fn, ULONG64 param, ULONG64& out_value) {
+    PawnIOExecuteInput in_buf{};
+    lstrcpynA(in_buf.fn_name, fn, static_cast<int>(FN_NAME_LENGTH));
+    in_buf.param = param;
+
+    ULONG64 out_val = 0;
+    DWORD bytes_ret = 0;
+    BOOL ok = DeviceIoControl(
+        hdev,
+        IOCTL_PIO_EXECUTE_FN,
+        &in_buf, static_cast<DWORD>(sizeof(in_buf)),
+        &out_val, static_cast<DWORD>(sizeof(out_val)),
+        &bytes_ret,
+        nullptr);
+
+    if (!ok || bytes_ret < sizeof(ULONG64)) return false;
+    out_value = out_val;
+    return true;
+}
 
 bool CpuCollector::init() {
     impl_ = new Impl();
@@ -130,6 +160,118 @@ bool CpuCollector::init() {
     }
 
     log_info("CPU collector initialized: %s", impl_->cpu_name);
+
+    // CPU ベンダ検出（CPUID leaf 0）
+    {
+        int v[4] = {};
+        __cpuid(v, 0);
+        char vendor_id[13] = {};
+        memcpy(vendor_id + 0, &v[1], 4);  // EBX
+        memcpy(vendor_id + 4, &v[3], 4);  // EDX
+        memcpy(vendor_id + 8, &v[2], 4);  // ECX
+        if      (strcmp(vendor_id, "GenuineIntel") == 0) impl_->vendor = CpuVendor::Intel;
+        else if (strcmp(vendor_id, "AuthenticAMD") == 0) impl_->vendor = CpuVendor::Amd;
+    }
+    if (impl_->vendor == CpuVendor::Unknown) {
+        log_error("PawnIO: unsupported CPU vendor, temperature unavailable");
+        return true;
+    }
+
+    // --- PawnIO ドライバ経由の CPU 温度取得初期化 ---
+    //
+    // PawnIO ドライバが未インストールの場合は temp_avail = false のまま（N/A 表示）。
+    // NVML パターンと同様に、ドライバが利用可能な場合のみ温度を取得する。
+
+    // デバイスオープン（\\.\PawnIO は PawnIO ドライバが作成する DosDevices シンボリックリンク）
+    impl_->hdev_pawnio = CreateFileW(
+        L"\\\\.\\PawnIO",
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+
+    if (impl_->hdev_pawnio == INVALID_HANDLE_VALUE) {
+        log_error("PawnIO: device not found (install PawnIO driver for CPU temp)");
+        return true;  // 温度なしで継続
+    }
+
+    // exe と同ディレクトリの IntelMSR.bin を読み込む
+    wchar_t exe_path[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    // exe パスの末尾ファイル名を IntelMSR.bin に置換
+    wchar_t* last_sep = wcsrchr(exe_path, L'\\');
+    if (!last_sep) {
+        log_error("PawnIO: failed to resolve exe path");
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
+    const wchar_t* bin_name = (impl_->vendor == CpuVendor::Amd) ? L"AMDFamily17.bin" : L"IntelMSR.bin";
+    wcscpy_s(last_sep + 1, MAX_PATH - (last_sep + 1 - exe_path), bin_name);
+
+    HANDLE hfile = CreateFileW(exe_path, GENERIC_READ, FILE_SHARE_READ,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hfile == INVALID_HANDLE_VALUE) {
+        log_error("PawnIO: %ls not found", bin_name);
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
+
+    DWORD bin_size = GetFileSize(hfile, nullptr);
+    if (bin_size == INVALID_FILE_SIZE) {
+        log_error("PawnIO: failed to get %ls size", bin_name);
+        CloseHandle(hfile);
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
+    std::vector<BYTE> bin_data(bin_size);
+    DWORD read_bytes = 0;
+    BOOL read_ok = ReadFile(hfile, bin_data.data(), bin_size, &read_bytes, nullptr);
+    CloseHandle(hfile);
+
+    if (!read_ok || read_bytes != bin_size) {
+        log_error("PawnIO: failed to read %ls", bin_name);
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
+
+    // モジュールをロード
+    DWORD bytes_ret = 0;
+    BOOL load_ok = DeviceIoControl(
+        impl_->hdev_pawnio,
+        IOCTL_PIO_LOAD_BINARY,
+        bin_data.data(), bin_size,
+        nullptr, 0,
+        &bytes_ret, nullptr);
+
+    if (!load_ok) {
+        log_error("PawnIO: IOCTL_PIO_LOAD_BINARY failed (err=%lu)", GetLastError());
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
+
+    if (impl_->vendor == CpuVendor::Intel) {
+        // TjMax を取得してキャッシュ（MSR_IA32_TEMPERATURE_TARGET ビット [23:16]）
+        ULONG64 tgt_val = 0;
+        if (pawnio_call(impl_->hdev_pawnio, "ioctl_read_msr", MSR_IA32_TEMPERATURE_TARGET, tgt_val)) {
+            impl_->tjmax = static_cast<UINT32>((tgt_val >> 16) & 0xFF);
+            if (impl_->tjmax == 0) impl_->tjmax = 100;  // 不正値はデフォルトにフォールバック
+        }
+        impl_->pawnio_avail = true;
+        log_info("PawnIO: CPU temp init OK (Intel TjMax=%u)", impl_->tjmax);
+    }
+    else {
+        // AMD: SMN 読み取りの PCI アクセス排他ミューテックスを作成/取得（LibreHardwareMonitor 互換）
+        impl_->hmutex_pci  = CreateMutexW(nullptr, FALSE, L"Global\\Access_PCI");
+        impl_->pawnio_avail = true;
+        log_info("PawnIO: CPU temp init OK (AMD SMN)");
+    }
     return true;
 }
 
@@ -157,67 +299,53 @@ void CpuCollector::update(CpuMetrics& out) {
         }
     }
 
-    // CoreTemp 共有メモリから CPU 温度を取得する
-    //
-    // 全コアの最大温度を out.temp_celsius に格納する。
-    // CoreTemp が起動していない場合は temp_avail = false のまま（--℃ 表示）。
-    // ハンドルは Impl にキャッシュして毎秒の OpenFileMapping コストを回避する。
-    if (!impl_->hmap_coretemp) {
-        impl_->hmap_coretemp = OpenFileMapping(
-            FILE_MAP_READ, FALSE, TEXT("CoreTempMappingObjectEx"));
-    }
-    if (!impl_->hmap_coretemp) {
+    // PawnIO ドライバ経由で CPU パッケージ温度を取得する（Intel: MSR, AMD: SMN）
+    if (!impl_->pawnio_avail) {
         out.temp_avail = false;
         return;
     }
 
-    const auto* p = reinterpret_cast<const CoreTempSharedDataEx*>(
-        MapViewOfFile(impl_->hmap_coretemp, FILE_MAP_READ, 0, 0, 0));
-    if (!p) {
-        // ハンドルが無効（CoreTemp 終了 → 再起動後の可能性）：次回再取得する
-        CloseHandle(impl_->hmap_coretemp);
-        impl_->hmap_coretemp = nullptr;
-        out.temp_avail = false;
-        return;
-    }
-
-    float max_temp = -1.f;
-    const UINT cores   = p->uiCoreCnt < 256u ? p->uiCoreCnt : 256u;
-    const UINT cpu_cnt = p->uiCPUCnt  > 0u   ? p->uiCPUCnt  : 1u;
-
-    for (UINT i = 0; i < cores; ++i) {
-        float t = p->fTemp[i];
-
-        if (p->ucFahrenheit) {
-            t = (t - 32.f) * 5.f / 9.f;
+    if (impl_->vendor == CpuVendor::Intel) {
+        // MSR_IA32_PACKAGE_THERM_STATUS（0x1B1）ビット [22:16] = Digital Readout、ビット 31 = Reading Valid
+        // 温度 = TjMax - Digital Readout
+        ULONG64 therm_val = 0;
+        if (!pawnio_call(impl_->hdev_pawnio, "ioctl_read_msr", MSR_IA32_PACKAGE_THERM_STATUS, therm_val)
+                || (therm_val >> 31) == 0) {
+            out.temp_avail = false;
+            return;
         }
-
-        if (p->ucDeltaToTjMax) {
-            // fTemp が TjMax までの差分を表す場合、絶対温度に変換する
-            // cores_per_cpu が 0 になる不正値（cores < cpu_cnt）もゼロ除算にならないよう 1 にクランプする
-            const UINT cores_per_cpu = (cpu_cnt > 1 && cores >= cpu_cnt) ? (cores / cpu_cnt) : 1u;
-            const UINT cpu_idx = i / cores_per_cpu;
-            t = static_cast<float>(p->uiTjMax[cpu_idx]) - t;
-        }
-
-        if (t > max_temp) max_temp = t;
-    }
-
-    UnmapViewOfFile(p);
-
-    if (max_temp >= 0.f) {
-        out.temp_celsius = max_temp;
+        const UINT32 readout = static_cast<UINT32>((therm_val >> 16) & 0x7F);
+        out.temp_celsius = static_cast<float>(impl_->tjmax) - static_cast<float>(readout);
         out.temp_avail   = true;
     }
     else {
-        out.temp_avail = false;
+        // AMD: SMN レジスタ THM_TCON_CUR_TMP（0x59800）から Tctl 温度を取得
+        // 温度 = (raw >> 21) * 125 / 1000、ビット 19 = オフセットフラグ（-49°C）
+        if (impl_->hmutex_pci) {
+            if (WaitForSingleObject(impl_->hmutex_pci, 100) != WAIT_OBJECT_0) {
+                out.temp_avail = false;
+                return;
+            }
+        }
+        ULONG64 raw = 0;
+        const bool ok = pawnio_call(impl_->hdev_pawnio, "ioctl_read_smn", SMN_THM_TCON_CUR_TMP, raw);
+        if (impl_->hmutex_pci) ReleaseMutex(impl_->hmutex_pci);
+        if (!ok) {
+            out.temp_avail = false;
+            return;
+        }
+        float temp = static_cast<float>(raw >> 21) * 125.0f / 1000.0f;
+        if (raw & 0x80000) temp -= 49.0f;
+        out.temp_celsius = temp;
+        out.temp_avail   = true;
     }
 }
 
 void CpuCollector::shutdown() {
     if (!impl_) return;
-    if (impl_->query)         { PdhCloseQuery(impl_->query); impl_->query = nullptr; }
-    if (impl_->hmap_coretemp) { CloseHandle(impl_->hmap_coretemp); impl_->hmap_coretemp = nullptr; }
+    if (impl_->query)                               { PdhCloseQuery(impl_->query); impl_->query = nullptr; }
+    if (impl_->hdev_pawnio != INVALID_HANDLE_VALUE) { CloseHandle(impl_->hdev_pawnio); impl_->hdev_pawnio = INVALID_HANDLE_VALUE; }
+    if (impl_->hmutex_pci)                          { CloseHandle(impl_->hmutex_pci); impl_->hmutex_pci = nullptr; }
     delete impl_;
     impl_ = nullptr;
 }

@@ -33,4 +33,43 @@ else {
     Write-Host "json.hpp already exists, skipping."
 }
 
+# IntelMSR.bin / AMDFamily17.bin（PawnIO.Modules から CPU 温度取得用モジュール）
+$dataDir = Join-Path $PSScriptRoot "..\data"
+if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }
+
+$msrDest = Join-Path $dataDir "IntelMSR.bin"
+$amdDest = Join-Path $dataDir "AMDFamily17.bin"
+
+if (-not (Test-Path $msrDest) -or -not (Test-Path $amdDest)) {
+    Write-Host "Downloading PawnIO.Modules..."
+    $zipUrl = "https://github.com/namazso/PawnIO.Modules/releases/download/0.2.4/release_0_2_4.zip"
+    $zipTemp = [System.IO.Path]::GetTempFileName() + ".zip"
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipTemp
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($zipTemp)
+    foreach ($entry in $zip.Entries) {
+        if ($entry.Name -eq "IntelMSR.bin" -and -not (Test-Path $msrDest)) {
+            $stream = $entry.Open()
+            $fs = [System.IO.File]::Create($msrDest)
+            $stream.CopyTo($fs)
+            $fs.Close()
+            $stream.Close()
+            Write-Host "  -> $msrDest"
+        }
+        if ($entry.Name -eq "AMDFamily17.bin" -and -not (Test-Path $amdDest)) {
+            $stream = $entry.Open()
+            $fs = [System.IO.File]::Create($amdDest)
+            $stream.CopyTo($fs)
+            $fs.Close()
+            $stream.Close()
+            Write-Host "  -> $amdDest"
+        }
+    }
+    $zip.Dispose()
+    Remove-Item $zipTemp -Force
+}
+else {
+    Write-Host "IntelMSR.bin and AMDFamily17.bin already exist, skipping."
+}
+
 Write-Host "All dependencies ready."

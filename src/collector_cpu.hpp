@@ -2,11 +2,11 @@
 #pragma once
 #include "metrics.hpp"
 
-// CPU 使用率（PDH）と温度（CoreTemp 共有メモリ）の収集
+// CPU 使用率（PDH）と温度（PawnIO ドライバ経由の MSR 読み取り）の収集
 //
 // PDH カウンタで全体使用率と論理コア別使用率を取得する。
-// CoreTemp 共有メモリ（CoreTempMappingObjectEx）で CPU 温度を取得する。
-// CoreTemp が起動していない場合は temp_avail = false になる。
+// PawnIO ドライバ（\\.\PawnIO）経由で MSR を直接読み取り CPU パッケージ温度を取得する。
+// PawnIO ドライバが未インストールの場合は temp_avail = false になる。
 class CpuCollector {
 public:
     // PDH カウンタを初期化する。
