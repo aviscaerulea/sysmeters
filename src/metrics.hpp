@@ -20,7 +20,7 @@ struct CpuMetrics {
     float total_pct    = 0.f;
     float core_pct[16] = {};             // 論理コア別使用率（%）
     float temp_celsius = 0.f;           // CPU 温度
-    bool  temp_avail   = false;         // WMI 温度取得成功フラグ
+    bool  temp_avail   = false;         // CoreTemp 温度取得成功フラグ
     char  name[48]     = {};            // CPU ブランド名（CPUID 取得）
 };
 
