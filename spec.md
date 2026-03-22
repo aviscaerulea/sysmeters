@@ -134,7 +134,7 @@ Applied to CPU, GPU, and Disk (NVMe) temperatures.
 |---|---|
 | CPU polling interval | 1.0 s |
 | Fast polling interval | 1.0 s (GPU/Disk/Net) |
-| Slow polling interval | 5.0 s (RAM/VRAM) |
+| Slow polling interval | 2.0 s (RAM/VRAM) |
 | Claude polling interval | 60 s |
 | OS uptime interval | 60 s |
 | OS version interval | 3600 s (1 hour) |
@@ -142,7 +142,7 @@ Applied to CPU, GPU, and Disk (NVMe) temperatures.
 | Claude API cache (Usage) | 360 s |
 | Claude API cache (Plan) | 3600 s |
 | S.M.A.R.T. update interval | 3600 s (1 hour) |
-| Disk space update interval | 300 s (5 minutes) |
+| Disk space update interval | 5 s (5 seconds) |
 | Global IP update interval | 300 s (5 minutes) |
 
 ## Claude API Specification
