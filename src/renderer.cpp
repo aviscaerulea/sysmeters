@@ -258,6 +258,21 @@ void Renderer::draw_hbar(float val, float max_val, D2D1_RECT_F rect, uint32_t co
     }
 }
 
+// コアバー補間アニメーション（30fps で呼ばれる）
+//
+// core_disp_ を m.core_pct に向けて lerp し、合計変化量が閾値を超えれば true を返す。
+bool Renderer::update_core_animation(const CpuMetrics& m) {
+    constexpr float LERP_K   = 0.25f;  // 補間係数（1 フレームで残差の 25% ずつ近づく）
+    constexpr float DONE_THR = 0.5f;   // 全コア合計の変化量がこれ未満なら描画不要
+    float total_delta = 0.f;
+    for (int i = 0; i < 16; ++i) {
+        float delta = m.core_pct[i] - core_disp_[i];
+        core_disp_[i] += delta * LERP_K;
+        total_delta += (delta < 0.f ? -delta : delta);
+    }
+    return total_delta >= DONE_THR;
+}
+
 // 縦バー描画（0-100% の高さ）
 void Renderer::draw_vbar(float pct, D2D1_RECT_F rect, uint32_t color_rgb) {
     // 背景
@@ -354,8 +369,8 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     float core_x = x;
     for (int i = 0; i < N_CORES; ++i) {
         D2D1_RECT_F cr = D2D1::RectF(core_x, y, core_x + bar_w, y + CORE_BAR_H);
-        uint32_t core_col = (m.core_pct[i] > 95.f) ? 0xEF5350 : cfg.col_cpu_core;
-        draw_vbar(m.core_pct[i], cr, core_col);
+        uint32_t core_col = (core_disp_[i] > 95.f) ? 0xEF5350 : cfg.col_cpu_core;
+        draw_vbar(core_disp_[i], cr, core_col);
         core_x += bar_w + GAP_BAR;
     }
     y += CORE_BAR_H + GAP;

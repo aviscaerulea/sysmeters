@@ -134,8 +134,10 @@ Applied to CPU, GPU, and Disk (NVMe) temperatures.
 
 | Item | Value |
 |---|---|
-| CPU polling interval | 1.0 s |
-| Fast polling interval | 1.0 s (GPU/Disk/Net) |
+| CPU polling interval | 0.9 s |
+| GPU polling interval | 0.9 s (CPU と同一タイマー) |
+| Fast polling interval | 1.0 s (Disk/Net) |
+| Core bar animation interval | 33 ms (≒ 30fps, lerp to target) |
 | Slow polling interval | 2.0 s (RAM/VRAM) |
 | Claude polling interval | 60 s |
 | OS uptime interval | 60 s |

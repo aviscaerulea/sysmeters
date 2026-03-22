@@ -19,6 +19,12 @@ public:
     // メトリクスを描画する（WM_PAINT から呼ぶ）
     void paint(const AllMetrics& m, const AppConfig& cfg);
 
+    // コアバーの補間アニメーションを 1 ステップ進める
+    //
+    // core_disp_ を m.core_pct に向けて lerp し、合計変化量が閾値を超えれば true を返す。
+    // true の場合は呼び出し元が InvalidateRect を行う。
+    bool update_core_animation(const CpuMetrics& m);
+
     // デバイスロスト時（WM_SIZE 等）にリソースを再作成する
     void resize(UINT w, UINT h);
 
@@ -45,6 +51,9 @@ private:
     ID2D1SolidColorBrush*  brush_fill_  = nullptr;  // 汎用（後で色を変えて使う）
 
     int preferred_h_ = 750;
+
+    // コアバーのアニメーション補間用表示値（update_core_animation で更新）
+    float core_disp_[16] = {};
 
     void create_device_resources(const AppConfig& cfg);
     void release_device_resources();

@@ -27,20 +27,22 @@
 // GitHub リポジトリ URL
 static constexpr LPCWSTR GITHUB_URL = L"https://github.com/aviscaerulea/sysmeters";
 
-static constexpr int TIMER_CPU        = 1;  // CPU 専用タイマー ID
-static constexpr int TIMER_FAST       = 2;  // 高速タイマー ID（GPU/Disk/Net）
+static constexpr int TIMER_CPU        = 1;  // CPU/GPU タイマー ID（0.9 秒）
+static constexpr int TIMER_FAST       = 2;  // 高速タイマー ID（Disk/Net）
 static constexpr int TIMER_SLOW       = 3;  // 低速タイマー ID（RAM/VRAM、2 秒）
 static constexpr int TIMER_CLAUDE     = 4;  // Claude 専用タイマー ID（5h/7d 更新）
 static constexpr int TIMER_DISK_SPACE = 5;  // Disk 空き容量タイマー ID（5 秒更新）
 static constexpr int TIMER_SMART      = 6;  // NVMe S.M.A.R.T. タイマー ID（1 時間更新）
 static constexpr int TIMER_IP         = 7;  // グローバル IP タイマー ID（5 分更新）
-static constexpr int TIMER_CPU_MS         = 1000;      // 1.0 秒
+static constexpr int TIMER_ANIM       = 8;  // アニメーションタイマー ID（コアバー補間）
+static constexpr int TIMER_CPU_MS         = 900;        // 0.9 秒
 static constexpr int TIMER_FAST_MS        = 1000;      // 1.0 秒
 static constexpr int TIMER_SLOW_MS        = 2000;      // 2.0 秒
 static constexpr int TIMER_CLAUDE_MS      = 60000;     // 60 秒
 static constexpr int TIMER_DISK_SPACE_MS  = 5000;      // 5 秒
 static constexpr int TIMER_SMART_MS       = 3600000;   // 1 時間
 static constexpr int TIMER_IP_MS          = 300000;    // 5 分
+static constexpr int TIMER_ANIM_MS        = 33;        // ≒ 30fps
 static constexpr int MIN_CLIENT_W = 461;  // 水平リサイズの最低クライアント幅（px）
 static constexpr int MIN_CLIENT_H = 430;  // コンテンツ高さの最低値（px）
 
@@ -144,6 +146,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     SetTimer(hwnd_, TIMER_DISK_SPACE, TIMER_DISK_SPACE_MS, nullptr);
     SetTimer(hwnd_, TIMER_SMART,      TIMER_SMART_MS,      nullptr);
     SetTimer(hwnd_, TIMER_IP,         TIMER_IP_MS,         nullptr);
+    SetTimer(hwnd_, TIMER_ANIM,       TIMER_ANIM_MS,       nullptr);
 
     // WM_GETMINMAXINFO 用の最小ウィンドウ幅を事前計算
     {
@@ -369,6 +372,7 @@ void AppWindow::destroy() {
     KillTimer(hwnd_, TIMER_DISK_SPACE);
     KillTimer(hwnd_, TIMER_SMART);
     KillTimer(hwnd_, TIMER_IP);
+    KillTimer(hwnd_, TIMER_ANIM);
     remove_tray_icon();
 
     if (col_cpu_)    { col_cpu_->shutdown();    delete col_cpu_;    }
@@ -392,12 +396,12 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_TIMER:
         if (wp == TIMER_CPU) {
-            // CPU 専用更新（0.8 秒）
+            // CPU/GPU 更新（0.9 秒）
             col_cpu_->update(metrics_->cpu);
+            col_gpu_->update_gpu(metrics_->gpu);
         }
         else if (wp == TIMER_FAST) {
-            // 高速更新（1.0 秒）：GPU/Disk/Net
-            col_gpu_->update_gpu(metrics_->gpu);
+            // 高速更新（1.0 秒）：Disk/Net
             col_disk_->update(metrics_->disk_c, metrics_->disk_d);
             col_net_->update(metrics_->net);
         }
@@ -423,6 +427,12 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (wp == TIMER_IP) {
             // グローバル IP 更新（5 分）
             col_ip_->update();
+        }
+        else if (wp == TIMER_ANIM) {
+            // コアバー補間アニメーション（30fps）：変化があれば再描画
+            if (renderer_->update_core_animation(metrics_->cpu))
+                InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
         }
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);
