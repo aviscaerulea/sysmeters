@@ -16,7 +16,7 @@ Displays various metrics in real time on a persistent overlay window rendered wi
 | Tray | Icon in system tray (Shell_NotifyIcon) |
 | Menu | Right-click tray: version display (click to open GitHub), always on top (toggle), config file, log file, exit |
 | Always-on-top setting | Persisted in `HKCU\Software\sysmeters\Topmost` (REG_DWORD); default is non-topmost |
-| Privileges | Admin required only for CPU temperature (WMI `ROOT\WMI` access) |
+| Privileges | No admin required; CPU temperature requires CoreTemp to be running |
 
 ## Meter Specification
 
@@ -40,7 +40,7 @@ Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsof
 | Per-core usage | 16 vertical bars side by side (0-100%, logical core count) |
 | Temperature | Horizontal bar (0-100°C) + value (°C), 3-level color coding |
 
-Data source: PDH (usage), WMI `MSAcpi_ThermalZoneTemperature` (temperature, admin required)
+Data source: PDH (usage), CoreTemp shared memory `CoreTempMappingObjectEx` (temperature, CoreTemp must be running)
 
 ### GPU
 
@@ -170,7 +170,7 @@ File-based logging that records startup information and critical errors.
 | Tray menu | "Open Log" → opens today's log in the default editor (opens directory if file not yet created) |
 
 Logged events: startup/shutdown, window creation failure, collector initialization success/failure, Claude API HTTP/JSON errors, config file parse errors.
-Per-second polling failures (PDH queries, WMI queries, etc.) are not logged.
+Per-second polling failures (PDH queries, CoreTemp shared memory reads, etc.) are not logged.
 
 ## Build Specification
 
