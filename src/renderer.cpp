@@ -634,7 +634,7 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     D2D1_RECT_F tr = D2D1::RectF(x, y, x + 120.f, y + LINE_H);
     render_target_->DrawText(labelbuf, static_cast<UINT32>(wcslen(labelbuf)), font_small_, tr, brush_text_);
 
-    float max_val = max(100.f, max(buf_max(m.send_history), buf_max(m.recv_history)));
+    float max_val = max(500.f, max(buf_max(m.send_history), buf_max(m.recv_history)));
 
     D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + ww, y + LINE_H + GRAPH_H);
     draw_area_graph(m.recv_history, max_val, gr, cfg.col_net_recv);
