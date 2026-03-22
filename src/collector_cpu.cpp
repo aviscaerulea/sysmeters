@@ -5,30 +5,48 @@
 #include <windows.h>
 #include <pdh.h>
 #include <pdhmsg.h>
-// WMI
-#define _WIN32_DCOM
-#include <comdef.h>
-#include <wbemidl.h>
-#pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "pdh.lib")
 #include <intrin.h>
 
 #include <vector>
-#include <string>
 #include <cstdio>
 #include <cstring>
 
-// PDH カウンタ + WMI 接続の実装詳細
+// CoreTemp 共有メモリ構造体（CoreTempMappingObjectEx）
+//
+// CoreTemp が公開する共有メモリのレイアウト。
+// 参考: https://www.alcpu.com/CoreTemp/developers.html
+#pragma pack(push, 1)
+struct CoreTempSharedDataEx {
+    UINT  uiLoad[256];       // コア別 CPU 使用率 (%)
+    UINT  uiTjMax[128];      // CPU 別 Tj Max 温度
+    UINT  uiCoreCnt;         // 全 CPU 合計コア数
+    UINT  uiCPUCnt;          // 物理 CPU 数
+    FLOAT fTemp[256];        // コア別温度（℃ or ℉、ucDeltaToTjMax に応じて解釈が異なる）
+    FLOAT fVID;
+    FLOAT fCPUSpeed;
+    FLOAT fFSBSpeed;
+    FLOAT fMultiplier;
+    CHAR  sCPUName[100];
+    BYTE  ucFahrenheit;      // 1=℉ 表示、0=℃ 表示
+    BYTE  ucDeltaToTjMax;    // 1=TjMax までの差分、0=絶対温度
+    BYTE  ucTdpSupported;
+    BYTE  ucPowerSupported;
+    UINT  uiStructVersion;   // 2 以上で以下フィールドが有効
+    UINT  uiTdp[128];
+    FLOAT fPower[128];
+    FLOAT fMultipliers[256];
+};
+#pragma pack(pop)
+
+// PDH カウンタの実装詳細
 struct CpuCollector::Impl {
-    // PDH
     PDH_HQUERY   query          = nullptr;
     PDH_HCOUNTER counter_total  = nullptr;
     std::vector<PDH_HCOUNTER> counter_cores;
 
-    // WMI
-    IWbemLocator*  wbem_locator  = nullptr;
-    IWbemServices* wbem_services = nullptr;
-    bool           wmi_ok        = false;
+    // CoreTemp 共有メモリハンドルキャッシュ（起動中は保持し毎秒の OpenFileMapping を省く）
+    HANDLE hmap_coretemp = nullptr;
 
     char cpu_name[48] = {};  // CPUID ブランド文字列
 };
@@ -111,38 +129,7 @@ bool CpuCollector::init() {
         strncpy_s(impl_->cpu_name, sizeof(impl_->cpu_name), trimmed, _TRUNCATE);
     }
 
-    // --- WMI 初期化 ---
-    // CoInitializeEx は main で呼ばれている前提
-    HRESULT hr = CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER,
-                                  IID_IWbemLocator, reinterpret_cast<void**>(&impl_->wbem_locator));
-    if (FAILED(hr)) {
-        log_error("CPU WMI CoCreateInstance failed (hr=0x%08x)", static_cast<unsigned>(hr));
-        return true;  // PDH は OK なので true を返す
-    }
-
-    hr = impl_->wbem_locator->ConnectServer(
-        _bstr_t(L"ROOT\\WMI"), nullptr, nullptr, nullptr, 0, nullptr, nullptr,
-        &impl_->wbem_services);
-    if (FAILED(hr)) {
-        log_error("CPU WMI ConnectServer failed (hr=0x%08x)", static_cast<unsigned>(hr));
-        impl_->wbem_locator->Release();
-        impl_->wbem_locator = nullptr;
-        return true;
-    }
-
-    hr = CoSetProxyBlanket(impl_->wbem_services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE,
-                           nullptr, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
-                           nullptr, EOAC_NONE);
-    if (FAILED(hr)) {
-        impl_->wbem_services->Release();
-        impl_->wbem_services = nullptr;
-        impl_->wbem_locator->Release();
-        impl_->wbem_locator = nullptr;
-        return true;
-    }
-
-    impl_->wmi_ok = true;
-    log_info("CPU collector initialized: %s (WMI: OK)", impl_->cpu_name);
+    log_info("CPU collector initialized: %s", impl_->cpu_name);
     return true;
 }
 
@@ -170,41 +157,56 @@ void CpuCollector::update(CpuMetrics& out) {
         }
     }
 
-    // WMI 温度取得
-    if (!impl_->wmi_ok || !impl_->wbem_services) {
+    // CoreTemp 共有メモリから CPU 温度を取得する
+    //
+    // 全コアの最大温度を out.temp_celsius に格納する。
+    // CoreTemp が起動していない場合は temp_avail = false のまま（--℃ 表示）。
+    // ハンドルは Impl にキャッシュして毎秒の OpenFileMapping コストを回避する。
+    if (!impl_->hmap_coretemp) {
+        impl_->hmap_coretemp = OpenFileMapping(
+            FILE_MAP_READ, FALSE, TEXT("CoreTempMappingObjectEx"));
+    }
+    if (!impl_->hmap_coretemp) {
         out.temp_avail = false;
         return;
     }
 
-    IEnumWbemClassObject* enumerator = nullptr;
-    HRESULT hr = impl_->wbem_services->ExecQuery(
-        _bstr_t(L"WQL"),
-        _bstr_t(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature"),
-        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, nullptr, &enumerator);
-    if (FAILED(hr) || !enumerator) { out.temp_avail = false; return; }
-
-    IWbemClassObject* obj = nullptr;
-    ULONG returned = 0;
-    float sum = 0.f;
-    int   cnt = 0;
-
-    // タイムアウト 500ms（WBEM_INFINITE だと WMI 無応答時に UI スレッドがブロックされる）
-    while (enumerator->Next(500, 1, &obj, &returned) == WBEM_S_NO_ERROR) {
-        VARIANT vtProp;
-        VariantInit(&vtProp);
-        if (SUCCEEDED(obj->Get(L"CurrentTemperature", 0, &vtProp, nullptr, nullptr))) {
-            // WMI 温度は 10 分の 1 ケルビン（デシケルビン）
-            float kelvin = static_cast<float>(vtProp.uintVal) / 10.f;
-            sum += kelvin - 273.15f;
-            ++cnt;
-        }
-        VariantClear(&vtProp);
-        obj->Release();
+    const auto* p = reinterpret_cast<const CoreTempSharedDataEx*>(
+        MapViewOfFile(impl_->hmap_coretemp, FILE_MAP_READ, 0, 0, 0));
+    if (!p) {
+        // ハンドルが無効（CoreTemp 終了 → 再起動後の可能性）：次回再取得する
+        CloseHandle(impl_->hmap_coretemp);
+        impl_->hmap_coretemp = nullptr;
+        out.temp_avail = false;
+        return;
     }
-    enumerator->Release();
 
-    if (cnt > 0) {
-        out.temp_celsius = sum / static_cast<float>(cnt);
+    float max_temp = -1.f;
+    const UINT cores   = p->uiCoreCnt < 256u ? p->uiCoreCnt : 256u;
+    const UINT cpu_cnt = p->uiCPUCnt  > 0u   ? p->uiCPUCnt  : 1u;
+
+    for (UINT i = 0; i < cores; ++i) {
+        float t = p->fTemp[i];
+
+        if (p->ucFahrenheit) {
+            t = (t - 32.f) * 5.f / 9.f;
+        }
+
+        if (p->ucDeltaToTjMax) {
+            // fTemp が TjMax までの差分を表す場合、絶対温度に変換する
+            // cores_per_cpu が 0 になる不正値（cores < cpu_cnt）もゼロ除算にならないよう 1 にクランプする
+            const UINT cores_per_cpu = (cpu_cnt > 1 && cores >= cpu_cnt) ? (cores / cpu_cnt) : 1u;
+            const UINT cpu_idx = i / cores_per_cpu;
+            t = static_cast<float>(p->uiTjMax[cpu_idx]) - t;
+        }
+
+        if (t > max_temp) max_temp = t;
+    }
+
+    UnmapViewOfFile(p);
+
+    if (max_temp >= 0.f) {
+        out.temp_celsius = max_temp;
         out.temp_avail   = true;
     }
     else {
@@ -214,9 +216,8 @@ void CpuCollector::update(CpuMetrics& out) {
 
 void CpuCollector::shutdown() {
     if (!impl_) return;
-    if (impl_->query) { PdhCloseQuery(impl_->query); impl_->query = nullptr; }
-    if (impl_->wbem_services) { impl_->wbem_services->Release(); impl_->wbem_services = nullptr; }
-    if (impl_->wbem_locator)  { impl_->wbem_locator->Release();  impl_->wbem_locator  = nullptr; }
+    if (impl_->query)         { PdhCloseQuery(impl_->query); impl_->query = nullptr; }
+    if (impl_->hmap_coretemp) { CloseHandle(impl_->hmap_coretemp); impl_->hmap_coretemp = nullptr; }
     delete impl_;
     impl_ = nullptr;
 }

@@ -3,7 +3,6 @@
 #include "logger.hpp"
 #include "window.hpp"
 #define WIN32_LEAN_AND_MEAN
-#define _WIN32_DCOM
 #include <windows.h>
 #include <objbase.h>
 #pragma comment(lib, "ole32.lib")
@@ -48,18 +47,13 @@ int main() {
         }
     }
 
-    // COM 初期化（WMI 使用のため、マルチスレッド対応）
+    // COM 初期化（マルチスレッド対応）
     HRESULT hr_com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hr_com) && hr_com != RPC_E_CHANGED_MODE) {
         ReleaseMutex(mutex);
         CloseHandle(mutex);
         return 1;
     }
-    // WMI プロキシ認証設定（CoInitializeSecurity を省くと WMI 接続が不安定になる）
-    // 失敗（RPC_E_TOO_LATE 等）は致命的でないため無視する
-    CoInitializeSecurity(nullptr, -1, nullptr, nullptr,
-        RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
-        nullptr, EOAC_NONE, nullptr);
 
     AppConfig cfg = load_config(get_config_path());
     log_init(cfg.log_dir);
