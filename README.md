@@ -44,7 +44,7 @@ out\sysmeters.exe
 ## 動作要件
 
 - Windows 11（64bit）
-- CPU 温度を取得する場合は**管理者権限**が必要（WMI アクセスのため）
+- CPU 温度を表示するには **CoreTemp** が起動している必要がある
 
 ## ビルド
 
