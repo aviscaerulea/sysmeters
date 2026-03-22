@@ -87,7 +87,10 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     wc.lpszClassName = L"SystemMetersWnd";
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = nullptr;
-    if (!RegisterClassExW(&wc)) return false;
+    if (!RegisterClassExW(&wc)) {
+        destroy();
+        return false;
+    }
 
     // 初期クライアントサイズ(win_width × 750)からウィンドウ全体サイズを計算
     RECT adj = {0, 0, cfg_->win_width, 750};
@@ -102,7 +105,10 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
         adj.right - adj.left, adj.bottom - adj.top,
         nullptr, nullptr, hinstance, nullptr);
 
-    if (!hwnd_) return false;
+    if (!hwnd_) {
+        destroy();
+        return false;
+    }
 
     // タイトルバーをダークモードに設定
     BOOL dark = TRUE;
@@ -114,7 +120,10 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     DwmSetWindowAttribute(hwnd_, DWMWA_BORDER_COLOR_,  &cr, sizeof(cr));
 
     // 描画エンジン初期化
-    if (!renderer_->init(hwnd_, *cfg_)) return false;
+    if (!renderer_->init(hwnd_, *cfg_)) {
+        destroy();
+        return false;
+    }
 
     // コレクタ初期化
     col_cpu_->init();
@@ -366,8 +375,8 @@ void AppWindow::destroy() {
     if (col_gpu_)    { col_gpu_->shutdown();    delete col_gpu_;    }
     if (col_disk_)   { col_disk_->shutdown();   delete col_disk_;   }
     if (col_net_)    { col_net_->shutdown();    delete col_net_;    }
-    if (col_claude_) { col_claude_->shutdown(); delete col_claude_; col_claude_ = nullptr; }
-    if (col_ip_)     { col_ip_->shutdown();     delete col_ip_;     col_ip_     = nullptr; }
+    if (col_claude_) { col_claude_->shutdown(); delete col_claude_; }
+    if (col_ip_)     { col_ip_->shutdown();     delete col_ip_; }
     if (col_mem_)    delete col_mem_;  // MemCollector は shutdown() 不要
     if (renderer_)   { renderer_->shutdown(); delete renderer_; }
     delete metrics_;
@@ -485,6 +494,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
 
     case WM_SIZE:
+        if (wp == SIZE_MINIMIZED) return 0;
         // ユーザリサイズ時にクライアント幅を同期（グラフ幅はこれを参照）
         cfg_->win_width = static_cast<int>(LOWORD(lp));
         renderer_->resize(LOWORD(lp), HIWORD(lp));
