@@ -329,11 +329,17 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
-    // 温度（右寄せ、3 段階色。取得不可時は非表示）
-    if (m.temp_avail) {
+    // 温度（右寄せ、3 段階色。取得不可時は "--℃"）
+    {
         wchar_t tbuf[16];
-        swprintf_s(tbuf, L"%3.0f\u2103", m.temp_celsius);
-        set_brush_color(brush_text_, temp_color(m.temp_celsius), 0.9f);
+        if (m.temp_avail) {
+            swprintf_s(tbuf, L"%3.0f\u2103", m.temp_celsius);
+            set_brush_color(brush_text_, temp_color(m.temp_celsius), 0.9f);
+        }
+        else {
+            swprintf_s(tbuf, L"--\u2103");
+            set_brush_color(brush_text_, 0x555555, 0.9f);
+        }
         font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
         font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
