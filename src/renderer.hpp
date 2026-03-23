@@ -50,7 +50,7 @@ private:
     ID2D1SolidColorBrush*  brush_text_  = nullptr;
     ID2D1SolidColorBrush*  brush_fill_  = nullptr;  // 汎用（後で色を変えて使う）
 
-    int preferred_h_ = 750;
+    int preferred_h_ = 880;
 
     // コアバーのアニメーション補間用表示値（update_core_animation で更新）
     float core_disp_[16] = {};

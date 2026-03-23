@@ -8,7 +8,7 @@ struct AppConfig {
     // ウィンドウ
     int   win_x     = 20;
     int   win_y     = 20;
-    int   win_width = 461;
+    int   win_width = 460;
 
     // 配色（0xRRGGBB）
     uint32_t col_background = 0x1A1A1A;
