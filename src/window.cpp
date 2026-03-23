@@ -43,11 +43,10 @@ static constexpr int TIMER_DISK_SPACE_MS  = 5000;      // 5 秒
 static constexpr int TIMER_SMART_MS       = 3600000;   // 1 時間
 static constexpr int TIMER_IP_MS          = 300000;    // 5 分
 static constexpr int TIMER_ANIM_MS        = 33;        // ≒ 30fps
-static constexpr int MIN_CLIENT_W = 461;  // 水平リサイズの最低クライアント幅（px）
 static constexpr int MIN_CLIENT_H = 430;  // コンテンツ高さの最低値（px）
 
-// ウィンドウスタイル定数（WM_GETMINMAXINFO でも参照するため定数化）
-static constexpr DWORD WND_STYLE    = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
+// ウィンドウスタイル定数
+static constexpr DWORD WND_STYLE    = WS_CAPTION | WS_SYSMENU;
 static constexpr DWORD WND_EX_STYLE = WS_EX_TOOLWINDOW;
 
 // DWM 属性 ID（Windows 11 Build 22000 以降。古い SDK でも定義されるようガード）
@@ -94,8 +93,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
         return false;
     }
 
-    // 初期クライアントサイズ(win_width × 750)からウィンドウ全体サイズを計算
-    RECT adj = {0, 0, cfg_->win_width, 750};
+    // 初期クライアントサイズ(win_width × 880)からウィンドウ全体サイズを計算
+    RECT adj = {0, 0, cfg_->win_width, 880};
     AdjustWindowRectEx(&adj, WND_STYLE, FALSE, WND_EX_STYLE);
 
     // ウィンドウ作成（標準タイトルバー＋閉じるボタン、常前面、タスクバー非表示）
@@ -147,13 +146,6 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     SetTimer(hwnd_, TIMER_SMART,      TIMER_SMART_MS,      nullptr);
     SetTimer(hwnd_, TIMER_IP,         TIMER_IP_MS,         nullptr);
     SetTimer(hwnd_, TIMER_ANIM,       TIMER_ANIM_MS,       nullptr);
-
-    // WM_GETMINMAXINFO 用の最小ウィンドウ幅を事前計算
-    {
-        RECT adj_min = {0, 0, MIN_CLIENT_W, 100};
-        AdjustWindowRectEx(&adj_min, WND_STYLE, FALSE, WND_EX_STYLE);
-        min_track_x_ = adj_min.right - adj_min.left;
-    }
 
     // OS 情報初期取得（マシン名は不変、OS ラベルは 1 時間ごとに update_os_label で再取得）
     {
@@ -449,22 +441,6 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND:
         return 1;  // 背景消去を抑制（ちらつき防止）
 
-    // 上下リサイズを無効化（左右のみ許可）
-    case WM_NCHITTEST: {
-        LRESULT hit = DefWindowProcW(hwnd, msg, wp, lp);
-        switch (hit) {
-        case HTBOTTOM:      return HTCLIENT;
-        case HTBOTTOMLEFT:  return HTLEFT;
-        case HTBOTTOMRIGHT: return HTRIGHT;
-        }
-        return hit;
-    }
-
-    // 最低クライアント幅 MIN_CLIENT_W を強制（値は create で事前計算済み）
-    case WM_GETMINMAXINFO:
-        reinterpret_cast<MINMAXINFO*>(lp)->ptMinTrackSize.x = min_track_x_;
-        return 0;
-
     // タスクトレイイベント
     case WM_TRAY: {
         const UINT notif = LOWORD(lp);
@@ -505,8 +481,6 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_SIZE:
         if (wp == SIZE_MINIMIZED) return 0;
-        // ユーザリサイズ時にクライアント幅を同期（グラフ幅はこれを参照）
-        cfg_->win_width = static_cast<int>(LOWORD(lp));
         renderer_->resize(LOWORD(lp), HIWORD(lp));
         return 0;
 

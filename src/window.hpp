@@ -31,7 +31,6 @@ public:
 private:
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
-    int  min_track_x_  = 0;     // WM_GETMINMAXINFO 用：最小ウィンドウ幅（create で計算）
     int  last_pref_h_  = 0;     // update_window_size 早期リターン用キャッシュ
     bool topmost_      = false;  // 最前面表示フラグ（レジストリから読み込み）
 
