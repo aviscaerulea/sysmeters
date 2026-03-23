@@ -262,7 +262,7 @@ void Renderer::draw_hbar(float val, float max_val, D2D1_RECT_F rect, uint32_t co
 //
 // core_disp_ を m.core_pct に向けて lerp し、合計変化量が閾値を超えれば true を返す。
 bool Renderer::update_core_animation(const CpuMetrics& m) {
-    constexpr float LERP_K   = 0.25f;  // 補間係数（1 フレームで残差の 25% ずつ近づく）
+    constexpr float LERP_K   = 0.33f;  // 補間係数（1 フレームで残差の 33% ずつ近づく）
     constexpr float DONE_THR = 0.5f;   // 全コア合計の変化量がこれ未満なら描画不要
     float total_delta = 0.f;
     for (int i = 0; i < 16; ++i) {
