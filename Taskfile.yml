@@ -3,7 +3,8 @@ version: "3"
 
 vars:
   APP_NAME: sysmeters
-  VERSION: 1.2.4
+  VERSION:
+    sh: git describe --tags --always --dirty | sed 's/^v//'
   ARCH: x64
 
 tasks:
