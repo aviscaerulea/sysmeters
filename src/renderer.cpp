@@ -9,6 +9,11 @@
 #include <ctime>
 #include <cwchar>
 
+// 警告色（各セクション共通）
+static constexpr uint32_t COL_WARN_RED    = 0xEF5350;  // 赤（危険・閾値超過）
+static constexpr uint32_t COL_WARN_ORANGE = 0xFFA726;  // オレンジ（注意・温度中間）
+static constexpr uint32_t COL_WARN_YELLOW = 0xd7b437;  // 黄（ペース超過）
+
 // ウィンドウレイアウト定数（クライアント領域内）
 static constexpr float PAD        = 11.f;   // 内側パディング
 static constexpr float SECTION_H  = 24.f;   // セクションラベル高さ（18pt 対応）
@@ -43,10 +48,12 @@ static D2D1_COLOR_F from_rgb(uint32_t rgb, float alpha = 1.f) {
         alpha);
 }
 
+// 温度に応じた警告色の取得
+// caution 以上でオレンジ、critical 以上で赤、未満はグレーを返す。
 uint32_t Renderer::temp_color(float c, float caution, float critical) {
-    if (c >= critical) return 0xEF5350;   // 赤
-    if (c >= caution)  return 0xFFA726;   // オレンジ
-    return 0x888888;                       // グレー（正常範囲）
+    if (c >= critical) return COL_WARN_RED;
+    if (c >= caution)  return COL_WARN_ORANGE;
+    return 0x888888;  // グレー（正常範囲）
 }
 
 bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
@@ -320,7 +327,7 @@ float Renderer::draw_os(const OsMetrics& m, const AppConfig& cfg, float y) {
         else
             swprintf_s(ubuf, L"%02llu時間%02llu分", hours, mins);
 
-        uint32_t uptime_col = (secs > static_cast<ULONGLONG>(cfg.warn_uptime_days) * 86400) ? 0xEF5350 : cfg.col_text;
+        uint32_t uptime_col = (secs > static_cast<ULONGLONG>(cfg.warn_uptime_days) * 86400) ? COL_WARN_RED : cfg.col_text;
         set_brush_color(brush_text_, uptime_col, 0.6f);
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         render_target_->DrawText(ubuf, static_cast<UINT32>(wcslen(ubuf)), font_small_,
@@ -345,7 +352,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
 
     // パーセンテージ（左寄せ、95% 超で赤、font_xlarge_）
     swprintf_s(buf, L"%4.1f%%", m.total_pct);
-    uint32_t cpu_text_col = (m.total_pct > cfg.warn_cpu_pct) ? 0xEF5350 : cfg.col_text;
+    uint32_t cpu_text_col = (m.total_pct > cfg.warn_cpu_pct) ? COL_WARN_RED : cfg.col_text;
     set_brush_color(brush_text_, cpu_text_col, 0.9f);
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
@@ -375,7 +382,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     float core_x = x;
     for (int i = 0; i < N_CORES; ++i) {
         D2D1_RECT_F cr = D2D1::RectF(core_x, y, core_x + bar_w, y + CORE_BAR_H);
-        uint32_t core_col = (core_disp_[i] > cfg.warn_cpu_pct) ? 0xEF5350 : cfg.col_cpu_core;
+        uint32_t core_col = (core_disp_[i] > cfg.warn_cpu_pct) ? COL_WARN_RED : cfg.col_cpu_core;
         draw_vbar(core_disp_[i], cr, core_col);
         core_x += bar_w + GAP_BAR;
     }
@@ -405,7 +412,7 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
 
     // パーセンテージ（左寄せ、95% 超で赤、font_xlarge_）
     swprintf_s(buf, L"%4.1f%%", m.usage_pct);
-    uint32_t gpu_text_col = (m.usage_pct > cfg.warn_gpu_pct) ? 0xEF5350 : cfg.col_text;
+    uint32_t gpu_text_col = (m.usage_pct > cfg.warn_gpu_pct) ? COL_WARN_RED : cfg.col_text;
     set_brush_color(brush_text_, gpu_text_col, 0.9f);
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
@@ -428,7 +435,7 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
     // RAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
-    uint32_t ram_col = (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_text;
+    uint32_t ram_col = (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_text;
     wchar_t buf[64];
     swprintf_s(buf, L"RAM   %5.1f%%", m.usage_pct);
     set_brush_color(brush_text_, ram_col);
@@ -456,7 +463,7 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
 
     // RAM バー：全体使用量を通常色で描画し、WSL 分を同系色の濃いオーバーレイで重ねる
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
-    uint32_t bar_col = (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_graph_fill;
+    uint32_t bar_col = (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_graph_fill;
     draw_hbar(m.usage_pct, 100.f, br, bar_col);
 
     if (m.wsl_gb > 0.f && m.total_gb > 0.f) {
@@ -495,7 +502,7 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
     }
 
     // VRAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
-    uint32_t vram_col = (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_text;
+    uint32_t vram_col = (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_text;
     wchar_t buf[64];
     swprintf_s(buf, L"VRAM  %5.1f%%", m.usage_pct);
     set_brush_color(brush_text_, vram_col);
@@ -513,7 +520,7 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
     y += LINE_H + 2.f;
 
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
-    draw_hbar(m.usage_pct, 100.f, br, (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_graph_fill);
+    draw_hbar(m.usage_pct, 100.f, br, (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_graph_fill);
 
     // 総量テキストをバー右側に表示（棒グラフと縦位置を合わせるため上にシフト）
     wchar_t totbuf[16];
@@ -569,7 +576,7 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
 
         // --- 右 1/3：Space（テキスト + バー + 容量テキスト縦積み）---
         float sx = x + gw + DISK_GAP;
-        uint32_t sp_col = (dm.used_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_text;
+        uint32_t sp_col = (dm.used_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_text;
 
         // テキスト行（"Used" 左寄せ・通常色、パーセンテージ右寄せ・条件付き色）
         D2D1_RECT_F str = D2D1::RectF(sx, y, sx + sw, y + LINE_H);
@@ -583,7 +590,7 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
         // バー（LINE_H の下から BAR_H 分）
-        uint32_t bar_col = (dm.used_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_graph_fill;
+        uint32_t bar_col = (dm.used_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_graph_fill;
         D2D1_RECT_F br = D2D1::RectF(sx, y + LINE_H + 2.f, sx + sw, y + LINE_H + 2.f + BAR_H);
         draw_hbar(dm.used_pct, 100.f, br, bar_col);
 
@@ -608,7 +615,7 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         if (show_smart) {
             wchar_t smuf[32];
             swprintf_s(smuf, L"%.1f GB/h", dm.smart_write_gbh);
-            uint32_t gbh_col = (dm.smart_write_gbh > cfg.warn_disk_gbh) ? 0xEF5350 : cfg.col_text;
+            uint32_t gbh_col = (dm.smart_write_gbh > cfg.warn_disk_gbh) ? COL_WARN_RED : cfg.col_text;
             set_brush_color(brush_text_, gbh_col, 0.45f);
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             float st = gt + INFO_LINE_H - 5.f;
@@ -693,13 +700,14 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     set_brush_color(brush_text_, cfg.col_text);
     render_target_->DrawText(plan_name, static_cast<UINT32>(wcslen(plan_name)), font_small_, hsr, brush_text_);
 
-    // 超過料金テキスト（閾値超で赤、プラン名と同幅のスペースパディングで位置合わせ）
+    // 超過料金テキスト（閾値超で赤）
+    // Consolas はモノスペースのためプラン名文字数分スペースを先頭に積むことで横位置を合わせる
     if (m.extra_enabled) {
-        wchar_t over_buf[48];
+        wchar_t over_buf[80];
         int pad = static_cast<int>(wcslen(plan_name));
         wmemset(over_buf, L' ', pad);
         swprintf_s(over_buf + pad, static_cast<int>(_countof(over_buf)) - pad, L"  over $%.1f", m.extra_used_dollars);
-        uint32_t over_col = (m.extra_used_dollars > cfg.warn_claude_over) ? 0xEF5350 : cfg.col_text;
+        uint32_t over_col = (m.extra_used_dollars > cfg.warn_claude_over) ? COL_WARN_RED : cfg.col_text;
         set_brush_color(brush_text_, over_col);
         render_target_->DrawText(over_buf, static_cast<UINT32>(wcslen(over_buf)), font_small_, hsr, brush_text_);
     }
@@ -741,11 +749,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             uint32_t pct_col;
             IDWriteTextFormat* pct_font;
             if (pct >= warn_pct) {
-                pct_col  = 0xEF5350;
+                pct_col  = COL_WARN_RED;
                 pct_font = font_small_bold_;
             }
             else if (expected_pct > 0.f && pct > expected_pct) {
-                pct_col  = 0xd7b437;
+                pct_col  = COL_WARN_YELLOW;
                 pct_font = font_small_;
             }
             else {
