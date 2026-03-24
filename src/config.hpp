@@ -22,6 +22,18 @@ struct AppConfig {
     uint32_t col_claude_bar = 0xCC923E;  // アンバー（同上）
     uint32_t col_cpu_core   = 0xCC923E;  // アンバー（同上）
 
+    // 警告色の閾値
+    float warn_cpu_pct       = 95.f;  // CPU 使用率（%）
+    float warn_gpu_pct       = 95.f;  // GPU 使用率（%）
+    float warn_mem_pct       = 90.f;  // RAM/VRAM/Disk Space 使用率（%）
+    float warn_claude_5h_pct = 90.f;  // Claude 5h レートリミット（%）
+    float warn_claude_7d_pct = 90.f;  // Claude 7d レートリミット（%）
+    float warn_claude_over   =  0.f;  // Claude 超過料金（ドル）
+    float warn_disk_gbh      = 10.f;  // Disk 書き込み量（GB/h）
+    float warn_temp_caution  = 70.f;  // 温度注意・オレンジ表示（℃）
+    float warn_temp_critical = 90.f;  // 温度危険・赤表示（℃）
+    int   warn_uptime_days   = 7;     // OS アップタイム（日）
+
     // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
     std::string log_dir = "logs";
 

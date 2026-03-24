@@ -43,10 +43,10 @@ static D2D1_COLOR_F from_rgb(uint32_t rgb, float alpha = 1.f) {
         alpha);
 }
 
-uint32_t Renderer::temp_color(float c) {
-    if (c >= 90.f) return 0xEF5350;   // 赤
-    if (c >= 70.f) return 0xFFA726;   // オレンジ
-    return 0x888888;                   // グレー（正常範囲）
+uint32_t Renderer::temp_color(float c, float caution, float critical) {
+    if (c >= critical) return 0xEF5350;   // 赤
+    if (c >= caution)  return 0xFFA726;   // オレンジ
+    return 0x888888;                       // グレー（正常範囲）
 }
 
 bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
@@ -74,6 +74,10 @@ bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
     if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         18.f, L"ja-JP", &font_small_))) return false;
+
+    if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        18.f, L"ja-JP", &font_small_bold_))) return false;
 
     if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
@@ -121,6 +125,7 @@ void Renderer::shutdown() {
     release_device_resources();
     safe_release(&font_normal_);
     safe_release(&font_small_);
+    safe_release(&font_small_bold_);
     safe_release(&font_large_);
     safe_release(&font_xlarge_);
     safe_release(&dwrite_factory_);
@@ -315,7 +320,8 @@ float Renderer::draw_os(const OsMetrics& m, const AppConfig& cfg, float y) {
         else
             swprintf_s(ubuf, L"%02llu時間%02llu分", hours, mins);
 
-        set_brush_color(brush_text_, cfg.col_text, 0.6f);
+        uint32_t uptime_col = (secs > static_cast<ULONGLONG>(cfg.warn_uptime_days) * 86400) ? 0xEF5350 : cfg.col_text;
+        set_brush_color(brush_text_, uptime_col, 0.6f);
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         render_target_->DrawText(ubuf, static_cast<UINT32>(wcslen(ubuf)), font_small_,
             D2D1::RectF(x, y, x + ww, y + SECTION_H), brush_text_);
@@ -339,7 +345,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
 
     // パーセンテージ（左寄せ、95% 超で赤、font_xlarge_）
     swprintf_s(buf, L"%4.1f%%", m.total_pct);
-    uint32_t cpu_text_col = (m.total_pct > 95.f) ? 0xEF5350 : cfg.col_text;
+    uint32_t cpu_text_col = (m.total_pct > cfg.warn_cpu_pct) ? 0xEF5350 : cfg.col_text;
     set_brush_color(brush_text_, cpu_text_col, 0.9f);
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
@@ -349,7 +355,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
         wchar_t tbuf[16];
         if (m.temp_avail) {
             swprintf_s(tbuf, L"%3.0f\u2103", m.temp_celsius);
-            set_brush_color(brush_text_, temp_color(m.temp_celsius), 0.9f);
+            set_brush_color(brush_text_, temp_color(m.temp_celsius, cfg.warn_temp_caution, cfg.warn_temp_critical), 0.9f);
         }
         else {
             swprintf_s(tbuf, L"--\u2103");
@@ -369,7 +375,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     float core_x = x;
     for (int i = 0; i < N_CORES; ++i) {
         D2D1_RECT_F cr = D2D1::RectF(core_x, y, core_x + bar_w, y + CORE_BAR_H);
-        uint32_t core_col = (core_disp_[i] > 95.f) ? 0xEF5350 : cfg.col_cpu_core;
+        uint32_t core_col = (core_disp_[i] > cfg.warn_cpu_pct) ? 0xEF5350 : cfg.col_cpu_core;
         draw_vbar(core_disp_[i], cr, core_col);
         core_x += bar_w + GAP_BAR;
     }
@@ -399,7 +405,7 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
 
     // パーセンテージ（左寄せ、95% 超で赤、font_xlarge_）
     swprintf_s(buf, L"%4.1f%%", m.usage_pct);
-    uint32_t gpu_text_col = (m.usage_pct > 95.f) ? 0xEF5350 : cfg.col_text;
+    uint32_t gpu_text_col = (m.usage_pct > cfg.warn_gpu_pct) ? 0xEF5350 : cfg.col_text;
     set_brush_color(brush_text_, gpu_text_col, 0.9f);
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
@@ -407,7 +413,7 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
     // 温度（右寄せ、3 段階色）
     wchar_t tbuf[16];
     swprintf_s(tbuf, L"%3.0f\u2103", m.temp_celsius);
-    set_brush_color(brush_text_, temp_color(m.temp_celsius), 0.9f);
+    set_brush_color(brush_text_, temp_color(m.temp_celsius, cfg.warn_temp_caution, cfg.warn_temp_critical), 0.9f);
     font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
     render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
     font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -422,7 +428,7 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
     // RAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
-    uint32_t ram_col = (m.usage_pct > 90.f) ? 0xEF5350 : cfg.col_text;
+    uint32_t ram_col = (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_text;
     wchar_t buf[64];
     swprintf_s(buf, L"RAM   %5.1f%%", m.usage_pct);
     set_brush_color(brush_text_, ram_col);
@@ -450,7 +456,7 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
 
     // RAM バー：全体使用量を通常色で描画し、WSL 分を同系色の濃いオーバーレイで重ねる
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
-    uint32_t bar_col = (m.usage_pct > 90.f) ? 0xEF5350 : cfg.col_graph_fill;
+    uint32_t bar_col = (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_graph_fill;
     draw_hbar(m.usage_pct, 100.f, br, bar_col);
 
     if (m.wsl_gb > 0.f && m.total_gb > 0.f) {
@@ -489,7 +495,7 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
     }
 
     // VRAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
-    uint32_t vram_col = (m.usage_pct > 90.f) ? 0xEF5350 : cfg.col_text;
+    uint32_t vram_col = (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_text;
     wchar_t buf[64];
     swprintf_s(buf, L"VRAM  %5.1f%%", m.usage_pct);
     set_brush_color(brush_text_, vram_col);
@@ -507,7 +513,7 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
     y += LINE_H + 2.f;
 
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
-    draw_hbar(m.usage_pct, 100.f, br, (m.usage_pct > 90.f) ? 0xEF5350 : cfg.col_graph_fill);
+    draw_hbar(m.usage_pct, 100.f, br, (m.usage_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_graph_fill);
 
     // 総量テキストをバー右側に表示（棒グラフと縦位置を合わせるため上にシフト）
     wchar_t totbuf[16];
@@ -554,7 +560,7 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         if (dm.smart_avail) {
             wchar_t tbuf[16];
             swprintf_s(tbuf, L"%3.0f\u2103", dm.smart_temp_celsius);
-            set_brush_color(brush_text_, temp_color(dm.smart_temp_celsius), 0.9f);
+            set_brush_color(brush_text_, temp_color(dm.smart_temp_celsius, cfg.warn_temp_caution, cfg.warn_temp_critical), 0.9f);
             font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + LINE_H + 4.f, x + gw - 4.f, y + LINE_H + GRAPH_H - 4.f);
             render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
@@ -563,20 +569,21 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
 
         // --- 右 1/3：Space（テキスト + バー + 容量テキスト縦積み）---
         float sx = x + gw + DISK_GAP;
-        uint32_t sp_col = (dm.used_pct > 90.f) ? 0xEF5350 : cfg.col_text;
+        uint32_t sp_col = (dm.used_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_text;
 
-        // テキスト行（"Used" 左寄せ + パーセンテージ右寄せ）
-        set_brush_color(brush_text_, sp_col);
+        // テキスト行（"Used" 左寄せ・通常色、パーセンテージ右寄せ・条件付き色）
         D2D1_RECT_F str = D2D1::RectF(sx, y, sx + sw, y + LINE_H);
+        set_brush_color(brush_text_, cfg.col_text);
         render_target_->DrawText(L"Used", 4, font_small_, str, brush_text_);
         wchar_t sbuf[16];
         swprintf_s(sbuf, L"%5.1f%%", dm.used_pct);
+        set_brush_color(brush_text_, sp_col);
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         render_target_->DrawText(sbuf, static_cast<UINT32>(wcslen(sbuf)), font_small_, str, brush_text_);
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
         // バー（LINE_H の下から BAR_H 分）
-        uint32_t bar_col = (dm.used_pct > 90.f) ? 0xEF5350 : cfg.col_graph_fill;
+        uint32_t bar_col = (dm.used_pct > cfg.warn_mem_pct) ? 0xEF5350 : cfg.col_graph_fill;
         D2D1_RECT_F br = D2D1::RectF(sx, y + LINE_H + 2.f, sx + sw, y + LINE_H + 2.f + BAR_H);
         draw_hbar(dm.used_pct, 100.f, br, bar_col);
 
@@ -601,7 +608,8 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         if (show_smart) {
             wchar_t smuf[32];
             swprintf_s(smuf, L"%.1f GB/h", dm.smart_write_gbh);
-            set_brush_color(brush_text_, cfg.col_text, 0.45f);
+            uint32_t gbh_col = (dm.smart_write_gbh > cfg.warn_disk_gbh) ? 0xEF5350 : cfg.col_text;
+            set_brush_color(brush_text_, gbh_col, 0.45f);
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             float st = gt + INFO_LINE_H - 5.f;
             D2D1_RECT_F smr = D2D1::RectF(sx, st, sx + sw, st + INFO_LINE_H);
@@ -678,14 +686,26 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     render_target_->DrawText(L"Claude", 6, font_normal_, hlr, brush_text_);
 
     D2D1_RECT_F hsr = D2D1::RectF(x + CLAUDE_LBL_W, y + 4.f, x + ww, y + LINE_H);
-    wchar_t plan_buf[48];
-    if (m.extra_enabled)
-        swprintf_s(plan_buf, L"%.15hs  over $%.1f", m.plan_label, m.extra_used_dollars);
-    else
-        swprintf_s(plan_buf, L"%.15hs", m.plan_label);
-    render_target_->DrawText(plan_buf, static_cast<UINT32>(wcslen(plan_buf)), font_small_, hsr, brush_text_);
+
+    // プラン名（常に通常色）
+    wchar_t plan_name[24];
+    swprintf_s(plan_name, L"%.15hs", m.plan_label);
+    set_brush_color(brush_text_, cfg.col_text);
+    render_target_->DrawText(plan_name, static_cast<UINT32>(wcslen(plan_name)), font_small_, hsr, brush_text_);
+
+    // 超過料金テキスト（閾値超で赤、プラン名と同幅のスペースパディングで位置合わせ）
+    if (m.extra_enabled) {
+        wchar_t over_buf[48];
+        int pad = static_cast<int>(wcslen(plan_name));
+        wmemset(over_buf, L' ', pad);
+        swprintf_s(over_buf + pad, static_cast<int>(_countof(over_buf)) - pad, L"  over $%.1f", m.extra_used_dollars);
+        uint32_t over_col = (m.extra_used_dollars > cfg.warn_claude_over) ? 0xEF5350 : cfg.col_text;
+        set_brush_color(brush_text_, over_col);
+        render_target_->DrawText(over_buf, static_cast<UINT32>(wcslen(over_buf)), font_small_, hsr, brush_text_);
+    }
     wchar_t sess_buf[24];
     swprintf_s(sess_buf, L"Sessions:%3d", m.session_count);
+    set_brush_color(brush_text_, cfg.col_text);
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
     render_target_->DrawText(sess_buf, static_cast<UINT32>(wcslen(sess_buf)), font_small_, hsr, brush_text_);
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -705,18 +725,40 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     };
 
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
-                         float expected_pct, int tick_count) {
+                         float expected_pct, int tick_count, float warn_pct) {
         static constexpr float CLAUDE_BAR_H = BAR_H * 1.2f;  // Claude 専用バー高さ（1.2 倍）
 
-        // ラベル + パーセンテージ（左寄せ、font_small_ = Disk I/O と同サイズ）
-        wchar_t buf[64];
-        if (avail) swprintf_s(buf, L"%s %3.0f%%", lbl, pct);
-        else       swprintf_s(buf, L"%s",         lbl);
-        uint32_t text_col = (avail && pct > expected_pct * 1.1f) ? 0xEF5350 : (avail ? cfg.col_text : 0x888888);
-        set_brush_color(brush_text_, text_col);
+        // ラベル（"5h"/"7d"）は常に通常色で左寄せ、パーセンテージは条件付き色・フォントで右寄せ
         font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         D2D1_RECT_F lr = D2D1::RectF(x, y, x + LBL_W, y + SECTION_H);
-        render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_small_, lr, brush_text_);
+        set_brush_color(brush_text_, avail ? cfg.col_text : 0x888888);
+        render_target_->DrawText(lbl, static_cast<UINT32>(wcslen(lbl)), font_small_, lr, brush_text_);
+
+        // パーセンテージ：90%超→太字赤、ペースマーカー超→黄、それ以外→通常色
+        if (avail) {
+            wchar_t pct_buf[16];
+            swprintf_s(pct_buf, L"%3.0f%%", pct);
+            uint32_t pct_col;
+            IDWriteTextFormat* pct_font;
+            if (pct >= warn_pct) {
+                pct_col  = 0xEF5350;
+                pct_font = font_small_bold_;
+            }
+            else if (expected_pct > 0.f && pct > expected_pct) {
+                pct_col  = 0xd7b437;
+                pct_font = font_small_;
+            }
+            else {
+                pct_col  = cfg.col_text;
+                pct_font = font_small_;
+            }
+            set_brush_color(brush_text_, pct_col);
+            pct_font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            pct_font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            render_target_->DrawText(pct_buf, static_cast<UINT32>(wcslen(pct_buf)), pct_font, lr, brush_text_);
+            pct_font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            pct_font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+        }
 
         // バー（ラベル右端からリセット時刻左端まで）
         float bar_right = avail ? (x + ww - RESET_W) : (x + ww);
@@ -783,9 +825,9 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     };
 
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
-             calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5);
+             calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
-             calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7);
+             calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7, cfg.warn_claude_7d_pct);
 
     return y;
 }

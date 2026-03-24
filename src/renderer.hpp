@@ -41,10 +41,11 @@ private:
     ID2D1Factory*          d2d_factory_    = nullptr;
     ID2D1HwndRenderTarget* render_target_  = nullptr;
     IDWriteFactory*        dwrite_factory_ = nullptr;
-    IDWriteTextFormat*     font_normal_    = nullptr;  // 通常テキスト（22pt）
-    IDWriteTextFormat*     font_small_     = nullptr;  // 小テキスト（18pt）
-    IDWriteTextFormat*     font_large_     = nullptr;  // グラフ内オーバーレイ（22pt bold）
-    IDWriteTextFormat*     font_xlarge_    = nullptr;  // CPU/GPU 使用率オーバーレイ（33pt bold）
+    IDWriteTextFormat*     font_normal_     = nullptr;  // 通常テキスト（22pt）
+    IDWriteTextFormat*     font_small_      = nullptr;  // 小テキスト（18pt）
+    IDWriteTextFormat*     font_small_bold_ = nullptr;  // 小テキスト太字（18pt bold）
+    IDWriteTextFormat*     font_large_      = nullptr;  // グラフ内オーバーレイ（22pt bold）
+    IDWriteTextFormat*     font_xlarge_     = nullptr;  // CPU/GPU 使用率オーバーレイ（33pt bold）
 
     // ブラシキャッシュ（色別に使い回す）
     ID2D1SolidColorBrush*  brush_text_  = nullptr;
@@ -75,7 +76,7 @@ private:
     void draw_vbar(float pct, D2D1_RECT_F rect, uint32_t color_rgb);
 
     // 温度色（3段階）を返す
-    static uint32_t temp_color(float celsius);
+    static uint32_t temp_color(float celsius, float caution, float critical);
 
     // セクション名（"CPU"/"GPU"）+ モデル名の 2 段階ラベル描画
     void draw_section_label_with_model(float x, float y, float ww,

@@ -24,6 +24,13 @@ AppConfig load_config(const std::string& path) {
             }
             catch (...) { return def; }
         };
+        auto get_float = [&](const char* sec, const char* key, float def) -> float {
+            // TOML の整数リテラル（例：95）・浮動小数点リテラル（例：95.0）の両方に対応
+            try { return static_cast<float>(toml::find_or<double>(data, sec, key, static_cast<double>(def))); }
+            catch (...) {}
+            try { return static_cast<float>(toml::find_or<int64_t>(data, sec, key, static_cast<int64_t>(def))); }
+            catch (...) { return def; }
+        };
 
         cfg.win_x     = get_int("window", "x",     cfg.win_x);
         cfg.win_y     = get_int("window", "y",     cfg.win_y);
@@ -40,6 +47,17 @@ AppConfig load_config(const std::string& path) {
         cfg.col_claude_bar = get_u32("color", "claude_bar", cfg.col_claude_bar);
         cfg.col_cpu_core   = get_u32("color", "cpu_core",   cfg.col_cpu_core);
 
+        cfg.warn_cpu_pct       = get_float("threshold", "cpu_pct",       cfg.warn_cpu_pct);
+        cfg.warn_gpu_pct       = get_float("threshold", "gpu_pct",       cfg.warn_gpu_pct);
+        cfg.warn_mem_pct       = get_float("threshold", "mem_pct",       cfg.warn_mem_pct);
+        cfg.warn_claude_5h_pct = get_float("threshold", "claude_5h_pct", cfg.warn_claude_5h_pct);
+        cfg.warn_claude_7d_pct = get_float("threshold", "claude_7d_pct", cfg.warn_claude_7d_pct);
+        cfg.warn_claude_over   = get_float("threshold", "claude_over",   cfg.warn_claude_over);
+        cfg.warn_disk_gbh      = get_float("threshold", "disk_gbh",      cfg.warn_disk_gbh);
+        cfg.warn_temp_caution  = get_float("threshold", "temp_caution",  cfg.warn_temp_caution);
+        cfg.warn_temp_critical = get_float("threshold", "temp_critical",  cfg.warn_temp_critical);
+        cfg.warn_uptime_days   = get_int  ("threshold", "uptime_days",   cfg.warn_uptime_days);
+
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
     }
     catch (...) {
@@ -50,6 +68,21 @@ AppConfig load_config(const std::string& path) {
     //
     // win_width が 0 以下だと Direct2D のレンダーターゲット作成が失敗する。
     cfg.win_width = std::max(80, cfg.win_width);
+
+    // 警告閾値のサニティチェック
+    cfg.warn_cpu_pct       = std::clamp(cfg.warn_cpu_pct,       0.f, 100.f);
+    cfg.warn_gpu_pct       = std::clamp(cfg.warn_gpu_pct,       0.f, 100.f);
+    cfg.warn_mem_pct       = std::clamp(cfg.warn_mem_pct,       0.f, 100.f);
+    cfg.warn_claude_5h_pct = std::clamp(cfg.warn_claude_5h_pct, 0.f, 100.f);
+    cfg.warn_claude_7d_pct = std::clamp(cfg.warn_claude_7d_pct, 0.f, 100.f);
+    cfg.warn_claude_over   = std::max(0.f, cfg.warn_claude_over);
+    cfg.warn_disk_gbh      = std::max(0.f, cfg.warn_disk_gbh);
+    cfg.warn_temp_caution  = std::clamp(cfg.warn_temp_caution,  0.f, 200.f);
+    cfg.warn_temp_critical = std::clamp(cfg.warn_temp_critical, 0.f, 200.f);
+    // caution >= critical になると温度注意が表示されなくなるため、差を確保する
+    if (cfg.warn_temp_caution >= cfg.warn_temp_critical)
+        cfg.warn_temp_critical = cfg.warn_temp_caution + 10.f;
+    cfg.warn_uptime_days = std::max(0, cfg.warn_uptime_days);
 
     return cfg;
 }
