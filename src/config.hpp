@@ -28,7 +28,7 @@ struct AppConfig {
     float warn_mem_pct       = 90.f;  // RAM/VRAM/Disk Space 使用率（%）
     float warn_claude_5h_pct = 90.f;  // Claude 5h レートリミット（%）
     float warn_claude_7d_pct = 90.f;  // Claude 7d レートリミット（%）
-    float warn_claude_over   =  0.f;  // Claude 超過料金（ドル）
+    float warn_claude_over   =  0.f;  // Claude 超過料金の警告閾値（ドル）。デフォルト 0.f = $0 超えで即赤表示
     float warn_disk_gbh      = 10.f;  // Disk 書き込み量（GB/h）
     float warn_temp_caution  = 70.f;  // 温度注意・オレンジ表示（℃）
     float warn_temp_critical = 90.f;  // 温度危険・赤表示（℃）

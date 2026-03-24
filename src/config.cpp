@@ -25,7 +25,8 @@ AppConfig load_config(const std::string& path) {
             catch (...) { return def; }
         };
         auto get_float = [&](const char* sec, const char* key, float def) -> float {
-            // TOML の整数リテラル（例：95）・浮動小数点リテラル（例：95.0）の両方に対応
+            // TOML 数値型の互換取得
+            // 整数リテラル（例：95）と浮動小数点リテラル（例：95.0）の両方に対応する
             try { return static_cast<float>(toml::find_or<double>(data, sec, key, static_cast<double>(def))); }
             catch (...) {}
             try { return static_cast<float>(toml::find_or<int64_t>(data, sec, key, static_cast<int64_t>(def))); }
@@ -81,7 +82,7 @@ AppConfig load_config(const std::string& path) {
     cfg.warn_temp_critical = std::clamp(cfg.warn_temp_critical, 0.f, 200.f);
     // caution >= critical になると温度注意が表示されなくなるため、差を確保する
     if (cfg.warn_temp_caution >= cfg.warn_temp_critical)
-        cfg.warn_temp_critical = cfg.warn_temp_caution + 10.f;
+        cfg.warn_temp_critical = std::min(cfg.warn_temp_caution + 10.f, 200.f);
     cfg.warn_uptime_days = std::max(0, cfg.warn_uptime_days);
 
     return cfg;

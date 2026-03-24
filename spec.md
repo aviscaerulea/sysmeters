@@ -123,10 +123,12 @@ Data source: Anthropic Usage API / Account API (OAuth token)
 
 | State | Color |
 |---|---|
-| 0-69°C (normal) | Gray |
-| 70-89°C (caution) | Orange |
-| 90°C and above (critical) | Red |
+| Below `temp_caution` (normal) | Gray |
+| `temp_caution` to `temp_critical` (caution) | Orange |
+| `temp_critical` and above (critical) | Red |
 | No data (unavailable) | Dark gray |
+
+Thresholds are configurable via `[threshold]` in `sysmeters.toml` (defaults: `temp_caution` = 70°C, `temp_critical` = 90°C).
 
 Applied to CPU, GPU, and Disk (NVMe) temperatures.
 
