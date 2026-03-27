@@ -59,6 +59,16 @@ AppConfig load_config(const std::string& path) {
         cfg.warn_temp_critical = get_float("threshold", "temp_critical",  cfg.warn_temp_critical);
         cfg.warn_uptime_days   = get_int  ("threshold", "uptime_days",   cfg.warn_uptime_days);
 
+        try { cfg.alert_sound = toml::find_or<bool>(data, "threshold", "alert_sound", cfg.alert_sound); }
+        catch (...) {}
+        cfg.reset_cpu_pct       = get_float("threshold", "reset_cpu_pct",       cfg.reset_cpu_pct);
+        cfg.reset_gpu_pct       = get_float("threshold", "reset_gpu_pct",       cfg.reset_gpu_pct);
+        cfg.reset_mem_pct       = get_float("threshold", "reset_mem_pct",       cfg.reset_mem_pct);
+        cfg.reset_temp          = get_float("threshold", "reset_temp",          cfg.reset_temp);
+        cfg.reset_disk_gbh      = get_float("threshold", "reset_disk_gbh",      cfg.reset_disk_gbh);
+        cfg.reset_claude_5h_pct = get_float("threshold", "reset_claude_5h_pct", cfg.reset_claude_5h_pct);
+        cfg.reset_claude_7d_pct = get_float("threshold", "reset_claude_7d_pct", cfg.reset_claude_7d_pct);
+
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
     }
     catch (...) {
@@ -84,6 +94,24 @@ AppConfig load_config(const std::string& path) {
     if (cfg.warn_temp_caution >= cfg.warn_temp_critical)
         cfg.warn_temp_critical = std::min(cfg.warn_temp_caution + 10.f, 200.f);
     cfg.warn_uptime_days = std::max(0, cfg.warn_uptime_days);
+
+    // 警告音リセット閾値のサニティチェック
+    //
+    // リセット閾値は警告閾値未満でなければヒステリシスが機能しないため、強制補正する。
+    cfg.reset_cpu_pct       = std::clamp(cfg.reset_cpu_pct,       0.f, 100.f);
+    cfg.reset_gpu_pct       = std::clamp(cfg.reset_gpu_pct,       0.f, 100.f);
+    cfg.reset_mem_pct       = std::clamp(cfg.reset_mem_pct,       0.f, 100.f);
+    cfg.reset_temp          = std::clamp(cfg.reset_temp,          0.f, 200.f);
+    cfg.reset_disk_gbh      = std::max(0.f, cfg.reset_disk_gbh);
+    cfg.reset_claude_5h_pct = std::clamp(cfg.reset_claude_5h_pct, 0.f, 100.f);
+    cfg.reset_claude_7d_pct = std::clamp(cfg.reset_claude_7d_pct, 0.f, 100.f);
+    if (cfg.reset_cpu_pct       >= cfg.warn_cpu_pct)       cfg.reset_cpu_pct       = std::max(0.f, cfg.warn_cpu_pct       - 5.f);
+    if (cfg.reset_gpu_pct       >= cfg.warn_gpu_pct)       cfg.reset_gpu_pct       = std::max(0.f, cfg.warn_gpu_pct       - 5.f);
+    if (cfg.reset_mem_pct       >= cfg.warn_mem_pct)       cfg.reset_mem_pct       = std::max(0.f, cfg.warn_mem_pct       - 5.f);
+    if (cfg.reset_temp          >= cfg.warn_temp_critical) cfg.reset_temp          = std::max(0.f, cfg.warn_temp_critical - 5.f);
+    if (cfg.reset_disk_gbh      >= cfg.warn_disk_gbh)      cfg.reset_disk_gbh      = std::max(0.f, cfg.warn_disk_gbh      - 1.f);
+    if (cfg.reset_claude_5h_pct >= cfg.warn_claude_5h_pct) cfg.reset_claude_5h_pct = std::max(0.f, cfg.warn_claude_5h_pct - 5.f);
+    if (cfg.reset_claude_7d_pct >= cfg.warn_claude_7d_pct) cfg.reset_claude_7d_pct = std::max(0.f, cfg.warn_claude_7d_pct - 5.f);
 
     return cfg;
 }

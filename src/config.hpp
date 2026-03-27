@@ -34,6 +34,16 @@ struct AppConfig {
     float warn_temp_critical = 90.f;  // 温度危険・赤表示（℃）
     int   warn_uptime_days   = 7;     // OS アップタイム（日）
 
+    // 警告音設定
+    bool  alert_sound        = true;  // 警告音有効/無効
+    float reset_cpu_pct      = 90.f;  // CPU 使用率の警告音リセット閾値（%）
+    float reset_gpu_pct      = 90.f;  // GPU 使用率の警告音リセット閾値（%）
+    float reset_mem_pct      = 85.f;  // RAM/VRAM/Disk Space の警告音リセット閾値（%）
+    float reset_temp         = 85.f;  // CPU/GPU/NVMe 温度の警告音リセット閾値（℃）
+    float reset_disk_gbh     =  5.f;  // Disk 書き込みの警告音リセット閾値（GB/h）
+    float reset_claude_5h_pct = 85.f; // Claude 5h の警告音リセット閾値（%）
+    float reset_claude_7d_pct = 85.f; // Claude 7d の警告音リセット閾値（%）
+
     // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
     std::string log_dir = "logs";
 

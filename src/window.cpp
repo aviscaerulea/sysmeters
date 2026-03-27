@@ -5,6 +5,7 @@
 #include "config.hpp"
 #include "metrics.hpp"
 #include "renderer.hpp"
+#include "alert.hpp"
 #include "collector_cpu.hpp"
 #include "collector_gpu.hpp"
 #include "collector_mem.hpp"
@@ -133,6 +134,10 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_net_->init();
     col_claude_->init(hwnd_);
     col_ip_->init(hwnd_);
+
+    // 警告音マネージャ初期化
+    alert_ = new AlertManager();
+    alert_->init();
 
     // タスクトレイアイコン追加
     add_tray_icon();
@@ -367,6 +372,7 @@ void AppWindow::destroy() {
     KillTimer(hwnd_, TIMER_ANIM);
     remove_tray_icon();
 
+    if (alert_)      { alert_->shutdown();      delete alert_;      }
     if (col_cpu_)    { col_cpu_->shutdown();    delete col_cpu_;    }
     if (col_gpu_)    { col_gpu_->shutdown();    delete col_gpu_;    }
     if (col_disk_)   { col_disk_->shutdown();   delete col_disk_;   }
@@ -426,6 +432,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
+        if (alert_) alert_->check(*metrics_, *cfg_);
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;

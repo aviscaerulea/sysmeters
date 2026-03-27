@@ -28,6 +28,7 @@ tasks:
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item '{{.APP_NAME}}.toml' 'out/'"
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/IntelMSR.bin' 'out/'"
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/AMDFamily17.bin' 'out/'"
+      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/alert.wav' 'out/'"
 
   release:
     desc: リリースビルド + zip パッケージング
@@ -37,5 +38,6 @@ tasks:
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item '{{.APP_NAME}}.toml' 'out/'"
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/IntelMSR.bin' 'out/'"
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/AMDFamily17.bin' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','out/{{.APP_NAME}}.toml','out/IntelMSR.bin','out/AMDFamily17.bin' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force"
+      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/alert.wav' 'out/'"
+      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','out/{{.APP_NAME}}.toml','out/IntelMSR.bin','out/AMDFamily17.bin','out/alert.wav' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force"
       - cmd: echo "Package out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"

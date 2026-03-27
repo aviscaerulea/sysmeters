@@ -14,6 +14,7 @@ class DiskCollector;
 class NetCollector;
 class ClaudeCollector;
 class IpCollector;
+class AlertManager;
 
 // アプリケーションウィンドウの管理
 //
@@ -44,6 +45,7 @@ private:
     NetCollector*    col_net_    = nullptr;
     ClaudeCollector* col_claude_ = nullptr;
     IpCollector*     col_ip_     = nullptr;
+    AlertManager*    alert_       = nullptr;
 
     void update_window_size();
     void update_os_label();  // OS バージョンラベルをレジストリから再取得する
