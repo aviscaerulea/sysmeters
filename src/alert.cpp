@@ -352,9 +352,9 @@ void AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
         }
     };
 
-    check_item(CPU,    m.cpu.total_pct,  cfg.warn_cpu_pct, cfg.reset_cpu_pct);
+    check_item(CPU,    m.cpu.total_history.average(AVG_SAMPLES),  cfg.warn_cpu_pct, cfg.reset_cpu_pct);
     if (m.gpu.avail)
-        check_item(GPU, m.gpu.usage_pct, cfg.warn_gpu_pct, cfg.reset_gpu_pct);
+        check_item(GPU, m.gpu.usage_history.average(AVG_SAMPLES), cfg.warn_gpu_pct, cfg.reset_gpu_pct);
     check_item(RAM,    m.mem.usage_pct,  cfg.warn_mem_pct, cfg.reset_mem_pct);
     if (m.vram.avail)
         check_item(VRAM, m.vram.usage_pct, cfg.warn_mem_pct, cfg.reset_mem_pct);

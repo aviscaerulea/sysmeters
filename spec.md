@@ -127,8 +127,8 @@ Plays `alert.wav` (located in the same directory as the exe) when any monitored 
 
 | ID | Metric | Warning threshold (TOML key) | Reset threshold (TOML key) |
 |---|---|---|---|
-| CPU | `cpu.total_pct` | `cpu_pct` (95%) | `reset_cpu_pct` (90%) |
-| GPU | `gpu.usage_pct` | `gpu_pct` (95%) | `reset_gpu_pct` (90%) |
+| CPU | `cpu.total_history` * | `cpu_pct` (95%) | `reset_cpu_pct` (90%) |
+| GPU | `gpu.usage_history` * | `gpu_pct` (95%) | `reset_gpu_pct` (90%) |
 | RAM | `mem.usage_pct` | `mem_pct` (90%) | `reset_mem_pct` (85%) |
 | VRAM | `vram.usage_pct` | `mem_pct` (90%) | `reset_mem_pct` (85%) |
 | DISK_C | `disk_c.used_pct` | `mem_pct` (90%) | `reset_mem_pct` (85%) |
@@ -142,6 +142,8 @@ Plays `alert.wav` (located in the same directory as the exe) when any monitored 
 | CLAUDE_5H | `claude.five_h_pct` | `claude_5h_pct` (90%) | `reset_claude_5h_pct` (85%) |
 | CLAUDE_7D | `claude.seven_d_pct` | `claude_7d_pct` (90%) | `reset_claude_7d_pct` (85%) |
 | CLAUDE_OVER | `claude.extra_used_dollars` | `claude_over` (0.0) | No reset (one-shot) |
+
+\* 直近 10 サンプルの平均値で判定（瞬間スパイクによる誤警告を防止）
 
 ### Hysteresis
 

@@ -30,6 +30,9 @@ private:
         COUNT_
     };
 
+    // CPU/GPU 警告判定に使う平均サンプル数（直近 10 サンプル ≒ 約 9 秒）
+    static constexpr std::size_t AVG_SAMPLES = 10;
+
     bool           fired_[COUNT_] = {};     // true = 発火済み（リセット閾値未達まで再発火しない）
     wchar_t        wav_path_[MAX_PATH] = {};
     bool           wav_avail_    = false;
