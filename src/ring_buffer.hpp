@@ -25,6 +25,16 @@ public:
         return data_[(head_ - count_ + i + N) % N];
     }
 
+    // 直近 n サンプルの平均値を返す（n=0 または空なら T{} を返す）
+    T average(std::size_t n) const {
+        if (count_ == 0 || n == 0) return T{};
+        n = (n < count_) ? n : count_;
+        T sum = T{};
+        for (std::size_t i = count_ - n; i < count_; i++)
+            sum += at(i);
+        return sum / static_cast<T>(n);
+    }
+
     std::size_t size()     const { return count_; }
     std::size_t capacity() const { return N; }
     bool        empty()    const { return count_ == 0; }
