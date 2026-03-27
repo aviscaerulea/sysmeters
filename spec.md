@@ -37,7 +37,7 @@ Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsof
 | Element | Display |
 |---|---|
 | Overall usage | Filled area graph (last 60 s) + percentage value |
-| Per-core usage | 16 vertical bars side by side (0-100%, logical core count) |
+| Per-core usage | Vertical bars side by side (0-100%, count = logical core count, dynamically determined at runtime) |
 | Temperature | Horizontal bar (0-100°C) + value (°C), 3-level color coding |
 
 Data source: PDH (usage), PawnIO driver (`\\.\PawnIO`) for temperature (PawnIO driver must be installed; hidden when unavailable):

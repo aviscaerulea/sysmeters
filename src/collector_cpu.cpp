@@ -46,6 +46,7 @@ struct CpuCollector::Impl {
     PDH_HQUERY   query          = nullptr;
     PDH_HCOUNTER counter_total  = nullptr;
     std::vector<PDH_HCOUNTER> counter_cores;
+    int core_count = 0;  // 登録済みコアカウンタ数（論理コア数）
 
     // PawnIO デバイスハンドルと状態
     HANDLE    hdev_pawnio  = INVALID_HANDLE_VALUE;
@@ -97,8 +98,11 @@ bool CpuCollector::init() {
         return false;
     }
 
-    // 論理コア別カウンタ（最大 16 まで試みる）
-    for (int i = 0; i < 16; ++i) {
+    // 論理コア別カウンタ（GetSystemInfo で取得した論理コア数分を登録）
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const int n_cores = static_cast<int>(si.dwNumberOfProcessors);
+    for (int i = 0; i < n_cores; ++i) {
         wchar_t buf[64];
         swprintf_s(buf, L"\\Processor(%d)\\%% Processor Time", i);
         PDH_HCOUNTER hc = nullptr;
@@ -106,6 +110,7 @@ bool CpuCollector::init() {
             impl_->counter_cores.push_back(hc);
         }
     }
+    impl_->core_count = static_cast<int>(impl_->counter_cores.size());
 
     // 最初のサンプリング（PDH は 2 回目以降が有効）
     PdhCollectQueryData(impl_->query);
@@ -292,7 +297,9 @@ void CpuCollector::update(CpuMetrics& out) {
     }
 
     // コア別使用率
-    for (int i = 0; i < static_cast<int>(impl_->counter_cores.size()) && i < 16; ++i) {
+    out.core_count = impl_->core_count;
+    out.core_pct.resize(impl_->core_count, 0.f);
+    for (int i = 0; i < static_cast<int>(impl_->counter_cores.size()); ++i) {
         PDH_FMT_COUNTERVALUE cv{};
         if (PdhGetFormattedCounterValue(impl_->counter_cores[i], PDH_FMT_DOUBLE, nullptr, &cv) == ERROR_SUCCESS) {
             out.core_pct[i] = static_cast<float>(cv.doubleValue);

@@ -1,6 +1,7 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #pragma once
 #include <ctime>
+#include <vector>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "ring_buffer.hpp"
@@ -17,8 +18,9 @@ struct OsMetrics {
 // CPU：全体使用率（面グラフ）+ コア別縦バー + 温度（横バー）
 struct CpuMetrics {
     RingBuffer<float, 60> total_history;  // 全体使用率履歴（%）
-    float total_pct    = 0.f;
-    float core_pct[16] = {};             // 論理コア別使用率（%）
+    float total_pct  = 0.f;
+    int   core_count = 0;               // 論理コア数（collector init 時に設定）
+    std::vector<float> core_pct;        // 論理コア別使用率（%）、core_count 要素
     float temp_celsius = 0.f;           // CPU 温度
     bool  temp_avail   = false;         // PawnIO 温度取得成功フラグ
     char  name[48]     = {};            // CPU ブランド名（CPUID 取得）

@@ -276,8 +276,11 @@ void Renderer::draw_hbar(float val, float max_val, D2D1_RECT_F rect, uint32_t co
 bool Renderer::update_core_animation(const CpuMetrics& m) {
     constexpr float LERP_K   = 0.33f;  // 補間係数（1 フレームで残差の 33% ずつ近づく）
     constexpr float DONE_THR = 0.5f;   // 全コア合計の変化量がこれ未満なら描画不要
+    if (core_disp_.size() != m.core_pct.size()) {
+        core_disp_.assign(m.core_pct.begin(), m.core_pct.end());
+    }
     float total_delta = 0.f;
-    for (int i = 0; i < 16; ++i) {
+    for (size_t i = 0; i < m.core_pct.size(); ++i) {
         float delta = m.core_pct[i] - core_disp_[i];
         core_disp_[i] += delta * LERP_K;
         total_delta += (delta < 0.f ? -delta : delta);
@@ -376,7 +379,10 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
     y += GRAPH_H_LG + GAP;
 
     // コア別縦バー（論理コア数本横並び、画面幅に合わせて動的計算）
-    const int   N_CORES = static_cast<int>(std::size(m.core_pct));
+    const int   N_CORES = static_cast<int>(m.core_pct.size());
+    if (static_cast<int>(core_disp_.size()) != N_CORES) {
+        core_disp_.assign(m.core_pct.begin(), m.core_pct.end());
+    }
     constexpr float GAP_BAR = 2.f;  // バー間ギャップ
     float bar_w = (ww - GAP_BAR * (N_CORES - 1)) / N_CORES;
     float core_x = x;
