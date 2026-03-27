@@ -72,16 +72,16 @@ alert_sound = true
 cpu_pct = 95
 # CPU 使用率の警告音リセット閾値（単位：%）
 # この値を下回るまで警告音を再度鳴らさない
-# デフォルト: 90
-reset_cpu_pct = 90
+# デフォルト: 70
+reset_cpu_pct = 70
 
 # GPU 使用率の警告閾値（単位：%）
 # この値を超えると GPU のテキストが赤（0xEF5350）になる
 # デフォルト: 95
 gpu_pct = 95
 # GPU 使用率の警告音リセット閾値（単位：%）
-# デフォルト: 90
-reset_gpu_pct = 90
+# デフォルト: 70
+reset_gpu_pct = 70
 
 # メモリ/ストレージ使用率の警告閾値（単位：%）
 # この値を超えると RAM/VRAM/Disk Space のテキストやバーが赤（0xEF5350）になる
@@ -89,8 +89,8 @@ reset_gpu_pct = 90
 mem_pct = 90
 # メモリ/ストレージの警告音リセット閾値（単位：%）
 # RAM/VRAM/Disk Space 共通
-# デフォルト: 85
-reset_mem_pct = 85
+# デフォルト: 80
+reset_mem_pct = 80
 
 # Claude 5h レートリミットの警告閾値（単位：%）
 # この値以上でパーセンテージが太字赤（0xEF5350）になる
@@ -98,20 +98,21 @@ reset_mem_pct = 85
 # デフォルト: 90
 claude_5h_pct = 90
 # Claude 5h の警告音リセット閾値（単位：%）
-# デフォルト: 85
-reset_claude_5h_pct = 85
+# デフォルト: 50
+reset_claude_5h_pct = 50
 
 # Claude 7d レートリミットの警告閾値（単位：%）
 # 動作は claude_5h_pct と同様
 # デフォルト: 90
 claude_7d_pct = 90
 # Claude 7d の警告音リセット閾値（単位：%）
-# デフォルト: 85
-reset_claude_7d_pct = 85
+# デフォルト: 50
+reset_claude_7d_pct = 50
 
 # Claude 超過料金の警告閾値（単位：ドル）
 # extra_used_dollars がこの値を超えると "over $X.X" テキストが赤（0xEF5350）になる
-# デフォルト: 0.0（$0 超えで即赤表示）
+# 警告音はこの値を「超えた」時点で 1 回鳴る（0.0 の場合、$0 を超えたとき＝超過発生時）
+# デフォルト: 0.0（$0 超えで即赤表示・警告音）
 claude_over = 0.0
 # ※ 超過額は増加のみのためリセット閾値なし（1 回のみ警告音を鳴らす）
 

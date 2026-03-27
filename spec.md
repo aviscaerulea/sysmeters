@@ -119,6 +119,49 @@ Change detection: `NotifyIpInterfaceChange` (IP Helper API) triggers immediate r
 
 Data source: Anthropic Usage API / Account API (OAuth token)
 
+## Alert Sound Specification
+
+Plays `alert.wav` (located in the same directory as the exe) when any monitored metric exceeds its warning threshold.
+
+### Trigger Conditions
+
+| ID | Metric | Warning threshold (TOML key) | Reset threshold (TOML key) |
+|---|---|---|---|
+| CPU | `cpu.total_pct` | `cpu_pct` (95%) | `reset_cpu_pct` (90%) |
+| GPU | `gpu.usage_pct` | `gpu_pct` (95%) | `reset_gpu_pct` (90%) |
+| RAM | `mem.usage_pct` | `mem_pct` (90%) | `reset_mem_pct` (85%) |
+| VRAM | `vram.usage_pct` | `mem_pct` (90%) | `reset_mem_pct` (85%) |
+| DISK_C | `disk_c.used_pct` | `mem_pct` (90%) | `reset_mem_pct` (85%) |
+| DISK_D | `disk_d.used_pct` | `mem_pct` (90%) | `reset_mem_pct` (85%) |
+| TEMP_CPU | `cpu.temp_celsius` | `temp_critical` (90°C) | `reset_temp` (85°C) |
+| TEMP_GPU | `gpu.temp_celsius` | `temp_critical` (90°C) | `reset_temp` (85°C) |
+| TEMP_NVME_C | `disk_c.smart_temp_celsius` | `temp_critical` (90°C) | `reset_temp` (85°C) |
+| TEMP_NVME_D | `disk_d.smart_temp_celsius` | `temp_critical` (90°C) | `reset_temp` (85°C) |
+| DISK_GBH | max(C, D) `smart_write_gbh` | `disk_gbh` (10 GB/h) | `reset_disk_gbh` (5 GB/h) |
+| UPTIME | OS uptime (days) | `uptime_days` (7) | No reset (one-shot) |
+| CLAUDE_5H | `claude.five_h_pct` | `claude_5h_pct` (90%) | `reset_claude_5h_pct` (85%) |
+| CLAUDE_7D | `claude.seven_d_pct` | `claude_7d_pct` (90%) | `reset_claude_7d_pct` (85%) |
+| CLAUDE_OVER | `claude.extra_used_dollars` | `claude_over` (0.0) | No reset (one-shot) |
+
+### Hysteresis
+
+```
+IDLE → (value > warn threshold) → FIRED (play WAV)
+FIRED → (value < reset threshold) → IDLE
+FIRED → (value > warn threshold) → FIRED (no re-play)
+```
+
+UPTIME and CLAUDE_OVER have no reset threshold and fire only once per session.
+
+### Playback
+
+- Format：WASAPI shared mode with `AUTOCONVERTPCM` (compatible with BLE headphones)
+- BLE clipping prevention：19 kHz inaudible sine tone inserted in-memory — 1.5 s before and 2.0 s after the WAV (WAV file itself is unchanged)
+- Thread：Playback runs on a background STA COM thread; UI thread is never blocked
+- Concurrency：If the previous playback thread is still running, the new play request is silently skipped
+- Shutdown：`shutdown_` flag interrupts the playback loop; thread is waited up to 5 s on exit
+- Disabled：Set `alert_sound = false` in `[threshold]` to suppress all alert sounds
+
 ## Temperature Color Coding
 
 | State | Color |

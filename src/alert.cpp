@@ -346,7 +346,7 @@ void AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
 
     // ヒステリシスなし：1 回のみ発火（再起動またはセッション終了までリセットしない）
     auto check_once = [&](Id id, float value, float warn) {
-        if (!fired_[id] && value >= warn) {
+        if (!fired_[id] && value > warn) {
             fired_[id] = true;
             need_play  = true;
         }
