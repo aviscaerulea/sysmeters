@@ -296,9 +296,11 @@ void CpuCollector::update(CpuMetrics& out) {
         out.total_history.push(out.total_pct);
     }
 
-    // コア別使用率
-    out.core_count = impl_->core_count;
-    out.core_pct.resize(impl_->core_count, 0.f);
+    // コア別使用率（初回のみサイズ確保）
+    if (out.core_count == 0) {
+        out.core_count = impl_->core_count;
+        out.core_pct.resize(impl_->core_count, 0.f);
+    }
     for (int i = 0; i < static_cast<int>(impl_->counter_cores.size()); ++i) {
         PDH_FMT_COUNTERVALUE cv{};
         if (PdhGetFormattedCounterValue(impl_->counter_cores[i], PDH_FMT_DOUBLE, nullptr, &cv) == ERROR_SUCCESS) {
