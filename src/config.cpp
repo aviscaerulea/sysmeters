@@ -61,8 +61,6 @@ AppConfig load_config(const std::string& path) {
 
         try { cfg.alert_sound = toml::find_or<bool>(data, "threshold", "alert_sound", cfg.alert_sound); }
         catch (...) {}
-        try { cfg.alert_toast = toml::find_or<bool>(data, "threshold", "alert_toast", cfg.alert_toast); }
-        catch (...) {}
         cfg.reset_cpu_pct       = get_float("threshold", "reset_cpu_pct",       cfg.reset_cpu_pct);
         cfg.reset_gpu_pct       = get_float("threshold", "reset_gpu_pct",       cfg.reset_gpu_pct);
         cfg.reset_mem_pct       = get_float("threshold", "reset_mem_pct",       cfg.reset_mem_pct);

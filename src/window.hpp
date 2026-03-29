@@ -34,6 +34,7 @@ private:
     HINSTANCE hinst_   = nullptr;
     int  last_pref_h_  = 0;     // update_window_size 早期リターン用キャッシュ
     bool topmost_      = false;  // 最前面表示フラグ（レジストリから読み込み）
+    bool toast_alert_  = true;   // Toast 通知フラグ（レジストリから読み込み）
 
     AppConfig*       cfg_     = nullptr;
     AllMetrics*      metrics_ = nullptr;
@@ -57,9 +58,11 @@ private:
     void show_context_menu();
     void open_config_file();
     void open_log_file();
-    bool load_topmost();   // レジストリから最前面設定を読む
-    void save_topmost();   // レジストリに最前面設定を書く
-    void apply_topmost();  // SetWindowPos で最前面状態を反映
+    bool load_topmost();        // レジストリから最前面設定を読む
+    void save_topmost();        // レジストリに最前面設定を書く
+    void apply_topmost();       // SetWindowPos で最前面状態を反映
+    bool load_toast_alert();    // レジストリから Toast 通知設定を読む（未設定時は true）
+    void save_toast_alert();    // レジストリに Toast 通知設定を書く
 
     static LRESULT CALLBACK wnd_proc(HWND, UINT, WPARAM, LPARAM);
     LRESULT handle_message(HWND, UINT, WPARAM, LPARAM);

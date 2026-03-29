@@ -173,8 +173,9 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     update_window_size();
     InvalidateRect(hwnd_, nullptr, FALSE);
 
-    topmost_ = load_topmost();
+    topmost_     = load_topmost();
     apply_topmost();
+    toast_alert_ = load_toast_alert();
 
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     UpdateWindow(hwnd_);
@@ -299,6 +300,8 @@ void AppWindow::show_context_menu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (topmost_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_TOPMOST, L"常に最前面に表示");
+    AppendMenuW(menu, MF_STRING | (toast_alert_ ? MF_CHECKED : MF_UNCHECKED),
+                IDM_ALERT_TOAST, L"Toast 通知");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG, L"設定ファイル");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"ログファイル");
@@ -344,36 +347,50 @@ void AppWindow::open_log_file() {
 }
 
 // レジストリキー定数
-static constexpr LPCWSTR REG_KEY   = L"Software\\sysmeters";  // HKCU 以下のキーパス
-static constexpr LPCWSTR REG_TOPMOST = L"Topmost";            // 最前面設定の値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_KEY         = L"Software\\sysmeters";  // HKCU 以下のキーパス
+static constexpr LPCWSTR REG_TOPMOST     = L"Topmost";              // 最前面設定の値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_ALERT_TOAST = L"AlertToast";           // Toast 通知設定の値名（REG_DWORD、0 or 1）
 
-// レジストリから最前面設定を読む
+// HKCU\Software\sysmeters の DWORD 値を bool として読む
 //
-// HKCU\Software\sysmeters\Topmost (REG_DWORD) を読み、値が存在しないか型が不正な場合は false を返す。
-bool AppWindow::load_topmost() {
+// キーや値が存在しないか型が不正な場合は default_val を返す。
+static bool load_reg_bool(LPCWSTR name, bool default_val) {
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &key) != ERROR_SUCCESS)
-        return false;
+        return default_val;
 
-    DWORD val = 0, size = sizeof(val), type = 0;
-    LONG result = RegQueryValueExW(key, REG_TOPMOST, nullptr, &type,
+    DWORD val = default_val ? 1 : 0, size = sizeof(val), type = 0;
+    LONG result = RegQueryValueExW(key, name, nullptr, &type,
                                    reinterpret_cast<BYTE*>(&val), &size);
     RegCloseKey(key);
 
-    return result == ERROR_SUCCESS && type == REG_DWORD && val != 0;
+    if (result != ERROR_SUCCESS || type != REG_DWORD) return default_val;
+    return val != 0;
 }
 
-// レジストリに最前面設定を書く
-void AppWindow::save_topmost() {
+// HKCU\Software\sysmeters に DWORD 値（bool）を書く
+static void save_reg_bool(LPCWSTR name, bool value) {
     HKEY key;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr,
                         0, KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS)
         return;
 
-    DWORD val = topmost_ ? 1 : 0;
-    RegSetValueExW(key, REG_TOPMOST, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&val), sizeof(val));
+    DWORD val = value ? 1 : 0;
+    RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&val), sizeof(val));
     RegCloseKey(key);
 }
+
+// レジストリから最前面設定を読む（未設定時は false）
+bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     false); }
+
+// レジストリに最前面設定を書く
+void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_);     }
+
+// レジストリから Toast 通知設定を読む（未設定時は true）
+bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, true);  }
+
+// レジストリに Toast 通知設定を書く
+void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_); }
 
 // SetWindowPos で最前面状態を反映する
 void AppWindow::apply_topmost() {
@@ -462,7 +479,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (alert_) {
             uint32_t fired = alert_->check(*metrics_, *cfg_);
-            if (fired && cfg_->alert_toast) show_balloon(fired);
+            if (fired && toast_alert_) show_balloon(fired);
         }
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -493,6 +510,10 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             topmost_ = !topmost_;
             apply_topmost();
             save_topmost();
+            break;
+        case IDM_ALERT_TOAST:
+            toast_alert_ = !toast_alert_;
+            save_toast_alert();
             break;
         case IDM_GITHUB:       ShellExecuteW(nullptr, L"open", GITHUB_URL, nullptr, nullptr, SW_SHOW); break;
         case IDM_OPEN_CONFIG: open_config_file(); break;
