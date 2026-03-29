@@ -96,8 +96,10 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) 
             if (memcmp(id, "fmt ", 4) == 0) {
                 DWORD readSize = std::min(chunkSize, (DWORD)sizeof(WAVEFORMATEX));
                 ReadFile(hFile, &fmt, readSize, &nRead, nullptr);
-                if (chunkSize > readSize)
-                    SetFilePointer(hFile, (LONG)(chunkSize - readSize), nullptr, FILE_CURRENT);
+                // チャンク末尾＋パディング（偶数バイト境界）までシーク
+                LONG skip = (LONG)(((chunkSize + 1) & ~1u) - readSize);
+                if (skip > 0)
+                    SetFilePointer(hFile, skip, nullptr, FILE_CURRENT);
                 if (fmt.wFormatTag != WAVE_FORMAT_PCM || fmt.wBitsPerSample != 16
                         || fmt.nSamplesPerSec == 0 || fmt.nBlockAlign == 0) {
                     log_error("alert: unsupported format (16bit PCM WAV only)");
@@ -113,7 +115,9 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) 
             }
             else {
                 // 不明チャンクをスキップ（偶数バイト境界）
-                SetFilePointer(hFile, (LONG)((chunkSize + 1) & ~1u), nullptr, FILE_CURRENT);
+                DWORD evenSize = (chunkSize + 1) & ~1u;
+                if (evenSize > static_cast<DWORD>(LONG_MAX)) break;  // 異常なチャンクサイズ
+                SetFilePointer(hFile, static_cast<LONG>(evenSize), nullptr, FILE_CURRENT);
             }
         }
         if (!hasFmt || !hasData) {
@@ -224,7 +228,16 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) 
                 BYTE* buf = nullptr;
                 if (SUCCEEDED(render->GetBuffer(frames, &buf))) {
                     DWORD nActual = 0;
-                    ReadFile(hFile, buf, frames * fmt.nBlockAlign, &nActual, nullptr);
+                    DWORD bufBytes = frames * fmt.nBlockAlign;
+                    ReadFile(hFile, buf, bufBytes, &nActual, nullptr);
+                    if (nActual == 0) {
+                        render->ReleaseBuffer(0, 0);
+                        eof = true;
+                        break;
+                    }
+                    // ノイズ防止のため残りバッファをゼロ埋め
+                    if (nActual < bufBytes)
+                        memset(buf + nActual, 0, bufBytes - nActual);
                     UINT32 framesRead = nActual / fmt.nBlockAlign;
                     render->ReleaseBuffer(framesRead, 0);
                     sentFrames += framesRead;
@@ -290,7 +303,12 @@ void AlertManager::init() {
     wchar_t exe[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     auto wav = fs::path(exe).parent_path() / L"alert.wav";
-    wcscpy_s(wav_path_, wav.wstring().c_str());
+    auto wav_str = wav.wstring();
+    if (wav_str.size() >= MAX_PATH) {
+        log_error("alert: wav path exceeds MAX_PATH, sound alerts disabled");
+        return;
+    }
+    wcscpy_s(wav_path_, wav_str.c_str());
     wav_avail_ = (GetFileAttributesW(wav_path_) != INVALID_FILE_ATTRIBUTES);
     if (!wav_avail_)
         log_info("alert: alert.wav not found, sound alerts disabled");
@@ -365,6 +383,7 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
     };
 
     // ヒステリシスなし：1 回のみ発火（再起動またはセッション終了までリセットしない）
+    // check_item と異なり > を使用する。>= だと warn 値 0.0 のとき初期値 0.0 で即発火してしまうため。
     auto check_once = [&](Id id, float value, float warn) {
         if (!fired_[id] && value > warn) {
             fired_[id] = true;
@@ -399,6 +418,7 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
     if (m.claude.avail) {
         check_item(CLAUDE_5H, m.claude.five_h_pct,  cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
         check_item(CLAUDE_7D, m.claude.seven_d_pct, cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
+        // extra_enabled が無効になっても fired_[CLAUDE_OVER] は保持される（check_once はリセットなし）
         if (m.claude.extra_enabled)
             check_once(CLAUDE_OVER, m.claude.extra_used_dollars, cfg.warn_claude_over);
     }

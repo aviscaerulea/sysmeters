@@ -48,7 +48,6 @@ struct AppConfig {
     std::string log_dir = "logs";
 
     // 設定読み込み時のエラーメッセージ（空ならエラーなし）
-    //
     // load_config は log_init より前に呼ばれるためログ出力できない。
     // log_init の直後にこのフィールドを確認してログ出力すること。
     std::string config_error;
