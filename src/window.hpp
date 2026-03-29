@@ -30,11 +30,15 @@ public:
     void on_claude_done();
 
 private:
+    // レジストリ未設定時のデフォルト値（load_topmost / load_toast_alert の fallback）
+    static constexpr bool DEF_TOPMOST     = false;
+    static constexpr bool DEF_TOAST_ALERT = true;
+
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
-    int  last_pref_h_  = 0;     // update_window_size 早期リターン用キャッシュ
-    bool topmost_      = false;  // 最前面表示フラグ（レジストリから読み込み）
-    bool toast_alert_  = true;   // Toast 通知フラグ（レジストリから読み込み）
+    int  last_pref_h_  = 0;            // update_window_size 早期リターン用キャッシュ
+    bool topmost_      = DEF_TOPMOST;
+    bool toast_alert_  = DEF_TOAST_ALERT;
 
     AppConfig*       cfg_     = nullptr;
     AllMetrics*      metrics_ = nullptr;

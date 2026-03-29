@@ -380,17 +380,17 @@ static void save_reg_bool(LPCWSTR name, bool value) {
     RegCloseKey(key);
 }
 
-// レジストリから最前面設定を読む（未設定時は false）
-bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     false); }
+// レジストリから最前面設定を読む
+bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     DEF_TOPMOST);     }
 
 // レジストリに最前面設定を書く
-void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_);     }
+void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_);               }
 
-// レジストリから Toast 通知設定を読む（未設定時は true）
-bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, true);  }
+// レジストリから Toast 通知設定を読む
+bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, DEF_TOAST_ALERT); }
 
 // レジストリに Toast 通知設定を書く
-void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_); }
+void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_);           }
 
 // SetWindowPos で最前面状態を反映する
 void AppWindow::apply_topmost() {
@@ -472,7 +472,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             col_ip_->update();
         }
         else if (wp == TIMER_ANIM) {
-            // コアバー補間アニメーション（30fps）：変化があれば再描画
+            // コアバー補間アニメーション（30fps）：変化があれば再描画。警告チェック・ウィンドウリサイズは不要
             if (renderer_->update_core_animation(metrics_->cpu))
                 InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
