@@ -328,16 +328,36 @@ void AlertManager::play() {
     }
 }
 
-void AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
-    if (!wav_avail_ || !cfg.alert_sound) return;
+// 監視項目 ID に対応する表示ラベルを返す
+const wchar_t* AlertManager::label(Id id) {
+    switch (id) {
+    case CPU:        return L"CPU 使用率";
+    case GPU:        return L"GPU 使用率";
+    case RAM:        return L"RAM 使用率";
+    case VRAM:       return L"VRAM 使用率";
+    case DISK_C:     return L"ディスク C: 使用率";
+    case DISK_D:     return L"ディスク D: 使用率";
+    case TEMP_CPU:   return L"CPU 温度";
+    case TEMP_GPU:   return L"GPU 温度";
+    case TEMP_NVME_C: return L"NVMe C: 温度";
+    case TEMP_NVME_D: return L"NVMe D: 温度";
+    case DISK_GBH:   return L"ディスク書き込み量";
+    case UPTIME:     return L"OS 稼働時間";
+    case CLAUDE_5H:  return L"Claude 5h レートリミット";
+    case CLAUDE_7D:  return L"Claude 7d レートリミット";
+    case CLAUDE_OVER: return L"Claude 超過料金";
+    default:         return L"不明";
+    }
+}
 
-    bool need_play = false;
+uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
+    uint32_t fired_mask = 0;
 
     // 通常の閾値チェック：超えたら発火、リセット閾値を下回ったら解除
     auto check_item = [&](Id id, float value, float warn, float reset) {
         if (!fired_[id] && value >= warn) {
             fired_[id] = true;
-            need_play = true;
+            fired_mask |= (1u << id);
         }
         else if (fired_[id] && value < reset) {
             fired_[id] = false;
@@ -348,7 +368,7 @@ void AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
     auto check_once = [&](Id id, float value, float warn) {
         if (!fired_[id] && value > warn) {
             fired_[id] = true;
-            need_play  = true;
+            fired_mask |= (1u << id);
         }
     };
 
@@ -383,5 +403,6 @@ void AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
             check_once(CLAUDE_OVER, m.claude.extra_used_dollars, cfg.warn_claude_over);
     }
 
-    if (need_play) play();
+    if (fired_mask && cfg.alert_sound && wav_avail_) play();
+    return fired_mask;
 }

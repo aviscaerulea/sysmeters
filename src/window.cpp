@@ -261,6 +261,34 @@ void AppWindow::remove_tray_icon() {
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
+// 発火した項目のビットマスクからバルーン（Toast）通知を表示する
+//
+// fired_mask の各ビットが AlertManager::Id に対応する。
+// 複数項目が同時発火した場合は改行区切りで列挙する。
+void AppWindow::show_balloon(uint32_t fired_mask) {
+    NOTIFYICONDATAW nid{};
+    nid.cbSize      = sizeof(nid);
+    nid.hWnd        = hwnd_;
+    nid.uID         = IDI_TRAY_ICON;
+    nid.uFlags      = NIF_INFO;
+    nid.dwInfoFlags = NIIF_WARNING;
+    wcscpy_s(nid.szInfoTitle, L"sysmeters 警告");
+
+    // 発火した項目名を改行区切りで szInfo に書き込む
+    int written = 0;
+    for (int i = 0; i < AlertManager::COUNT_; i++) {
+        if (!(fired_mask & (1u << i))) continue;
+        auto id = static_cast<AlertManager::Id>(i);
+        int n = swprintf_s(nid.szInfo + written,
+                           std::size(nid.szInfo) - written,
+                           L"%s%s", (written > 0 ? L"\n" : L""),
+                           AlertManager::label(id));
+        if (n < 0) break;
+        written += n;
+    }
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
 void AppWindow::show_context_menu() {
     // メニュー最上部に「アプリ名 vX.Y.Z」を表示
     wchar_t label[64];
@@ -432,7 +460,10 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
-        if (alert_) alert_->check(*metrics_, *cfg_);
+        if (alert_) {
+            uint32_t fired = alert_->check(*metrics_, *cfg_);
+            if (fired && cfg_->alert_toast) show_balloon(fired);
+        }
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;

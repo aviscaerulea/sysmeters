@@ -51,6 +51,9 @@ private:
     void update_os_label();  // OS バージョンラベルをレジストリから再取得する
     void add_tray_icon();
     void remove_tray_icon();
+    // バルーン（Toast）通知表示
+    // fired_mask の各ビットが AlertManager::Id に対応する。
+    void show_balloon(uint32_t fired_mask);
     void show_context_menu();
     void open_config_file();
     void open_log_file();

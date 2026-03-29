@@ -66,6 +66,11 @@ cpu_core = 0xCC923E
 # デフォルト: true
 alert_sound = true
 
+# Toast 通知の有効/無効
+# true の場合、閾値を超えたときに OS のトースト通知を表示する
+# デフォルト: true
+alert_toast = true
+
 # CPU 使用率の警告閾値（単位：%）
 # この値を超えると CPU 全体/コア別のテキストやバーが赤（0xEF5350）になる
 # デフォルト: 95

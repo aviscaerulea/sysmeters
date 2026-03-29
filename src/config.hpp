@@ -34,8 +34,9 @@ struct AppConfig {
     float warn_temp_critical = 90.f;  // 温度危険・赤表示（℃）
     int   warn_uptime_days   = 7;     // OS アップタイム（日）
 
-    // 警告音設定
+    // 警告通知設定
     bool  alert_sound        = true;  // 警告音有効/無効
+    bool  alert_toast        = true;  // Toast 通知有効/無効
     float reset_cpu_pct      = 90.f;  // CPU 使用率の警告音リセット閾値（%）
     float reset_gpu_pct      = 90.f;  // GPU 使用率の警告音リセット閾値（%）
     float reset_mem_pct      = 85.f;  // RAM/VRAM/Disk Space の警告音リセット閾値（%）
