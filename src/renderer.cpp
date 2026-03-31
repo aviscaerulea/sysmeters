@@ -748,13 +748,13 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         set_brush_color(brush_text_, avail ? cfg.col_text : 0x888888);
         render_target_->DrawText(lbl, static_cast<UINT32>(wcslen(lbl)), font_small_, lr, brush_text_);
 
-        // パーセンテージ：90%超→太字赤、ペースマーカー超→黄、それ以外→通常色
+        // パーセンテージ：理想ペース超過が閾値以上→太字赤、ペースマーカー超→黄、それ以外→通常色
         if (avail) {
             wchar_t pct_buf[16];
             swprintf_s(pct_buf, L"%3.0f%%", pct);
             uint32_t pct_col;
             IDWriteTextFormat* pct_font;
-            if (pct >= warn_pct) {
+            if (expected_pct > 0.f && (pct - expected_pct) >= warn_pct) {
                 pct_col  = COL_WARN_RED;
                 pct_font = font_small_bold_;
             }

@@ -416,8 +416,13 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
         check_once(UPTIME, uptime_days, static_cast<float>(cfg.warn_uptime_days));
     }
     if (m.claude.avail) {
-        check_item(CLAUDE_5H, m.claude.five_h_pct,  cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
-        check_item(CLAUDE_7D, m.claude.seven_d_pct, cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
+        // expected_pct が 0 のとき（タイミング不明）は超過率を計算できないため判定しない
+        if (m.claude.five_h_expected_pct > 0.f)
+            check_item(CLAUDE_5H, m.claude.five_h_pct - m.claude.five_h_expected_pct,
+                       cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
+        if (m.claude.seven_d_expected_pct > 0.f)
+            check_item(CLAUDE_7D, m.claude.seven_d_pct - m.claude.seven_d_expected_pct,
+                       cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
         // extra_enabled が無効になっても fired_[CLAUDE_OVER] は保持される（check_once はリセットなし）
         if (m.claude.extra_enabled)
             check_once(CLAUDE_OVER, m.claude.extra_used_dollars, cfg.warn_claude_over);
