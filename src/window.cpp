@@ -20,6 +20,8 @@
 #include <dwmapi.h>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #ifndef APP_VERSION
 #define APP_VERSION "dev"
@@ -130,6 +132,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     // コレクタ初期化
     col_cpu_->init();
     col_gpu_->init();
+    col_mem_->init();
     col_disk_->init('C', 'D');
     col_net_->init();
     col_claude_->init(hwnd_);
@@ -315,14 +318,10 @@ void AppWindow::show_context_menu() {
 }
 
 void AppWindow::open_config_file() {
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(hinst_, path, MAX_PATH);
-    // 実行ファイルのディレクトリに sysmeters.toml がある
-    wchar_t* last_sep = wcsrchr(path, L'\\');
-    if (last_sep) { *(last_sep + 1) = L'\0'; }
-    wcscat_s(path, L"sysmeters.toml");
-
-    ShellExecuteW(nullptr, L"open", path, nullptr, nullptr, SW_SHOW);
+    wchar_t exe[MAX_PATH] = {};
+    GetModuleFileNameW(hinst_, exe, MAX_PATH);
+    auto path = fs::path(exe).parent_path() / L"sysmeters.toml";
+    ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOW);
 }
 
 // 当日のログファイルをエディタで開く
@@ -380,19 +379,11 @@ static void save_reg_bool(LPCWSTR name, bool value) {
     RegCloseKey(key);
 }
 
-// レジストリから最前面設定を読む
 bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     DEF_TOPMOST);     }
-
-// レジストリに最前面設定を書く
 void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_);               }
-
-// レジストリから Toast 通知設定を読む
 bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, DEF_TOAST_ALERT); }
-
-// レジストリに Toast 通知設定を書く
 void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_);           }
 
-// SetWindowPos で最前面状態を反映する
 void AppWindow::apply_topmost() {
     SetWindowPos(hwnd_, topmost_ ? HWND_TOPMOST : HWND_NOTOPMOST,
                  0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -407,14 +398,16 @@ void AppWindow::run() {
 }
 
 void AppWindow::destroy() {
-    KillTimer(hwnd_, TIMER_CPU);
-    KillTimer(hwnd_, TIMER_FAST);
-    KillTimer(hwnd_, TIMER_SLOW);
-    KillTimer(hwnd_, TIMER_CLAUDE);
-    KillTimer(hwnd_, TIMER_DISK_SPACE);
-    KillTimer(hwnd_, TIMER_SMART);
-    KillTimer(hwnd_, TIMER_IP);
-    KillTimer(hwnd_, TIMER_ANIM);
+    if (hwnd_) {
+        KillTimer(hwnd_, TIMER_CPU);
+        KillTimer(hwnd_, TIMER_FAST);
+        KillTimer(hwnd_, TIMER_SLOW);
+        KillTimer(hwnd_, TIMER_CLAUDE);
+        KillTimer(hwnd_, TIMER_DISK_SPACE);
+        KillTimer(hwnd_, TIMER_SMART);
+        KillTimer(hwnd_, TIMER_IP);
+        KillTimer(hwnd_, TIMER_ANIM);
+    }
     remove_tray_icon();
 
     if (alert_)      { alert_->shutdown();      delete alert_;      }
@@ -424,7 +417,7 @@ void AppWindow::destroy() {
     if (col_net_)    { col_net_->shutdown();    delete col_net_;    }
     if (col_claude_) { col_claude_->shutdown(); delete col_claude_; }
     if (col_ip_)     { col_ip_->shutdown();     delete col_ip_; }
-    if (col_mem_)    delete col_mem_;  // MemCollector は shutdown() 不要
+    if (col_mem_)   { col_mem_->shutdown();   delete col_mem_;   }
     if (renderer_)   { renderer_->shutdown(); delete renderer_; }
     delete metrics_;
     delete cfg_;
