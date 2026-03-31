@@ -306,7 +306,7 @@ void ClaudeCollector::do_fetch() {
             result.avail = true;
 
             // 超過料金情報（extra_usage）
-            if (!usage_j["extra_usage"].is_null()) {
+            if (usage_j["extra_usage"].is_object()) {
                 auto eu = usage_j["extra_usage"];
                 result.extra_enabled      = eu.value("is_enabled", false);
                 result.extra_used_dollars = static_cast<float>(eu.value("used_credits", 0.0)) / 100.f;
@@ -412,9 +412,9 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out) {
 void ClaudeCollector::shutdown() {
     notify_wnd_.store(nullptr);
 
-    // スレッドの完了を待つ（最大 8 秒：タイムアウト 1500ms × 4 フェーズ + 余裕）
+    // スレッドの完了を待つ（最大 15 秒：2 リクエスト × タイムアウト 1500ms × 4 フェーズ + 余裕）
     if (fetch_thread_) {
-        WaitForSingleObject(fetch_thread_, 8000);
+        WaitForSingleObject(fetch_thread_, 15000);
         CloseHandle(fetch_thread_);
         fetch_thread_ = nullptr;
     }

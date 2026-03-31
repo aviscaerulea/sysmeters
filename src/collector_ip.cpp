@@ -107,7 +107,8 @@ void WINAPI IpCollector::on_ip_change(PVOID context,
 void IpCollector::update() {
     bool expected = false;
     if (!fetching_.compare_exchange_strong(expected, true)) return;
-    if (fetch_thread_ && WaitForSingleObject(fetch_thread_, 0) == WAIT_OBJECT_0) {
+    if (fetch_thread_) {
+        // CAS 成功時点でフェッチ完了（fetching_.store(false)）は保証されているため安全にクローズできる
         CloseHandle(fetch_thread_);
         fetch_thread_ = nullptr;
     }

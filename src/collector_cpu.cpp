@@ -125,7 +125,6 @@ bool CpuCollector::init() {
         }
         brand[48] = '\0';
 
-        // 先頭空白除去
         const char* p = brand;
         while (*p == ' ') ++p;
 
@@ -133,13 +132,12 @@ bool CpuCollector::init() {
         char trimmed[49] = {};
         strncpy_s(trimmed, sizeof(trimmed), p, _TRUNCATE);
 
-        // 末尾スペース除去（CPUID ブランド文字列は末尾にスペースが入る場合がある）
+        // CPUID ブランド文字列は末尾にスペースが入る場合があるため除去する
         {
             size_t tlen = strlen(trimmed);
             while (tlen > 0 && trimmed[tlen - 1] == ' ') trimmed[--tlen] = '\0';
         }
 
-        // " Processor" 除去
         for (const char* suf : {" Processor", " processor"}) {
             size_t tlen = strlen(trimmed);
             size_t slen = strlen(suf);
@@ -148,7 +146,7 @@ bool CpuCollector::init() {
             }
         }
 
-        // " N-Core" パターン除去（" 8-Core" や " 12-Core" など）
+        // " 8-Core" や " 12-Core" など末尾の N-Core パターン除去
         {
             const char* last_sp = strrchr(trimmed, ' ');
             if (last_sp) {
