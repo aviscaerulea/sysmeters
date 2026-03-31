@@ -260,6 +260,16 @@ void ClaudeCollector::do_fetch() {
     ClaudeMetrics result;
     { std::lock_guard<std::mutex> lock(result_mutex_); result = pending_; }
 
+    // 毎時 0 分はキャッシュを削除して最新データを強制取得する
+    time_t now_t = static_cast<time_t>(now_ts());
+    struct tm local_t{};
+    localtime_s(&local_t, &now_t);
+    if (local_t.tm_min == 0) {
+        std::error_code ec;
+        fs::remove(cache_usage_path(), ec);
+        fs::remove(cache_plan_path(), ec);
+    }
+
     std::string token = get_token();
 
     // --- Usage API ---
