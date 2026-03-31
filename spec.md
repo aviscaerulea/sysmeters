@@ -139,8 +139,8 @@ Plays `alert.wav` (located in the same directory as the exe) when any monitored 
 | TEMP_NVME_D | `disk_d.smart_temp_celsius` | `temp_critical` (90°C) | `reset_temp` (85°C) |
 | DISK_GBH | max(C, D) `smart_write_gbh` | `disk_gbh` (10 GB/h) | `reset_disk_gbh` (5 GB/h) |
 | UPTIME | OS uptime (days) | `uptime_days` (7) | No reset (one-shot) |
-| CLAUDE_5H | `claude.five_h_pct` | `claude_5h_pct` (90%) | `reset_claude_5h_pct` (85%) |
-| CLAUDE_7D | `claude.seven_d_pct` | `claude_7d_pct` (90%) | `reset_claude_7d_pct` (85%) |
+| CLAUDE_5H | `claude.five_h_pct - five_h_expected_pct`（理想ペース超過率） | `claude_5h_pct` (20%、1 時間分) | `reset_claude_5h_pct` (0%、即時リセット) |
+| CLAUDE_7D | `claude.seven_d_pct - seven_d_expected_pct`（理想ペース超過率） | `claude_7d_pct` (7.14%、12 時間分) | `reset_claude_7d_pct` (0%、即時リセット) |
 | CLAUDE_OVER | `claude.extra_used_dollars` | `claude_over` (0.0) | No reset (one-shot) |
 
 \* 直近 10 サンプルの平均値で判定（瞬間スパイクによる誤警告を防止）
