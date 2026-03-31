@@ -20,7 +20,6 @@ static constexpr int    BLE_TRAILING_TONE_MS = 2000;
 static constexpr int    TONE_FREQ_HZ         = 19000;
 // 不可聴トーンの振幅（int16_t、フルスケール 32767 の約 3%）
 static constexpr int    TONE_AMPLITUDE       = 1000;
-// 円周率
 static constexpr double PI                   = 3.14159265358979323846;
 
 // 再生スレッドに渡すパラメータ
@@ -47,6 +46,34 @@ static void fill_tone_buffer(BYTE* buf, UINT32 frames,
         phase += step;
     }
     phase = std::fmod(phase, 2.0 * PI);
+}
+
+// IAudioClient に不可聴トーンを指定フレーム数再生する
+//
+// toneFrames: 再生するフレーム数。再生後は Stop()/Reset() で次のセグメントに備える。
+static void play_tone_segment(IAudioClient* client, IAudioRenderClient* render,
+                               HANDLE hEvent, UINT32 bufFrames,
+                               const WAVEFORMATEX& fmt, UINT32 toneFrames,
+                               const volatile bool* shutdown) {
+    UINT32 written = 0;
+    double phase   = 0.0;
+    client->Start();
+    while (written < toneFrames && !*shutdown) {
+        WaitForSingleObject(hEvent, 200);
+        UINT32 padding = 0;
+        client->GetCurrentPadding(&padding);
+        UINT32 avail  = bufFrames - padding;
+        UINT32 frames = std::min(avail, toneFrames - written);
+        if (frames == 0) continue;
+        BYTE* buf = nullptr;
+        if (SUCCEEDED(render->GetBuffer(frames, &buf))) {
+            fill_tone_buffer(buf, frames, fmt, phase);
+            render->ReleaseBuffer(frames, 0);
+            written += frames;
+        }
+    }
+    client->Stop();
+    client->Reset();
 }
 
 // WAV ファイルを WASAPI 共有モードで再生する
@@ -176,28 +203,8 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) 
         }
 
         // 冒頭不可聴トーン挿入（BLE ヘッドフォン省電力移行防止）
-        {
-            const UINT32 toneFrames = fmt.nSamplesPerSec * BLE_LEADING_TONE_MS / 1000;
-            UINT32 written = 0;
-            double phase   = 0.0;
-            client->Start();
-            while (written < toneFrames && !*shutdown) {
-                WaitForSingleObject(hEvent, 200);
-                UINT32 padding = 0;
-                client->GetCurrentPadding(&padding);
-                UINT32 avail  = bufFrames - padding;
-                UINT32 frames = std::min(avail, toneFrames - written);
-                if (frames == 0) continue;
-                BYTE* buf = nullptr;
-                if (SUCCEEDED(render->GetBuffer(frames, &buf))) {
-                    fill_tone_buffer(buf, frames, fmt, phase);
-                    render->ReleaseBuffer(frames, 0);
-                }
-                written += frames;
-            }
-            client->Stop();
-            client->Reset();
-        }
+        play_tone_segment(client, render, hEvent, bufFrames, fmt,
+                          fmt.nSamplesPerSec * BLE_LEADING_TONE_MS / 1000, shutdown);
 
         // data チャンク先頭にシーク
         SetFilePointer(hFile, (LONG)dataStart, nullptr, FILE_BEGIN);
@@ -247,27 +254,9 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) 
         }
 
         // 末尾不可聴トーン挿入（BLE ヘッドフォン省電力移行防止）
-        if (eof) {
-            const UINT32 trailFrames = fmt.nSamplesPerSec * BLE_TRAILING_TONE_MS / 1000;
-            UINT32 written = 0;
-            double phase   = 0.0;
-            client->Start();
-            while (written < trailFrames && !*shutdown) {
-                WaitForSingleObject(hEvent, 200);
-                UINT32 padding = 0;
-                client->GetCurrentPadding(&padding);
-                UINT32 avail  = bufFrames - padding;
-                UINT32 frames = std::min(avail, trailFrames - written);
-                if (frames == 0) continue;
-                BYTE* buf = nullptr;
-                if (SUCCEEDED(render->GetBuffer(frames, &buf))) {
-                    fill_tone_buffer(buf, frames, fmt, phase);
-                    render->ReleaseBuffer(frames, 0);
-                }
-                written += frames;
-            }
-            client->Stop();
-        }
+        if (eof)
+            play_tone_segment(client, render, hEvent, bufFrames, fmt,
+                              fmt.nSamplesPerSec * BLE_TRAILING_TONE_MS / 1000, shutdown);
 
         ok = eof;
     }
@@ -403,9 +392,9 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
         check_item(TEMP_CPU, m.cpu.temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
     if (m.gpu.avail)
         check_item(TEMP_GPU, m.gpu.temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
-    if (m.disk_c.smart_avail)
+    if (m.disk_c.smart_avail && m.disk_c.smart_temp_avail)
         check_item(TEMP_NVME_C, m.disk_c.smart_temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
-    if (m.disk_d.smart_avail)
+    if (m.disk_d.smart_avail && m.disk_d.smart_temp_avail)
         check_item(TEMP_NVME_D, m.disk_d.smart_temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
     {
         float gbh = std::max(m.disk_c.smart_write_gbh, m.disk_d.smart_write_gbh);

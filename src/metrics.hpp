@@ -67,7 +67,8 @@ struct DiskMetrics {
     int   phys_drive      = -1;    // 物理ドライブ番号（init 時に解決）
     float smart_write_gbh    = 0.f;  // 時間あたり書き込み量（GB/h）
     float smart_temp_celsius = 0.f;  // NVMe コンポジット温度（°C）
-    bool  smart_avail     = false;
+    bool  smart_avail        = false;
+    bool  smart_temp_avail   = false;  // 温度センサー実装済みフラグ（kelvin==0 は未実装）
 };
 
 // Network：送受信分離の面グラフ + グローバル IP

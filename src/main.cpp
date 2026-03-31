@@ -66,7 +66,7 @@ int main() {
     if (!window.create(hinst, cfg)) {
         log_error("window creation failed");
         log_shutdown();
-        MessageBoxW(nullptr, L"ウィンドウの作成に失敗しました。\n管理者権限で実行してください。",
+        MessageBoxW(nullptr, L"ウィンドウの作成に失敗しました。",
                     L"sysmeters", MB_ICONERROR);
         CoUninitialize();
         ReleaseMutex(mutex);

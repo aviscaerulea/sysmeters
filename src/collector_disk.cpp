@@ -208,9 +208,13 @@ static void query_nvme_smart(int phys_drive, DiskMetrics& dm) {
     std::memcpy(&written, log.data_units_written, sizeof(written));
 
     // コンポジット温度（Kelvin 16-bit LE → Celsius、poh に依存しない）
+    // NVMe 仕様上 kelvin==0 は温度センサー未実装を意味するため除外する
     uint16_t kelvin = static_cast<uint16_t>(log.temperature[0])
                     | (static_cast<uint16_t>(log.temperature[1]) << 8);
-    dm.smart_temp_celsius = (kelvin > 0) ? static_cast<float>(kelvin) - 273.15f : 0.f;
+    if (kelvin > 0) {
+        dm.smart_temp_celsius = static_cast<float>(kelvin) - 273.15f;
+        dm.smart_temp_avail   = true;
+    }
 
     // TBW（bytes）= DataUnitsWritten × 512,000 bytes
     if (poh > 0) {
@@ -232,9 +236,10 @@ void DiskCollector::update_smart(DiskMetrics& c, DiskMetrics& d) {
 
     // 同一物理ドライブのコピーブロック。DiskMetrics に S.M.A.R.T. フィールドを追加した際は必ずここも更新すること
     if (impl_->phys_drives[1] == impl_->phys_drives[0]) {
-        d.smart_write_gbh   = c.smart_write_gbh;
+        d.smart_write_gbh    = c.smart_write_gbh;
         d.smart_temp_celsius = c.smart_temp_celsius;
-        d.smart_avail       = c.smart_avail;
+        d.smart_avail        = c.smart_avail;
+        d.smart_temp_avail   = c.smart_temp_avail;
     }
     else {
         query_nvme_smart(impl_->phys_drives[1], d);
