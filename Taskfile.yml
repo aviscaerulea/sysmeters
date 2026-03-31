@@ -30,6 +30,12 @@ tasks:
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/AMDFamily17.bin' 'out/'"
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/alert.wav' 'out/'"
 
+  rebuild:
+    desc: sysmeters.exe を停止・リビルドして起動する
+    deps: [build]
+    cmds:
+      - cmd: pwsh.exe -NoProfile -Command "Start-Process 'out/{{.APP_NAME}}.exe'"
+
   release:
     desc: リリースビルド + zip パッケージング
     deps: [clean]
