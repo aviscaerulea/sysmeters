@@ -44,6 +44,7 @@ private:
     IDWriteTextFormat*     font_normal_     = nullptr;  // 通常テキスト（22pt）
     IDWriteTextFormat*     font_small_      = nullptr;  // 小テキスト（18pt）
     IDWriteTextFormat*     font_small_bold_ = nullptr;  // 小テキスト太字（18pt bold）
+    IDWriteTextFormat*     font_tiny_       = nullptr;  // 極小テキスト（16pt）
     IDWriteTextFormat*     font_large_      = nullptr;  // グラフ内オーバーレイ（22pt bold）
     IDWriteTextFormat*     font_xlarge_     = nullptr;  // CPU/GPU 使用率オーバーレイ（33pt bold）
 

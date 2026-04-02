@@ -58,6 +58,9 @@ AppConfig load_config(const std::string& path) {
         cfg.warn_temp_caution  = get_float("threshold", "temp_caution",  cfg.warn_temp_caution);
         cfg.warn_temp_critical = get_float("threshold", "temp_critical",  cfg.warn_temp_critical);
         cfg.warn_uptime_days   = get_int  ("threshold", "uptime_days",   cfg.warn_uptime_days);
+        cfg.warn_processes     = get_int  ("threshold", "processes",     cfg.warn_processes);
+        cfg.warn_threads       = get_int  ("threshold", "threads",       cfg.warn_threads);
+        cfg.warn_handles       = get_int  ("threshold", "handles",       cfg.warn_handles);
 
         try { cfg.alert_sound = toml::find_or<bool>(data, "threshold", "alert_sound", cfg.alert_sound); }
         catch (...) {}
@@ -94,6 +97,9 @@ AppConfig load_config(const std::string& path) {
     if (cfg.warn_temp_caution >= cfg.warn_temp_critical)
         cfg.warn_temp_critical = std::min(cfg.warn_temp_caution + 10.f, 200.f);
     cfg.warn_uptime_days = std::max(0, cfg.warn_uptime_days);
+    cfg.warn_processes   = std::clamp(cfg.warn_processes, 0, 999999);
+    cfg.warn_threads     = std::clamp(cfg.warn_threads,   0, 999999);
+    cfg.warn_handles     = std::clamp(cfg.warn_handles,   0, 999999);
 
     // 警告音リセット閾値のサニティチェック
     //
