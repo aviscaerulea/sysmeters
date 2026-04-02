@@ -37,10 +37,11 @@ Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsof
 | Element | Display |
 |---|---|
 | Overall usage | Filled area graph (last 60 s) + percentage value |
+| Hard fault | Filled area graph overlay (second Y-axis, 0-1000 Page Reads/sec, muted amber-red `#B05030`) |
 | Per-core usage | Vertical bars side by side (0-100%, count = logical core count, dynamically determined at runtime) |
 | Temperature | Horizontal bar (0-100°C) + value (°C), 3-level color coding |
 
-Data source: PDH (usage), PawnIO driver (`\\.\PawnIO`) for temperature (PawnIO driver must be installed; hidden when unavailable):
+Data source: PDH (usage, hard faults via `\Memory\Page Reads/sec`), PawnIO driver (`\\.\PawnIO`) for temperature (PawnIO driver must be installed; hidden when unavailable):
 - Intel: `MSR_IA32_PACKAGE_THERM_STATUS` via `IntelMSR.bin`
 - AMD: SMN register `0x59800` (THM_TCON_CUR_TMP) via `AMDFamily17.bin`
 
@@ -181,7 +182,7 @@ Applied to CPU, GPU, and Disk (NVMe) temperatures.
 
 | Item | Value |
 |---|---|
-| CPU polling interval | 0.9 s |
+| CPU polling interval | 0.9 s (CPU/GPU/hard fault) |
 | GPU polling interval | 0.9 s (CPU と同一タイマー) |
 | Fast polling interval | 1.0 s (Disk/Net) |
 | Core bar animation interval | 33 ms (≒ 30fps, lerp to target) |

@@ -13,6 +13,7 @@
 static constexpr uint32_t COL_WARN_RED    = 0xEF5350;  // 赤（危険・閾値超過）
 static constexpr uint32_t COL_WARN_ORANGE = 0xFFA726;  // オレンジ（注意・温度中間）
 static constexpr uint32_t COL_WARN_YELLOW = 0xd7b437;  // 黄（ペース超過）
+static constexpr uint32_t COL_HARD_FAULT  = 0xB05030;  // アンバー寄りの赤（ハードフォールト）
 
 // ウィンドウレイアウト定数（クライアント領域内）
 static constexpr float PAD        = 11.f;   // 内側パディング
@@ -341,17 +342,18 @@ float Renderer::draw_os(const OsMetrics& m, const AppConfig& cfg, float y) {
     return y + SECTION_H;
 }
 
-float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
+float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
     draw_section_label_with_model(x, y, ww, L"CPU", m.name, cfg);
     y += SECTION_H;
 
-    // 全体使用率 面グラフ（全幅）+ オーバーレイテキスト
+    // ハードフォールト（背面、第 2 Y 軸：0～1000 Page Reads/sec）→ CPU 使用率（前面）の順で描画
     wchar_t buf[32];
     D2D1_RECT_F gr = D2D1::RectF(x, y, x + ww, y + GRAPH_H_LG);
-    draw_area_graph(m.total_history, 100.f, gr, cfg.col_graph_fill);
+    draw_area_graph(mem.hard_fault_history, 1000.f, gr, COL_HARD_FAULT);
+    draw_area_graph(m.total_history, 100.f, gr, cfg.col_graph_fill, false);
 
     // パーセンテージ（左寄せ、95% 超で赤、font_xlarge_）
     swprintf_s(buf, L"%4.1f%%", m.total_pct);
@@ -374,6 +376,20 @@ float Renderer::draw_cpu(const CpuMetrics& m, const AppConfig& cfg, float y) {
         font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
         font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    }
+
+    // ハードフォールト値（温度直下、右寄せ、目立たないグレー）
+    {
+        float latest = mem.hard_fault_history.empty() ? 0.f
+            : mem.hard_fault_history.at(mem.hard_fault_history.size() - 1);
+        wchar_t hf_buf[16];
+        swprintf_s(hf_buf, L"HF:%4d", static_cast<int>(latest));
+        set_brush_color(brush_text_, 0x666666);
+        D2D1_RECT_F hf_rect = D2D1::RectF(ol.left, ol.top + 26.f, ol.right, ol.bottom);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        render_target_->DrawText(hf_buf, static_cast<UINT32>(wcslen(hf_buf)), font_small_,
+            hf_rect, brush_text_);
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     }
 
     y += GRAPH_H_LG + GAP;
@@ -861,7 +877,7 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg) {
 
     float y = PAD;
     y = draw_os(m.os, cfg, y);          y += SECTION_GAP;
-    y = draw_cpu(m.cpu, cfg, y);        y += SECTION_GAP;
+    y = draw_cpu(m.cpu, m.mem, cfg, y); y += SECTION_GAP;
     y = draw_gpu(m.gpu, cfg, y);        y += SECTION_GAP;
     y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP;
     y = draw_vram(m.vram, cfg, y);      y += SECTION_GAP;

@@ -9,6 +9,10 @@ public:
     // WSL2 未起動の環境ではカウンタ取得を省略して初期化する。
     void init();
     void update(MemMetrics& out);
+
+    // ハードフォールトカウンタを更新する（TIMER_FAST から 1 秒ごとに呼び出す）
+    void update_hard_faults(MemMetrics& out);
+
     void shutdown();
 
     ~MemCollector() { shutdown(); }

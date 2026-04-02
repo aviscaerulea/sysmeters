@@ -35,12 +35,13 @@ struct GpuMetrics {
     char  name[48]     = {};            // GPU 名（NVML 取得）
 };
 
-// RAM：横バー + 使用量表示
+// RAM：横バー + 使用量表示 + ハードフォールト重畳グラフ
 struct MemMetrics {
     float usage_pct = 0.f;
     float used_gb   = 0.f;
     float total_gb  = 0.f;
     float wsl_gb    = 0.f;  // vmmemWSL プロセスの Working Set 合計（WSL 非使用時は 0）
+    RingBuffer<float, 60> hard_fault_history;  // ハードフォールト履歴（Pages Input/sec）
 };
 
 // VRAM：面グラフ + 使用量表示

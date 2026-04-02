@@ -432,9 +432,10 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_TIMER:
         if (wp == TIMER_CPU) {
-            // CPU/GPU 更新（0.9 秒）
+            // CPU/GPU/ハードフォールト更新（0.9 秒）：CPU グラフ描画タイミングを同期
             col_cpu_->update(metrics_->cpu);
             col_gpu_->update_gpu(metrics_->gpu);
+            col_mem_->update_hard_faults(metrics_->mem);
         }
         else if (wp == TIMER_FAST) {
             // 高速更新（1.0 秒）：Disk/Net
