@@ -88,6 +88,10 @@ bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
         18.f, L"ja-JP", &font_small_bold_))) return false;
 
     if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        16.f, L"ja-JP", &font_tiny_))) return false;
+
+    if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         22.f, L"ja-JP", &font_large_))) return false;
 
@@ -134,6 +138,7 @@ void Renderer::shutdown() {
     safe_release(&font_normal_);
     safe_release(&font_small_);
     safe_release(&font_small_bold_);
+    safe_release(&font_tiny_);
     safe_release(&font_large_);
     safe_release(&font_xlarge_);
     safe_release(&dwrite_factory_);
@@ -413,6 +418,48 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
         core_x += bar_w + GAP_BAR;
     }
     y += CORE_BAR_H + GAP;
+
+    // プロセス数/スレッド数/ハンドル数（1 行テキスト、閾値超過で赤文字）
+    {
+        wchar_t proc_buf[16], thr_buf[20], hdl_buf[20];
+        swprintf_s(proc_buf, L"Proc:% 4d",     m.processes);
+        swprintf_s(thr_buf,  L"  Thread:% 5d", m.threads);
+        swprintf_s(hdl_buf,  L"  Handle:% 6d", m.handles);
+
+        auto measure = [&](const wchar_t* text) -> float {
+            IDWriteTextLayout* layout = nullptr;
+            DWRITE_TEXT_METRICS tm{};
+            if (SUCCEEDED(dwrite_factory_->CreateTextLayout(
+                    text, static_cast<UINT32>(wcslen(text)),
+                    font_tiny_, 10000.f, SECTION_H, &layout))) {
+                layout->GetMetrics(&tm);
+                layout->Release();
+            }
+            return tm.widthIncludingTrailingWhitespace;
+        };
+
+        float hw = measure(hdl_buf);
+        float tw = measure(thr_buf);
+        float pw = measure(proc_buf);
+
+        float right = x + ww;
+        struct { const wchar_t* text; float w; int val; int warn; } parts[] = {
+            { hdl_buf, hw, m.handles,   cfg.warn_handles   },
+            { thr_buf, tw, m.threads,   cfg.warn_threads   },
+            { proc_buf, pw, m.processes, cfg.warn_processes },
+        };
+        for (auto& p : parts) {
+            uint32_t col = (p.val > p.warn) ? COL_WARN_RED : cfg.col_text;
+            D2D1_RECT_F r = D2D1::RectF(right - p.w, y, right, y + SECTION_H);
+            set_brush_color(brush_text_, col, 0.6f);
+            render_target_->DrawText(p.text, static_cast<UINT32>(wcslen(p.text)),
+                                     font_tiny_, r, brush_text_);
+            right -= p.w;
+        }
+
+        set_brush_color(brush_text_, cfg.col_text);
+        y += SECTION_H;
+    }
 
     return y;
 }

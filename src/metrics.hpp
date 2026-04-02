@@ -15,7 +15,7 @@ struct OsMetrics {
     ULONGLONG uptime_ms = 0;
 };
 
-// CPU：全体使用率（面グラフ）+ コア別縦バー + 温度（横バー）
+// CPU：全体使用率（面グラフ）+ コア別縦バー + 温度（横バー）+ システム統計
 struct CpuMetrics {
     RingBuffer<float, 60> total_history;  // 全体使用率履歴（%）
     float total_pct  = 0.f;
@@ -24,6 +24,9 @@ struct CpuMetrics {
     float temp_celsius = 0.f;           // CPU 温度
     bool  temp_avail   = false;         // PawnIO 温度取得成功フラグ
     char  name[48]     = {};            // CPU ブランド名（CPUID 取得）
+    int processes = 0;
+    int threads   = 0;
+    int handles   = 0;
 };
 
 // GPU：使用率（面グラフ）+ 温度（横バー）

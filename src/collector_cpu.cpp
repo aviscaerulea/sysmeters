@@ -30,6 +30,11 @@ static constexpr ULONG64 MSR_IA32_PACKAGE_THERM_STATUS = 0x1B1;
 // AMD SMN アドレス（F17H_M01H_THM_TCON_CUR_TMP - Zen 1〜5 共通）
 static constexpr ULONG64 SMN_THM_TCON_CUR_TMP = 0x00059800;
 
+// システム統計 PDH カウンタパス
+static constexpr wchar_t PDH_SYSTEM_PROCESSES[] = L"\\System\\Processes";
+static constexpr wchar_t PDH_SYSTEM_THREADS[]   = L"\\System\\Threads";
+static constexpr wchar_t PDH_PROCESS_HANDLES[]  = L"\\Process(_Total)\\Handle Count";
+
 // IOCTL_PIO_EXECUTE_FN 入力バッファ（PawnIOLib.cpp の pawnio_execute_nt に準拠）
 //
 // 先頭 32 バイトが関数名（ゼロ埋め）、以降が ULONG64 の入力パラメータ配列。
@@ -47,6 +52,10 @@ struct CpuCollector::Impl {
     PDH_HCOUNTER counter_total  = nullptr;
     std::vector<PDH_HCOUNTER> counter_cores;
     int core_count = 0;  // 登録済みコアカウンタ数（論理コア数）
+
+    PDH_HCOUNTER counter_processes = nullptr;
+    PDH_HCOUNTER counter_threads   = nullptr;
+    PDH_HCOUNTER counter_handles   = nullptr;
 
     // PawnIO デバイスハンドルと状態
     HANDLE    hdev_pawnio  = INVALID_HANDLE_VALUE;
@@ -111,6 +120,10 @@ bool CpuCollector::init() {
         }
     }
     impl_->core_count = static_cast<int>(impl_->counter_cores.size());
+
+    PdhAddEnglishCounterW(impl_->query, PDH_SYSTEM_PROCESSES, 0, &impl_->counter_processes);
+    PdhAddEnglishCounterW(impl_->query, PDH_SYSTEM_THREADS,   0, &impl_->counter_threads);
+    PdhAddEnglishCounterW(impl_->query, PDH_PROCESS_HANDLES,  0, &impl_->counter_handles);
 
     // 最初のサンプリング（PDH は 2 回目以降が有効）
     PdhCollectQueryData(impl_->query);
@@ -303,6 +316,22 @@ void CpuCollector::update(CpuMetrics& out) {
         PDH_FMT_COUNTERVALUE cv{};
         if (PdhGetFormattedCounterValue(impl_->counter_cores[i], PDH_FMT_DOUBLE, nullptr, &cv) == ERROR_SUCCESS) {
             out.core_pct[i] = static_cast<float>(cv.doubleValue);
+        }
+    }
+
+    {
+        PDH_FMT_COUNTERVALUE sv{};
+        if (impl_->counter_processes
+                && PdhGetFormattedCounterValue(impl_->counter_processes, PDH_FMT_LARGE, nullptr, &sv) == ERROR_SUCCESS) {
+            out.processes = static_cast<int>(sv.largeValue);
+        }
+        if (impl_->counter_threads
+                && PdhGetFormattedCounterValue(impl_->counter_threads, PDH_FMT_LARGE, nullptr, &sv) == ERROR_SUCCESS) {
+            out.threads = static_cast<int>(sv.largeValue);
+        }
+        if (impl_->counter_handles
+                && PdhGetFormattedCounterValue(impl_->counter_handles, PDH_FMT_LARGE, nullptr, &sv) == ERROR_SUCCESS) {
+            out.handles = static_cast<int>(sv.largeValue);
         }
     }
 

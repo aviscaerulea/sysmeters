@@ -40,8 +40,9 @@ Data source: `GetComputerNameW` (machine name), registry `HKLM\SOFTWARE\Microsof
 | Hard fault | Filled area graph overlay (second Y-axis, 0-1000 Page Reads/sec, muted amber-red `#B05030`) |
 | Per-core usage | Vertical bars side by side (0-100%, count = logical core count, dynamically determined at runtime) |
 | Temperature | Horizontal bar (0-100°C) + value (°C), 3-level color coding |
+| System stats | `Proc:N  Thread:N  Handle:N` (font_tiny_, 16pt, alpha 0.6, right-aligned) — each value turns red when exceeding threshold (`processes`/`threads`/`handles` in `[threshold]`) |
 
-Data source: PDH (usage, hard faults via `\Memory\Page Reads/sec`), PawnIO driver (`\\.\PawnIO`) for temperature (PawnIO driver must be installed; hidden when unavailable):
+Data source: PDH (usage, hard faults via `\Memory\Page Reads/sec`, system stats via `\System\Processes` / `\System\Threads` / `\Process(_Total)\Handle Count`), PawnIO driver (`\\.\PawnIO`) for temperature (PawnIO driver must be installed; hidden when unavailable):
 - Intel: `MSR_IA32_PACKAGE_THERM_STATUS` via `IntelMSR.bin`
 - AMD: SMN register `0x59800` (THM_TCON_CUR_TMP) via `AMDFamily17.bin`
 

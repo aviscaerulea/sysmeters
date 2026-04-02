@@ -33,6 +33,9 @@ struct AppConfig {
     float warn_temp_caution  = 70.f;  // 温度注意・オレンジ表示（℃）
     float warn_temp_critical = 90.f;  // 温度危険・赤表示（℃）
     int   warn_uptime_days   = 7;     // OS アップタイム（日）
+    int   warn_processes     = 1000;  // プロセス数の警告閾値
+    int   warn_threads       = 10000; // スレッド数の警告閾値
+    int   warn_handles       = 250000;// ハンドル数の警告閾値
 
     // 警告音設定
     bool  alert_sound        = true;  // 警告音有効/無効
