@@ -31,9 +31,12 @@ tasks:
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/alert.wav' 'out/'"
 
   rebuild:
-    desc: sysmeters.exe を停止・リビルドして起動する
-    deps: [build]
+    desc: 実行中のバイナリを停止し、クリーンビルドして再起動する
     cmds:
+      - cmd: taskkill /IM {{.APP_NAME}}.exe /F
+        ignore_error: true
+      - task: clean
+      - task: build
       - cmd: pwsh.exe -NoProfile -Command "Start-Process 'out/{{.APP_NAME}}.exe'"
 
   release:
