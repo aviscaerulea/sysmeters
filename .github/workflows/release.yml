@@ -1,0 +1,58 @@
+# vim: set ft=yaml fenc=utf-8 ff=unix sw=2 ts=2 et :
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      TAG_NAME: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        shell: pwsh
+        run: |
+          $version = $env:TAG_NAME -replace '^v', ''
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Fetch dependencies
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/fetch-deps.ps1
+
+      - name: Build (Release)
+        shell: pwsh
+        run: pwsh -NoProfile -File build.ps1 -Version $env:VERSION -Config Release
+
+      - name: Copy assets
+        shell: pwsh
+        run: |
+          Copy-Item 'sysmeters.toml' 'out/'
+          Copy-Item 'data/IntelMSR.bin' 'out/'
+          Copy-Item 'data/AMDFamily17.bin' 'out/'
+          Copy-Item 'data/alert.wav' 'out/'
+
+      - name: Create zip package
+        shell: pwsh
+        run: |
+          $zipName = "sysmeters-$env:TAG_NAME-x64.zip"
+          Compress-Archive -Path 'out/sysmeters.exe','out/sysmeters.toml','out/IntelMSR.bin','out/AMDFamily17.bin','out/alert.wav' -DestinationPath "out/$zipName" -Force
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+
+      - name: Upload release asset
+        shell: bash
+        run: gh release upload "$TAG_NAME" "out/$ZIP_NAME" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZIP_NAME: ${{ env.ZIP_NAME }}
