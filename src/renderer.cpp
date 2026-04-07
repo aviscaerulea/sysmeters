@@ -8,12 +8,25 @@
 #include <cstdio>
 #include <ctime>
 #include <cwchar>
+#include <string>
 
 // 警告色（各セクション共通）
 static constexpr uint32_t COL_WARN_RED    = 0xEF5350;  // 赤（危険・閾値超過）
 static constexpr uint32_t COL_WARN_ORANGE = 0xFFA726;  // オレンジ（注意・温度中間）
 static constexpr uint32_t COL_WARN_YELLOW = 0xd7b437;  // 黄（ペース超過）
 static constexpr uint32_t COL_HARD_FAULT  = 0xB05030;  // アンバー寄りの赤（ハードフォールト）
+
+// 整数値を3桁区切りカンマ付きワイド文字列に変換する
+static std::wstring fmt_comma(int v)
+{
+    std::wstring s = std::to_wstring(v);
+    int pos = static_cast<int>(s.size()) - 3;
+    while (pos > 0) {
+        s.insert(pos, 1, L',');
+        pos -= 3;
+    }
+    return s;
+}
 
 // ウィンドウレイアウト定数（クライアント領域内）
 static constexpr float PAD        = 11.f;   // 内側パディング
@@ -421,10 +434,10 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
 
     // プロセス数/スレッド数/ハンドル数（1 行テキスト、閾値超過で赤文字）
     {
-        wchar_t proc_buf[16], thr_buf[20], hdl_buf[20];
-        swprintf_s(proc_buf, L"Proc:% 4d",     m.processes);
-        swprintf_s(thr_buf,  L"  Thread:% 5d", m.threads);
-        swprintf_s(hdl_buf,  L"  Handle:% 6d", m.handles);
+        wchar_t proc_buf[24], thr_buf[28], hdl_buf[28];
+        swprintf_s(proc_buf, L"Proc:%5s",     fmt_comma(m.processes).c_str());
+        swprintf_s(thr_buf,  L"  Thread:%6s", fmt_comma(m.threads).c_str());
+        swprintf_s(hdl_buf,  L"  Handle:%9s", fmt_comma(m.handles).c_str());
 
         auto measure = [&](const wchar_t* text) -> float {
             IDWriteTextLayout* layout = nullptr;
