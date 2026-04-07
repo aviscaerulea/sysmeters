@@ -7,7 +7,6 @@ out/
 *.local.*
 include/toml.hpp
 include/json.hpp
-data/
 .clasp.json
 **/.env
 .serena/
