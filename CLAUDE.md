@@ -66,6 +66,10 @@ WM_TIMER (1s) → Collectors → Metrics → Renderer → Direct2D → Window
 - **設定**：TOML（toml11 シングルヘッダ）
 - **JSON**：nlohmann/json シングルヘッダ
 
+## 実装上の注意点
+
+- `docs/screenshot.png` を差し替える際は、グローバル IP アドレスがマスクされていることを必ず確認する
+
 ## 参考
 
 @README.md

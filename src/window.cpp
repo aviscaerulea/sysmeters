@@ -276,7 +276,6 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
     nid.uID         = IDI_TRAY_ICON;
     nid.uFlags      = NIF_INFO;
     nid.dwInfoFlags = NIIF_WARNING;
-    wcscpy_s(nid.szInfoTitle, L"sysmeters 警告");
 
     // 発火した項目名を改行区切りで szInfo に書き込む
     int written = 0;
