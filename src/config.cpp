@@ -7,7 +7,7 @@
 AppConfig load_config(const std::string& path) {
     AppConfig cfg;
 
-    std::ifstream ifs(path);
+    std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) return cfg;  // ファイルなし → デフォルト値で返す
 
     try {
