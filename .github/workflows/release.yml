@@ -22,11 +22,6 @@ jobs:
           $version = $env:TAG_NAME -replace '^v', ''
           echo "VERSION=$version" >> $env:GITHUB_ENV
 
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1.13.0
-        with:
-          arch: x64
-
       - name: Fetch dependencies
         shell: pwsh
         run: pwsh -NoProfile -File scripts/fetch-deps.ps1
