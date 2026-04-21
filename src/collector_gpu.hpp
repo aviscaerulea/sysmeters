@@ -10,10 +10,10 @@ class GpuCollector {
 public:
     // nvml.dll を動的ロードして初期化する
     bool init();
-    // GPU 使用率・温度のみ更新する
+    // GPU 使用率・温度を更新する（usage_pct と usage_history の同一サンプル更新）
     void update_gpu(GpuMetrics& gpu);
-    // GPU 使用率・温度 + VRAM を更新する
-    void update_all(GpuMetrics& gpu, VramMetrics& vram);
+    // VRAM のみ更新する
+    void update_vram(VramMetrics& vram);
     void shutdown();
 
     ~GpuCollector() { shutdown(); }
