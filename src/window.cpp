@@ -277,7 +277,9 @@ void AppWindow::remove_tray_icon() {
 // 発火した項目のビットマスクからバルーン（Toast）通知を表示する
 //
 // fired_mask の各ビットが AlertManager::Id に対応する。
-// 複数項目が同時発火した場合は改行区切りで列挙する。
+// 1 件発火：Toast の 3 行表示領域の真ん中（2 行目）に配置するため前後に改行を挿入する。
+// 2〜3 件：上から順に詰めて表示する。
+// 4 件以上：上 2 行を項目名、3 行目を「ほか N 件」に集約する。
 void AppWindow::show_balloon(uint32_t fired_mask) {
     NOTIFYICONDATAW nid{};
     nid.cbSize      = sizeof(nid);
@@ -286,18 +288,30 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
     nid.uFlags      = NIF_INFO;
     nid.dwInfoFlags = NIIF_WARNING;
 
-    // 発火した項目名を改行区切りで szInfo に書き込む
-    int written = 0;
+    const wchar_t* labels[AlertManager::COUNT_] = {};
+    int n = 0;
     for (int i = 0; i < AlertManager::COUNT_; i++) {
         if (!(fired_mask & (1u << i))) continue;
-        auto id = static_cast<AlertManager::Id>(i);
-        int n = swprintf_s(nid.szInfo + written,
-                           std::size(nid.szInfo) - written,
-                           L"%s%s", (written > 0 ? L"\n" : L""),
-                           AlertManager::label(id));
-        if (n < 0) break;
-        written += n;
+        labels[n++] = AlertManager::label(static_cast<AlertManager::Id>(i));
     }
+    if (n == 0) return;
+
+    // ラベル合計長が szInfo の容量（256 wchar）を超えても invalid parameter handler を
+    // 発火させないため、_snwprintf_s に _TRUNCATE を指定してオーバーフロー時は切り詰める
+    const size_t cap = std::size(nid.szInfo);
+    if (n == 1) {
+        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"\n　%s\n", labels[0]);
+    }
+    else if (n == 2) {
+        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"　%s\n　%s", labels[0], labels[1]);
+    }
+    else if (n == 3) {
+        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"　%s\n　%s\n　%s", labels[0], labels[1], labels[2]);
+    }
+    else {
+        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"　%s\n　%s\n　ほか %d 件", labels[0], labels[1], n - 2);
+    }
+
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
