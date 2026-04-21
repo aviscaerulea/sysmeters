@@ -165,7 +165,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     // 初回描画（全メトリクスを一括取得）
     metrics_->os.uptime_ms = GetTickCount64();
     col_cpu_->update(metrics_->cpu);
-    col_gpu_->update_all(metrics_->gpu, metrics_->vram);
+    col_gpu_->update_gpu(metrics_->gpu);
+    col_gpu_->update_vram(metrics_->vram);
     col_mem_->update(metrics_->mem);
     col_disk_->update(metrics_->disk_c, metrics_->disk_d);
     col_disk_->update_space(metrics_->disk_c, metrics_->disk_d);
@@ -444,7 +445,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else if (wp == TIMER_SLOW) {
             // 低速更新（2.0 秒）：RAM/VRAM
             col_mem_->update(metrics_->mem);
-            col_gpu_->update_all(metrics_->gpu, metrics_->vram);
+            col_gpu_->update_vram(metrics_->vram);
         }
         else if (wp == TIMER_CLAUDE) {
             // Claude + OS 更新（60 秒）：5h/7d レートリミット + アップタイム

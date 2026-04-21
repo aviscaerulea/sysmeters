@@ -101,7 +101,8 @@ bool GpuCollector::init() {
     return true;
 }
 
-// GPU 使用率・温度のみ更新する（NVML の VRAM クエリをスキップ）
+// GPU 使用率・温度を更新する
+// usage_pct と usage_history を同一サンプルで更新し、描画時の乖離を防ぐ
 void GpuCollector::update_gpu(GpuMetrics& gpu) {
     if (!impl_ || !impl_->device) {
         gpu.avail = false;
@@ -119,32 +120,18 @@ void GpuCollector::update_gpu(GpuMetrics& gpu) {
     if (impl_->fn_get_temp(impl_->device, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
         gpu.temp_celsius = static_cast<float>(temp);
     }
-}
-
-// GPU 使用率・温度 + VRAM を更新する
-// TIMER_FAST の update_gpu() と二重 push しないよう、GPU 使用率は push せず値のみ更新する
-void GpuCollector::update_all(GpuMetrics& gpu, VramMetrics& vram) {
-    if (!impl_ || !impl_->device) {
-        gpu.avail  = false;
-        vram.avail = false;
-        return;
-    }
-
-    // GPU 使用率（値のみ更新、履歴 push は update_gpu に委ねる）
-    nvmlUtilization_t util{};
-    if (impl_->fn_get_util(impl_->device, &util) == NVML_SUCCESS) {
-        gpu.usage_pct = static_cast<float>(util.gpu);
-        gpu.avail = true;
-    }
-
-    // GPU 温度
-    unsigned int temp = 0;
-    if (impl_->fn_get_temp(impl_->device, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
-        gpu.temp_celsius = static_cast<float>(temp);
-    }
 
     // GPU 名をメトリクスにコピー
     memcpy(gpu.name, impl_->gpu_name, sizeof(gpu.name));
+}
+
+// VRAM を更新する
+// GPU 使用率・温度は update_gpu に一元化しているため、ここでは扱わない
+void GpuCollector::update_vram(VramMetrics& vram) {
+    if (!impl_ || !impl_->device) {
+        vram.avail = false;
+        return;
+    }
 
     nvmlMemory_t mem{};
     if (impl_->fn_get_mem(impl_->device, &mem) == NVML_SUCCESS) {
