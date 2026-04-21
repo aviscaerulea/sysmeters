@@ -72,11 +72,17 @@ AppConfig load_config(const std::string& path) {
         cfg.reset_claude_5h_pct = get_float("threshold", "reset_claude_5h_pct", cfg.reset_claude_5h_pct);
         cfg.reset_claude_7d_pct = get_float("threshold", "reset_claude_7d_pct", cfg.reset_claude_7d_pct);
 
+        try { cfg.priority_control_enable     = toml::find_or<bool>(data, "process", "priority_control",   cfg.priority_control_enable); } catch (...) {}
+        cfg.priority_check_interval_sec = get_int("process", "check_interval_sec", cfg.priority_check_interval_sec);
+
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
     }
     catch (...) {
         cfg.config_error = "TOML parse failed: " + path;
     }
+
+    // プロセス優先度チェック周期のサニティチェック
+    cfg.priority_check_interval_sec = std::clamp(cfg.priority_check_interval_sec, 1, 300);
 
     // win_width のサニティチェック
     //
