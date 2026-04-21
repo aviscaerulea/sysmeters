@@ -81,7 +81,6 @@ AppConfig load_config(const std::string& path) {
         cfg.config_error = "TOML parse failed: " + path;
     }
 
-    // プロセス優先度チェック周期のサニティチェック
     cfg.priority_check_interval_sec = std::clamp(cfg.priority_check_interval_sec, 1, 300);
 
     // win_width のサニティチェック
