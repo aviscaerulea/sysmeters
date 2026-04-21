@@ -68,6 +68,13 @@ private:
     bool load_toast_alert();    // レジストリから Toast 通知設定を読む（未設定時は true）
     void save_toast_alert();    // レジストリに Toast 通知設定を書く
 
+    // プロセス優先度自動制御
+    bool  priority_control_enable_ = false;                      // cfg_ から複製した有効/無効フラグ
+    DWORD current_priority_class_  = NORMAL_PRIORITY_CLASS;      // 現在適用中の優先度クラス
+    int   compute_occlusion_percent();  // ウィンドウ隠蔽率を 0〜100 で返す（100 が完全隠蔽）
+    void  update_process_priority();    // 隠蔽率を計測し、必要なら SetPriorityClass を呼ぶ
+    void  restore_process_priority();   // 終了時に NORMAL へ戻す
+
     static LRESULT CALLBACK wnd_proc(HWND, UINT, WPARAM, LPARAM);
     LRESULT handle_message(HWND, UINT, WPARAM, LPARAM);
 };
