@@ -47,6 +47,10 @@ struct AppConfig {
     float reset_claude_5h_pct =  0.f;  // Claude 5h の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット
     float reset_claude_7d_pct =  0.f;  // Claude 7d の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット
 
+    // プロセス優先度制御
+    bool priority_control_enable     = false;  // 隠蔽率に応じた優先度自動制御の ON/OFF
+    int  priority_check_interval_sec = 3;      // 隠蔽率チェック周期（秒）
+
     // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
     std::string log_dir = "logs";
 
