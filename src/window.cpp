@@ -157,8 +157,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     SetTimer(hwnd_, TIMER_ANIM,       TIMER_ANIM_MS,       nullptr);
 
     // プロセス優先度制御（設定が有効な場合のみタイマーを立てる）
-    priority_control_enable_ = cfg_->priority_control_enable;
-    if (priority_control_enable_) {
+    if (cfg_->priority_control_enable) {
         SetTimer(hwnd_, TIMER_PRIORITY,
                  static_cast<UINT>(cfg_->priority_check_interval_sec * 1000), nullptr);
         update_process_priority();
@@ -398,9 +397,13 @@ void AppWindow::apply_topmost() {
                  0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-// ウィンドウ隠蔽率計算
-// ウィンドウ矩形を 10x10 = 100 点でサンプリングし、自 HWND 以外が前面に来ている点の割合を
-// 0〜100 の整数で返す。最小化・非表示は完全隠蔽（100）として即返す。
+// 優先度切り替え閾値（単位：%、隠蔽率）
+//
+// 隠蔽率 10% 未満をほぼ全面可視、90% 以上をほぼ全面隠蔽として扱う。
+// 境界値付近での連続遷移は計測周期（デフォルト 3 秒）で自然に緩慢化する。
+static constexpr int OCC_PCT_ABOVE_NORMAL = 10;   // これ未満なら ABOVE_NORMAL
+static constexpr int OCC_PCT_BELOW_NORMAL = 90;   // これ以上なら BELOW_NORMAL
+
 int AppWindow::compute_occlusion_percent() {
     if (!hwnd_)                  return 100;
     if (IsIconic(hwnd_))         return 100;
@@ -421,6 +424,7 @@ int AppWindow::compute_occlusion_percent() {
                 rc.left + (w * (ix * 2 + 1)) / (GRID * 2),
                 rc.top  + (h * (iy * 2 + 1)) / (GRID * 2),
             };
+            // NULL は画面外（ユーザから不可視）なので隠蔽として扱う
             HWND top = WindowFromPoint(p);
             if (top == hwnd_ || (top && GetAncestor(top, GA_ROOT) == hwnd_))
                 ++visible;
@@ -429,24 +433,18 @@ int AppWindow::compute_occlusion_percent() {
     return 100 - visible;
 }
 
-// プロセス優先度更新
-// 隠蔽率に応じて 3 段階（ABOVE_NORMAL / NORMAL / BELOW_NORMAL）を切り替える。
 void AppWindow::update_process_priority() {
-    if (!priority_control_enable_) return;
-
     const int hidden = compute_occlusion_percent();
     DWORD target;
-    if      (hidden >= 90) target = BELOW_NORMAL_PRIORITY_CLASS;
-    else if (hidden >= 10) target = NORMAL_PRIORITY_CLASS;
-    else                   target = ABOVE_NORMAL_PRIORITY_CLASS;
+    if      (hidden >= OCC_PCT_BELOW_NORMAL) target = BELOW_NORMAL_PRIORITY_CLASS;
+    else if (hidden >= OCC_PCT_ABOVE_NORMAL) target = NORMAL_PRIORITY_CLASS;
+    else                                     target = ABOVE_NORMAL_PRIORITY_CLASS;
 
     if (target == current_priority_class_) return;
     SetPriorityClass(GetCurrentProcess(), target);
     current_priority_class_ = target;
 }
 
-// プロセス優先度復帰
-// 終了時に NORMAL へ戻す。
 void AppWindow::restore_process_priority() {
     if (current_priority_class_ == NORMAL_PRIORITY_CLASS) return;
     SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
