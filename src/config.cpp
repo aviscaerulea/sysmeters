@@ -99,6 +99,8 @@ AppConfig load_config(const std::string& path) {
 
         cfg.priority_control_enable     = get_bool("process", "priority_control",   cfg.priority_control_enable);
         cfg.priority_check_interval_sec = get_int ("process", "check_interval_sec", cfg.priority_check_interval_sec);
+        cfg.priority_visible_range_pct  = get_int ("process", "visible_range_pct",  cfg.priority_visible_range_pct);
+        cfg.priority_hidden_range_pct   = get_int ("process", "hidden_range_pct",   cfg.priority_hidden_range_pct);
 
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
 
@@ -115,6 +117,10 @@ AppConfig load_config(const std::string& path) {
     }
 
     cfg.priority_check_interval_sec = std::clamp(cfg.priority_check_interval_sec, 1, 300);
+    // 優先度範囲幅のサニティチェック
+    // 各値を [0, 49] にクランプする。両者の合計が最大 98 に抑えられるため NORMAL 範囲（100 - visible - hidden > 0）の消失を防ぐ。
+    cfg.priority_visible_range_pct  = std::clamp(cfg.priority_visible_range_pct,  0, 49);
+    cfg.priority_hidden_range_pct   = std::clamp(cfg.priority_hidden_range_pct,   0, 49);
 
     // win_width のサニティチェック
     //

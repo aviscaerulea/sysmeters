@@ -504,12 +504,6 @@ void AppWindow::apply_topmost() {
                  0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-// 優先度切り替え閾値（単位：%、隠蔽率）
-//
-// 隠蔽率がこれ未満なら全面可視扱い（ABOVE_NORMAL）、これ以上なら全面隠蔽扱い（BELOW_NORMAL）とする。
-// 境界値付近での連続遷移は計測周期（デフォルト 5 秒）で自然に緩慢化する。
-static constexpr int OCC_PCT_FULLY_VISIBLE = 10;
-static constexpr int OCC_PCT_FULLY_HIDDEN  = 90;
 
 int AppWindow::compute_occlusion_percent() {
     RECT rc;
@@ -557,10 +551,9 @@ int AppWindow::compute_occlusion_percent() {
 void AppWindow::update_process_priority() {
     const int hidden = compute_occlusion_percent();
     DWORD target;
-    // 隠蔽率が OCC_PCT_FULLY_VISIBLE 未満なら全面可視、OCC_PCT_FULLY_HIDDEN 以上なら全面隠蔽
-    if      (hidden < OCC_PCT_FULLY_VISIBLE) target = ABOVE_NORMAL_PRIORITY_CLASS;
-    else if (hidden < OCC_PCT_FULLY_HIDDEN)  target = NORMAL_PRIORITY_CLASS;
-    else                                     target = BELOW_NORMAL_PRIORITY_CLASS;
+    if      (hidden <       cfg_->priority_visible_range_pct) target = ABOVE_NORMAL_PRIORITY_CLASS;
+    else if (hidden < 100 - cfg_->priority_hidden_range_pct)  target = NORMAL_PRIORITY_CLASS;
+    else                                                      target = BELOW_NORMAL_PRIORITY_CLASS;
 
     if (target == current_priority_class_) return;
     if (!SetPriorityClass(GetCurrentProcess(), target)) {
