@@ -38,8 +38,6 @@ tasks:
   rebuild:
     desc: 実行中のバイナリを停止し、クリーンビルドして再起動する
     cmds:
-      - cmd: taskkill /IM {{.APP_NAME}}.exe /F
-        ignore_error: true
       - task: clean
       - task: build
       - cmd: pwsh.exe -NoProfile -Command "Start-Process 'out/{{.APP_NAME}}.exe'"
