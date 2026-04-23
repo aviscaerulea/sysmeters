@@ -39,6 +39,7 @@ private:
     int  last_pref_h_  = 0;            // update_window_size 早期リターン用キャッシュ
     bool topmost_      = DEF_TOPMOST;
     bool toast_alert_  = DEF_TOAST_ALERT;
+    UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
 
     AppConfig*       cfg_     = nullptr;
     AllMetrics*      metrics_ = nullptr;

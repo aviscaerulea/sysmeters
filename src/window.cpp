@@ -143,6 +143,9 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     alert_ = new AlertManager();
     alert_->init();
 
+    // Explorer 再起動によるタスクバー再生成通知を登録
+    WM_TASKBAR_CREATED_ = RegisterWindowMessageW(L"TaskbarCreated");
+
     // タスクトレイアイコン追加
     add_tray_icon();
 
@@ -202,10 +205,12 @@ void AppWindow::update_os_label() {
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
             L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
             0, KEY_READ, &key) == ERROR_SUCCESS) {
-        wchar_t prod[64] = {}, disp[16] = {}, build[8] = {};
+        wchar_t prod[128] = {}, disp[16] = {}, build[8] = {};
         DWORD siz;
         siz = sizeof(prod);
-        RegQueryValueExW(key, L"ProductName", nullptr, nullptr, reinterpret_cast<BYTE*>(prod), &siz);
+        if (RegQueryValueExW(key, L"ProductName", nullptr, nullptr,
+                             reinterpret_cast<BYTE*>(prod), &siz) == ERROR_MORE_DATA)
+            prod[_countof(prod) - 1] = L'\0';  // 切り捨て時に NUL 終端を保証
         siz = sizeof(disp);
         RegQueryValueExW(key, L"DisplayVersion", nullptr, nullptr, reinterpret_cast<BYTE*>(disp), &siz);
         siz = sizeof(build);
@@ -233,10 +238,12 @@ void AppWindow::update_window_size() {
     AdjustWindowRectEx(&adj, WND_STYLE, FALSE, WND_EX_STYLE);
     int full_h = adj.bottom - adj.top;
 
-    // 作業領域を超えないようクランプ
-    RECT work;
-    SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
-    int max_h = work.bottom - work.top;
+    // ウィンドウが属するモニタの作業領域を取得してクランプ（マルチモニタ対応）
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    HMONITOR hmon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+    GetMonitorInfoW(hmon, &mi);
+    int max_h = mi.rcWork.bottom - mi.rcWork.top;
     if (full_h > max_h) full_h = max_h;
 
     RECT rc;
@@ -300,6 +307,7 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
     // 4 行で 70 wchar 程度と szInfo 容量（256 wchar）に十分収まる
     // ※ Win11 新通知 UI（XAML）では szInfo 先頭の改行がトリムされる OS バージョンがある
     const size_t cap  = std::size(nid.szInfo);
+    // 表示行数の調整：4 件以上は先頭 2 件 + 「ほか N 件」にまとめる
     const int    show = (n <= 3) ? n : 2;
     size_t       off  = 0;
     // 1 件のみのときは Toast 3 行領域の中央（2 行目）に寄せるため先頭に空行を入れる
@@ -307,12 +315,14 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
         int r = swprintf_s(nid.szInfo, cap, L"\n");
         if (r > 0) off += static_cast<size_t>(r);
     }
+    // 項目テキスト書き込み（need_lf：次の行または「ほか」テキストへの改行が必要なとき true）
     for (int i = 0; i < show; i++) {
         if (off >= cap) break;
         const bool need_lf = (i + 1 < show) || (n > 3) || (n == 1);
         int r = swprintf_s(nid.szInfo + off, cap - off, L"　%s%s", labels[i], need_lf ? L"\n" : L"");
         if (r > 0) off += static_cast<size_t>(r);
     }
+    // 件数ヘッダ：4 件以上のとき省略分を追記
     if (n > 3 && off < cap)
         swprintf_s(nid.szInfo + off, cap - off, L"　ほか %d 件", n - 2);
 
@@ -426,6 +436,11 @@ int AppWindow::compute_occlusion_percent() {
     RECT rc;
     if (!hwnd_ || IsIconic(hwnd_) || !IsWindowVisible(hwnd_) || !GetWindowRect(hwnd_, &rc))
         return 100;
+
+    // 仮想デスクトップ非表示（クローク）時は完全隠蔽扱い
+    BOOL cloaked = FALSE;
+    DwmGetWindowAttribute(hwnd_, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+    if (cloaked) return 100;
     const int w = rc.right  - rc.left;
     const int h = rc.bottom - rc.top;
     if (w <= 0 || h <= 0) return 100;
@@ -527,6 +542,13 @@ LRESULT CALLBACK AppWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 }
 
 LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    // Explorer 再起動後のトレイ復帰（動的メッセージはcase に書けないため先行チェック）
+    if (WM_TASKBAR_CREATED_ && msg == WM_TASKBAR_CREATED_) {
+        add_tray_icon();
+        apply_topmost();
+        return 0;
+    }
+
     switch (msg) {
     case WM_TIMER:
         if (wp == TIMER_CPU) {
@@ -564,6 +586,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             col_ip_->update();
         }
         else if (wp == TIMER_PRIORITY) {
+            // 優先度制御は再描画や警告チェック対象外（バックグラウンド処理のみ）
             update_process_priority();
             return 0;
         }

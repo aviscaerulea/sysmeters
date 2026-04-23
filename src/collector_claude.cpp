@@ -38,8 +38,8 @@ static fs::path cache_plan_path() {
 
 // credentials.json から OAuth トークンを取得する
 static std::string get_token() {
-    wchar_t home[MAX_PATH];
-    SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, home);
+    wchar_t home[MAX_PATH] = {};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, home))) return {};
     fs::path creds = fs::path(home) / L".claude" / L".credentials.json";
 
     std::ifstream ifs(creds);
@@ -77,8 +77,13 @@ static json read_cache(const fs::path& path, double ttl) {
 }
 
 // WinHTTP でシンプルな GET リクエストを発行し、レスポンスボディを返す
+//
+// 失敗時は空文字を返す。out_status が非 null なら HTTP ステータスコードを書き込む。
+// active_req が非 null の場合、リクエスト中ハンドルを格納して shutdown による強制中断を可能にする。
 static std::string http_get(const std::wstring& host, const std::wstring& path,
-                            const std::string& token, const std::string& beta_header) {
+                            const std::string& token, const std::string& beta_header,
+                            int* out_status = nullptr,
+                            std::atomic<void*>* active_req = nullptr) {
     HINTERNET session = WinHttpOpen(L"sysmeters/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nullptr, nullptr, 0);
     if (!session) return {};
@@ -90,7 +95,10 @@ static std::string http_get(const std::wstring& host, const std::wstring& path,
         nullptr, nullptr, nullptr, WINHTTP_FLAG_SECURE);
     if (!req) { WinHttpCloseHandle(conn); WinHttpCloseHandle(session); return {}; }
 
-    // 全フェーズのタイムアウトを設定（shutdown() の最大待機 8 秒に収まるようにする）
+    // shutdown() による強制中断のためハンドルを登録する
+    if (active_req) active_req->store(req);
+
+    // 全フェーズのタイムアウトを設定（shutdown() の最大待機 15 秒に収まるようにする）
     DWORD timeout_ms = 1500;
     WinHttpSetOption(req, WINHTTP_OPTION_RESOLVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
     WinHttpSetOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
@@ -112,27 +120,45 @@ static std::string http_get(const std::wstring& host, const std::wstring& path,
         DWORD status_size = sizeof(status_code);
         WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                             nullptr, &status_code, &status_size, nullptr);
+        if (out_status) *out_status = static_cast<int>(status_code);
         if (status_code != 200) {
-            char msg[32];
-            snprintf(msg, sizeof(msg), "HTTP %lu", status_code);
-            log_error(msg);
-            WinHttpCloseHandle(req);
-            WinHttpCloseHandle(conn);
-            WinHttpCloseHandle(session);
-            return {};
+            if (status_code == 401)      log_error("HTTP 401 unauthorized");
+            else if (status_code == 429) log_error("HTTP 429 too many requests");
+            else {
+                char msg[32];
+                snprintf(msg, sizeof(msg), "HTTP %lu", status_code);
+                log_error(msg);
+            }
         }
-        DWORD size = 0;
-        do {
-            if (!WinHttpQueryDataAvailable(req, &size)) break;
-            if (size == 0) break;
-            std::string chunk(size, '\0');
-            DWORD read = 0;
-            if (!WinHttpReadData(req, chunk.data(), size, &read)) break;
-            body.append(chunk, 0, read);
-        } while (size > 0);
+        else {
+            // レスポンスボディ取得（1MB 上限）
+            static constexpr size_t MAX_RESP_BYTES = 1 * 1024 * 1024;
+            DWORD size = 0;
+            do {
+                if (!WinHttpQueryDataAvailable(req, &size)) break;
+                if (size == 0) break;
+                if (body.size() + size > MAX_RESP_BYTES) {
+                    log_error("claude response too large");
+                    body.clear();
+                    break;
+                }
+                std::string chunk(size, '\0');
+                DWORD read = 0;
+                if (!WinHttpReadData(req, chunk.data(), size, &read)) break;
+                body.append(chunk, 0, read);
+            } while (size > 0);
+        }
     }
 
-    WinHttpCloseHandle(req);
+    // active_req から所有権を原子的に回収する。
+    // shutdown() がすでに取得してクローズしていれば nullptr が返る（二重クローズを防ぐ）。
+    HINTERNET req_to_close = req;
+    if (active_req) {
+        void* expected = req;
+        if (!active_req->compare_exchange_strong(expected, nullptr))
+            req_to_close = nullptr;
+    }
+    if (req_to_close) WinHttpCloseHandle(req_to_close);
     WinHttpCloseHandle(conn);
     WinHttpCloseHandle(session);
     return body;
@@ -201,6 +227,7 @@ static float calc_expected_pct(const std::string& iso, double window_secs) {
     return std::clamp(expected, 0.f, 100.f);
 }
 
+// Anthropic API beta ヘッダの値（OAuth エンドポイント有効化用）。API バージョン更新時は要変更。
 static const char* BETA_HEADER = "oauth-2025-04-20";
 
 // キャッシュヒット or API 取得を行うヘルパー
@@ -209,7 +236,9 @@ static const char* BETA_HEADER = "oauth-2025-04-20";
 // キャッシュなし・期限切れなら HTTP GET を実行し、失敗時はエラーキャッシュを保存して nullptr を返す。
 // 戻り値に "_ts" が含まれていればキャッシュヒット、含まれなければ新規取得を示す。
 static json fetch_or_cache(const fs::path& cache_path, double ttl,
-                            const std::wstring& api_path, const std::string& token) {
+                            const std::wstring& api_path, const std::string& token,
+                            int* out_status = nullptr,
+                            std::atomic<void*>* active_req = nullptr) {
     json j = read_cache(cache_path, ttl);
     if (j != nullptr) {
         if (j.contains("error")) return nullptr;  // ネガティブキャッシュ
@@ -217,7 +246,7 @@ static json fetch_or_cache(const fs::path& cache_path, double ttl,
     }
     if (token.empty()) return nullptr;
 
-    std::string body = http_get(L"api.anthropic.com", api_path, token, BETA_HEADER);
+    std::string body = http_get(L"api.anthropic.com", api_path, token, BETA_HEADER, out_status, active_req);
     if (body.empty()) {
         try {
             std::ofstream ofs(cache_path);
@@ -273,9 +302,12 @@ void ClaudeCollector::do_fetch() {
     std::string token = get_token();
 
     // --- Usage API ---
-    json usage_j = fetch_or_cache(cache_usage_path(), 360.0, L"/api/oauth/usage", token);
+    int usage_status = 0;
+    json usage_j = fetch_or_cache(cache_usage_path(), 360.0, L"/api/oauth/usage", token, &usage_status, &active_req_);
     if (usage_j == nullptr && !token.empty()) {
         log_error("Claude Usage API failed");
+        // 401 は認証切れ → 次回フェッチ時にネガティブキャッシュを削除して即再取得させる
+        if (usage_status == 401) first_fetch_ = true;
     }
     if (usage_j != nullptr && !usage_j.contains("_ts")) {
         // 新規 API 取得 → タイムスタンプを付与してキャッシュ保存
@@ -316,7 +348,7 @@ void ClaudeCollector::do_fetch() {
     }
 
     // --- Account API（プランラベル）---
-    json plan_j = fetch_or_cache(cache_plan_path(), 3600.0, L"/api/oauth/account", token);
+    json plan_j = fetch_or_cache(cache_plan_path(), 3600.0, L"/api/oauth/account", token, nullptr, &active_req_);
     if (plan_j != nullptr && !plan_j.contains("_ts")) {
         // 新規 API 取得 → tier→label 変換してキャッシュ保存
         try {
@@ -411,6 +443,10 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out) {
 
 void ClaudeCollector::shutdown() {
     notify_wnd_.store(nullptr);
+
+    // 受信中のリクエストを強制中断して fetch スレッドの即時終了を促す
+    HINTERNET active = static_cast<HINTERNET>(active_req_.exchange(nullptr));
+    if (active) WinHttpCloseHandle(active);
 
     // スレッドの完了を待つ（最大 15 秒：2 リクエスト × タイムアウト 1500ms × 4 フェーズ + 余裕）
     if (fetch_thread_) {

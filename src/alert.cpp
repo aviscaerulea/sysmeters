@@ -386,8 +386,8 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
     check_item(RAM,    m.mem.usage_pct,  cfg.warn_mem_pct, cfg.reset_mem_pct);
     if (m.vram.avail)
         check_item(VRAM, m.vram.usage_pct, cfg.warn_mem_pct, cfg.reset_mem_pct);
-    check_item(DISK_C, m.disk_c.used_pct, cfg.warn_mem_pct, cfg.reset_mem_pct);
-    check_item(DISK_D, m.disk_d.used_pct, cfg.warn_mem_pct, cfg.reset_mem_pct);
+    check_item(DISK_C, m.disk_c.used_pct, cfg.warn_disk_space_pct, cfg.reset_disk_space_pct);
+    check_item(DISK_D, m.disk_d.used_pct, cfg.warn_disk_space_pct, cfg.reset_disk_space_pct);
     if (m.cpu.temp_avail)
         check_item(TEMP_CPU, m.cpu.temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
     if (m.gpu.avail)

@@ -25,7 +25,8 @@ struct AppConfig {
     // 警告色の閾値
     float warn_cpu_pct       = 95.f;  // CPU 使用率（%）
     float warn_gpu_pct       = 95.f;  // GPU 使用率（%）
-    float warn_mem_pct       = 90.f;  // RAM/VRAM/Disk Space 使用率（%）
+    float warn_mem_pct       = 90.f;  // RAM/VRAM 使用率（%）
+    float warn_disk_space_pct = 90.f; // Disk Space 使用率（%）
     float warn_claude_5h_pct = 20.f;   // Claude 5h 理想ペースからの超過閾値（%）。デフォルト 20 = ウィンドウ 1/5（1 時間分）
     float warn_claude_7d_pct =  7.14f; // Claude 7d 理想ペースからの超過閾値（%）。デフォルト 7.14 = ウィンドウ 1/14（12 時間分）
     float warn_claude_over   =  0.f;  // Claude 超過料金の警告閾値（ドル）。デフォルト 0.f = $0 超えで即赤表示
@@ -41,7 +42,8 @@ struct AppConfig {
     bool  alert_sound        = true;  // 警告音有効/無効
     float reset_cpu_pct      = 90.f;  // CPU 使用率の警告音リセット閾値（%）
     float reset_gpu_pct      = 90.f;  // GPU 使用率の警告音リセット閾値（%）
-    float reset_mem_pct      = 85.f;  // RAM/VRAM/Disk Space の警告音リセット閾値（%）
+    float reset_mem_pct       = 85.f;  // RAM/VRAM の警告音リセット閾値（%）
+    float reset_disk_space_pct = 85.f; // Disk Space の警告音リセット閾値（%）
     float reset_temp         = 85.f;  // CPU/GPU/NVMe 温度の警告音リセット閾値（℃）
     float reset_disk_gbh     =  5.f;  // Disk 書き込みの警告音リセット閾値（GB/h）
     float reset_claude_5h_pct =  0.f;  // Claude 5h の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット

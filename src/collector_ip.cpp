@@ -32,6 +32,9 @@ static std::string fetch_ip_body() {
     WinHttpSetOption(req, WINHTTP_OPTION_SEND_TIMEOUT,    &timeout_ms, sizeof(timeout_ms));
     WinHttpSetOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
 
+    // IP アドレス文字列用途のため 4KB で十分
+    static constexpr size_t MAX_RESP_BYTES = 4 * 1024;
+
     std::string body;
     if (WinHttpSendRequest(req, nullptr, 0, nullptr, 0, 0, 0) &&
         WinHttpReceiveResponse(req, nullptr)) {
@@ -39,6 +42,11 @@ static std::string fetch_ip_body() {
         do {
             if (!WinHttpQueryDataAvailable(req, &size)) break;
             if (size == 0) break;
+            if (body.size() + size > MAX_RESP_BYTES) {
+                log_error("IP response too large");
+                body.clear();
+                break;
+            }
             std::string chunk(size, '\0');
             DWORD read = 0;
             if (!WinHttpReadData(req, chunk.data(), size, &read)) break;

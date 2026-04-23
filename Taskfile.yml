@@ -20,9 +20,14 @@ tasks:
     cmds:
       - cmd: pwsh.exe -NoProfile -Command "if (Test-Path out) { Remove-Item -Recurse -Force out }"
 
+  gen-hashes:
+    desc: PawnIO バイナリの SHA-256 ハッシュヘッダを生成（src/pawnio_hashes.hpp）
+    cmds:
+      - cmd: pwsh.exe -NoProfile -File scripts/fetch-deps.ps1
+
   build:
     desc: デバッグビルド（out/sysmeters.exe）
-    deps: [kill]
+    deps: [kill, gen-hashes]
     cmds:
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Debug
       - cmd: pwsh.exe -NoProfile -Command "Copy-Item '{{.APP_NAME}}.toml' 'out/'"

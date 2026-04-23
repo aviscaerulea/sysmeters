@@ -73,7 +73,8 @@ static int get_phys_drive(char drv) {
     DWORD bytes = 0;
     int result = -1;
     if (DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
-                        nullptr, 0, &buf, sizeof(buf), &bytes, nullptr)) {
+                        nullptr, 0, &buf, sizeof(buf), &bytes, nullptr) &&
+        buf.vde.NumberOfDiskExtents > 0) {
         result = static_cast<int>(buf.vde.Extents[0].DiskNumber);
     }
     CloseHandle(h);
