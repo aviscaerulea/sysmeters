@@ -420,3 +420,7 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
     if (fired_mask && cfg.alert_sound && wav_avail_) play();
     return fired_mask;
 }
+
+void AlertManager::play_external() {
+    if (wav_avail_) play();
+}

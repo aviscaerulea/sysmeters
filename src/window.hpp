@@ -34,12 +34,19 @@ private:
     static constexpr bool DEF_TOPMOST     = false;
     static constexpr bool DEF_TOAST_ALERT = true;
 
+    // Claude Code 制限強化時間 通知の発火時刻（ローカル時刻でハードコード固定）
+    static constexpr int PEAK_NOTIFY_HOUR = 21;
+    static constexpr int PEAK_NOTIFY_MIN  = 0;
+    // 60 秒周期の通知チェックタイマー ID
+    static constexpr int TIMER_NOTIFY_SCHED = 110;
+
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
     int  last_pref_h_  = 0;            // update_window_size 早期リターン用キャッシュ
     bool topmost_      = DEF_TOPMOST;
     bool toast_alert_  = DEF_TOAST_ALERT;
     UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
+    int  last_check_min_ = -1;         // 前回通知チェック時の分（エッジ検出用、-1 = 未初期化）
 
     AppConfig*       cfg_     = nullptr;
     AllMetrics*      metrics_ = nullptr;
@@ -60,6 +67,12 @@ private:
     // バルーン（Toast）通知表示
     // fired_mask の各ビットが AlertManager::Id に対応する。
     void show_balloon(uint32_t fired_mask);
+    // 指定タイトル・本文で Toast 通知（情報レベル）を表示する
+    void show_notify(const wchar_t* title, const wchar_t* body);
+    // 制限強化時間 通知の発火判定と実行（TIMER_NOTIFY_SCHED から呼ばれる）
+    void check_peak_limit_notify();
+    // 起動時にピーク期間内なら即時通知する（create() から 1 度だけ呼ぶ）
+    void check_peak_limit_on_startup();
     void show_context_menu();
     void open_config_file();
     void open_log_file();

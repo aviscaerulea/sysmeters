@@ -49,6 +49,12 @@ struct AppConfig {
     float reset_claude_5h_pct =  0.f;  // Claude 5h の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット
     float reset_claude_7d_pct =  0.f;  // Claude 7d の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット
 
+    // Claude Code 制限強化時間 Toast 通知（ローカル平日 21:00 固定）
+    bool         notify_peak_limit_enable = true;
+    bool         notify_peak_limit_sound  = false;
+    std::wstring notify_peak_limit_title  = L"Claude Code";
+    std::wstring notify_peak_limit_body   = L"平日 21:00-03:00 ピーク制限時間です";
+
     // プロセス優先度制御
     bool priority_control_enable     = false;  // 隠蔽率に応じた優先度自動制御の ON/OFF
     int  priority_check_interval_sec = 5;      // 隠蔽率チェック周期（秒）

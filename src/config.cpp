@@ -3,6 +3,9 @@
 #include <toml.hpp>
 #include <algorithm>
 #include <fstream>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 
 AppConfig load_config(const std::string& path) {
     AppConfig cfg;
@@ -39,6 +42,19 @@ AppConfig load_config(const std::string& path) {
         auto get_bool = [&](const char* sec, const char* key, bool def) -> bool {
             try { return toml::find_or<bool>(data, sec, key, def); }
             catch (...) { return def; }
+        };
+        // UTF-8 文字列を wstring として取得する（キー不在・変換失敗時はデフォルト値を返す）
+        auto get_wstr = [&](const char* sec, const char* key,
+                            const std::wstring& def) -> std::wstring {
+            std::string u8;
+            try { u8 = toml::find_or<std::string>(data, sec, key, std::string{}); }
+            catch (...) { return def; }
+            if (u8.empty()) return def;
+            int n = MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, nullptr, 0);
+            if (n <= 0) return def;
+            std::wstring w(static_cast<size_t>(n - 1), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, u8.c_str(), -1, w.data(), n);
+            return w;
         };
 
         cfg.win_x     = get_int("window", "x",     cfg.win_x);
@@ -85,6 +101,14 @@ AppConfig load_config(const std::string& path) {
         cfg.priority_check_interval_sec = get_int ("process", "check_interval_sec", cfg.priority_check_interval_sec);
 
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
+
+        cfg.notify_peak_limit_enable = get_bool ("notify", "peak_limit_enable", cfg.notify_peak_limit_enable);
+        cfg.notify_peak_limit_sound  = get_bool ("notify", "peak_limit_sound",  cfg.notify_peak_limit_sound);
+        cfg.notify_peak_limit_title  = get_wstr ("notify", "peak_limit_title",  cfg.notify_peak_limit_title);
+        cfg.notify_peak_limit_body   = get_wstr ("notify", "peak_limit_body",   cfg.notify_peak_limit_body);
+        // szInfoTitle は 64 wchar、szInfo は 256 wchar が上限
+        if (cfg.notify_peak_limit_title.size() > 63) cfg.notify_peak_limit_title.resize(63);
+        if (cfg.notify_peak_limit_body.size()  > 255) cfg.notify_peak_limit_body.resize(255);
     }
     catch (...) {
         cfg.config_error = "TOML parse failed: " + path;
