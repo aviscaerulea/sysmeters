@@ -163,13 +163,25 @@ handles = 1000000
 # プロセス優先度の自動制御
 # true の場合、ウィンドウが他ウィンドウに隠されている比率に応じて
 # プロセス優先度を次の 3 段階で自動調整する：
-#   隠蔽率 10% 未満 → ABOVE_NORMAL（NORMAL の 1 つ上）
-#   隠蔽率 10% 以上 90% 未満 → NORMAL
-#   隠蔽率 90% 以上 → BELOW_NORMAL（NORMAL の 1 つ下）
+#   隠蔽率 visible_range_pct 未満                    → ABOVE_NORMAL（NORMAL の 1 つ上）
+#   上記以上 100 - hidden_range_pct 未満             → NORMAL
+#   隠蔽率 100 - hidden_range_pct 以上               → BELOW_NORMAL（NORMAL の 1 つ下）
 # 隠蔽率はウィンドウ矩形を 10x10 = 100 点でサンプリングして算出する。
 # 最小化・非表示状態は完全隠蔽（100%）として扱う。
 # デフォルト: false
 priority_control = false
+
+# ABOVE_NORMAL 判定範囲幅（単位：%、隠蔽率）
+# 隠蔽率がこの値未満のとき、優先度を ABOVE_NORMAL（NORMAL の 1 つ上）に上げる。
+# 0 以上 49 以下の値に自動クランプされる（上限 49 により両値の合計が最大 98 となり、NORMAL 範囲が消失しない）。
+# デフォルト: 20
+visible_range_pct = 20
+
+# BELOW_NORMAL 判定範囲幅（単位：%、隠蔽率）
+# 隠蔽率が 100 - この値 以上のとき、優先度を BELOW_NORMAL（NORMAL の 1 つ下）に下げる。
+# 0 以上 49 以下の値に自動クランプされる。
+# デフォルト: 20
+hidden_range_pct = 20
 
 # 隠蔽率チェック周期（単位：秒）
 # priority_control = true のときのみ有効。

@@ -58,6 +58,8 @@ struct AppConfig {
     // プロセス優先度制御
     bool priority_control_enable     = false;  // 隠蔽率に応じた優先度自動制御の ON/OFF
     int  priority_check_interval_sec = 5;      // 隠蔽率チェック周期（秒）
+    int  priority_visible_range_pct  = 20;     // 隠蔽率がこれ未満で ABOVE_NORMAL（可視判定範囲幅、%）
+    int  priority_hidden_range_pct   = 20;     // 隠蔽率が 100 - これ以上で BELOW_NORMAL（隠蔽判定範囲幅、%）
 
     // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
     std::string log_dir = "logs";
