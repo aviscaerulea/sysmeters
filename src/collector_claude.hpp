@@ -27,11 +27,12 @@ public:
     ~ClaudeCollector() { shutdown(); }
 
 private:
-    std::atomic<HWND> notify_wnd_ = nullptr;
-    std::atomic<bool> fetching_ = false;
-    HANDLE            fetch_thread_ = nullptr;
-    std::mutex        result_mutex_;
-    bool              first_fetch_ = true;   // 初回フェッチフラグ（ネガティブキャッシュ無視に使用）
+    std::atomic<HWND>  notify_wnd_ = nullptr;
+    std::atomic<bool>  fetching_   = false;
+    std::atomic<void*> active_req_ = nullptr;  // 受信中の WinHTTP リクエストハンドル（shutdown 強制中断用）
+    HANDLE             fetch_thread_ = nullptr;
+    std::mutex         result_mutex_;
+    bool               first_fetch_ = true;   // 初回フェッチフラグ（ネガティブキャッシュ無視に使用）
 
     // バックグラウンドで取得した結果（仮置き）
     ClaudeMetrics pending_{};

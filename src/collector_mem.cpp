@@ -20,7 +20,8 @@ static constexpr const wchar_t* HF_COUNTER = L"\\Memory\\Page Reads/sec";
 struct MemCollector::Impl {
     PDH_HQUERY   query      = nullptr;
     PDH_HCOUNTER counters[2] = {};
-    int          n          = 0;
+    // 登録済み vmmem カウンタ数（VMMEM_COUNTERS の各パスで成功した件数）
+    int          vmmem_count = 0;
     // ハードフォールト専用クエリ（WSL クエリとは更新間隔が異なるため分離）
     PDH_HQUERY   hf_query   = nullptr;
     PDH_HCOUNTER hf_counter = nullptr;
@@ -34,11 +35,11 @@ void MemCollector::init() {
         return;
     }
     for (auto path : VMMEM_COUNTERS) {
-        if (PdhAddEnglishCounterW(p->query, path, 0, &p->counters[p->n]) == ERROR_SUCCESS)
-            ++p->n;
+        if (PdhAddEnglishCounterW(p->query, path, 0, &p->counters[p->vmmem_count]) == ERROR_SUCCESS)
+            ++p->vmmem_count;
     }
     // WSL 非使用環境ではカウンタ登録ゼロになる。その場合も hf_query は初期化するため早期リターンしない
-    if (p->n == 0) {
+    if (p->vmmem_count == 0) {
         PdhCloseQuery(p->query);
         p->query = nullptr;
     }
@@ -71,7 +72,7 @@ void MemCollector::update(MemMetrics& out) {
     out.wsl_gb = 0.f;
     if (impl_ && impl_->query && PdhCollectQueryData(impl_->query) == ERROR_SUCCESS) {
         LONGLONG wsl_bytes = 0;
-        for (int i = 0; i < impl_->n; ++i) {
+        for (int i = 0; i < impl_->vmmem_count; ++i) {
             PDH_FMT_COUNTERVALUE val{};
             if (PdhGetFormattedCounterValue(impl_->counters[i], PDH_FMT_LARGE, nullptr, &val) == ERROR_SUCCESS)
                 wsl_bytes += val.largeValue;

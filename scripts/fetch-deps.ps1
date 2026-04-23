@@ -73,3 +73,45 @@ else {
 }
 
 Write-Host "All dependencies ready."
+
+# pawnio_hashes.hpp を生成（バイナリ署名検証用コンパイル時定数）
+$hashesHpp = Join-Path $PSScriptRoot "..\src\pawnio_hashes.hpp"
+
+function ConvertTo-CppHexArray([string]$hexStr) {
+    # 2 文字ずつに分割して 0xNN 形式に変換し 8 バイトごとに折り返す
+    $bytes = [System.Convert]::FromHexString($hexStr)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $bytes.Length; $i += 8) {
+        $end   = [Math]::Min($i + 7, $bytes.Length - 1)
+        $chunk = $bytes[$i..$end]
+        $hex   = ($chunk | ForEach-Object { "0x{0:X2}" -f $_ }) -join ", "
+        $lines.Add("    $hex,")
+    }
+    # 末尾カンマを除去
+    $lines[$lines.Count - 1] = $lines[$lines.Count - 1].TrimEnd(",")
+    return $lines -join "`n"
+}
+
+$intelHash = (Get-FileHash $msrDest -Algorithm SHA256).Hash
+$amdHash   = (Get-FileHash $amdDest -Algorithm SHA256).Hash
+$intelArr  = ConvertTo-CppHexArray $intelHash
+$amdArr    = ConvertTo-CppHexArray $amdHash
+
+$hpp = @"
+// vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
+// 自動生成ファイル（scripts/fetch-deps.ps1 が生成）。直接編集しないこと。
+// PawnIO バイナリの SHA-256 ハッシュ（ロード時に検証する）
+#pragma once
+#include <cstdint>
+
+static constexpr uint8_t PAWNIO_HASH_INTEL[32] = {
+$intelArr
+};
+
+static constexpr uint8_t PAWNIO_HASH_AMD[32] = {
+$amdArr
+};
+"@
+
+[System.IO.File]::WriteAllText($hashesHpp, $hpp, [System.Text.Encoding]::UTF8)
+Write-Host "Generated pawnio_hashes.hpp (IntelMSR SHA256=$intelHash)"

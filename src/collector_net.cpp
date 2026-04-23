@@ -5,8 +5,6 @@
 #include <windows.h>
 #include <pdh.h>
 #pragma comment(lib, "pdh.lib")
-#include <vector>
-
 struct NetCollector::Impl {
     PDH_HQUERY   query        = nullptr;
     PDH_HCOUNTER counter_send = nullptr;  // Bytes Sent/sec
@@ -21,12 +19,12 @@ bool NetCollector::init() {
         return false;
     }
 
-    // _Total で全 NIC 合算
+    // _Total で OS 側が重複排除した全 NIC 合算値を取得する
     PdhAddEnglishCounterW(impl_->query,
-        L"\\Network Interface(*)\\Bytes Sent/sec",
+        L"\\Network Interface(_Total)\\Bytes Sent/sec",
         0, &impl_->counter_send);
     PdhAddEnglishCounterW(impl_->query,
-        L"\\Network Interface(*)\\Bytes Received/sec",
+        L"\\Network Interface(_Total)\\Bytes Received/sec",
         0, &impl_->counter_recv);
 
     PdhCollectQueryData(impl_->query);
@@ -43,28 +41,15 @@ void NetCollector::update(NetMetrics& out) {
 
     PdhCollectQueryData(impl_->query);
 
-    // PDH_FMT_DOUBLE で各 NIC の合計を取得（* ワイルドカードの場合は配列になる）
-    // 全 NIC 合算のためスカラー形式で取得を試みる
-    auto get_sum = [](PDH_HCOUNTER hc) -> float {
-        // ARRAY 形式で取得して合算する
-        DWORD buf_size = 0, item_count = 0;
-        PdhGetFormattedCounterArray(hc, PDH_FMT_DOUBLE, &buf_size, &item_count, nullptr);
-        if (buf_size == 0) return 0.f;
-
-        // buf_size はバイト数（文字列データを含む）なので raw バッファで確保してキャストする
-        std::vector<char> raw(buf_size);
-        auto* items = reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM*>(raw.data());
-        if (PdhGetFormattedCounterArray(hc, PDH_FMT_DOUBLE,
-            &buf_size, &item_count, items) != ERROR_SUCCESS) {
-            return 0.f;
-        }
-        double sum = 0.0;
-        for (DWORD i = 0; i < item_count; ++i) sum += items[i].FmtValue.doubleValue;
-        return bytes_to_kb(sum);
+    auto get = [](PDH_HCOUNTER hc) -> float {
+        PDH_FMT_COUNTERVALUE v{};
+        if (PdhGetFormattedCounterValue(hc, PDH_FMT_DOUBLE, nullptr, &v) == ERROR_SUCCESS)
+            return bytes_to_kb(v.doubleValue);
+        return 0.f;
     };
 
-    out.send_kbps = get_sum(impl_->counter_send);
-    out.recv_kbps = get_sum(impl_->counter_recv);
+    out.send_kbps = get(impl_->counter_send);
+    out.recv_kbps = get(impl_->counter_recv);
     out.send_history.push(out.send_kbps);
     out.recv_history.push(out.recv_kbps);
 

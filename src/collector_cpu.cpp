@@ -1,12 +1,15 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
 #include "collector_cpu.hpp"
 #include "logger.hpp"
+#include "pawnio_hashes.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winioctl.h>
+#include <bcrypt.h>
 #include <pdh.h>
 #include <pdhmsg.h>
 #pragma comment(lib, "pdh.lib")
+#pragma comment(lib, "bcrypt.lib")
 #include <intrin.h>
 
 #include <vector>
@@ -66,6 +69,29 @@ struct CpuCollector::Impl {
 
     char cpu_name[48] = {};  // CPUID ブランド文字列
 };
+
+// ファイルの SHA-256 を計算し、期待値と一致するか検証する
+//
+// BCrypt SHA-256 でハッシュを計算し expected と比較する。
+// 一致すれば true、不一致またはハッシュ計算失敗なら false。
+static bool verify_pawnio_hash(const BYTE* data, DWORD size, const uint8_t expected[32]) {
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0)))
+        return false;
+
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    bool ok = false;
+    if (BCRYPT_SUCCESS(BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0))) {
+        BYTE digest[32] = {};
+        if (BCRYPT_SUCCESS(BCryptHashData(hash, const_cast<PUCHAR>(data), size, 0)) &&
+            BCRYPT_SUCCESS(BCryptFinishHash(hash, digest, sizeof(digest), 0))) {
+            ok = (memcmp(digest, expected, 32) == 0);
+        }
+        BCryptDestroyHash(hash);
+    }
+    BCryptCloseAlgorithmProvider(alg, 0);
+    return ok;
+}
 
 // PawnIO モジュール関数を呼び出すヘルパー
 //
@@ -251,6 +277,15 @@ bool CpuCollector::init() {
 
     if (!read_ok || read_bytes != bin_size) {
         log_error("PawnIO: failed to read %ls", bin_name);
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
+
+    // SHA-256 ハッシュ検証（改ざん防止）
+    const uint8_t* expected_hash = (impl_->vendor == CpuVendor::Amd) ? PAWNIO_HASH_AMD : PAWNIO_HASH_INTEL;
+    if (!verify_pawnio_hash(bin_data.data(), bin_size, expected_hash)) {
+        log_error("PawnIO: binary hash mismatch: %ls", bin_name);
         CloseHandle(impl_->hdev_pawnio);
         impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
         return true;

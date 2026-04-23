@@ -121,8 +121,9 @@ static void log_write(const char* level, const char* fmt, va_list args) {
 void log_init(const std::string& dir) {
     InitializeCriticalSection(&g_cs);
 
-    wchar_t wdir[MAX_PATH];
-    MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), -1, wdir, MAX_PATH);
+    wchar_t wdir[MAX_PATH] = {};
+    if (MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), -1, wdir, MAX_PATH) == 0)
+        wcscpy_s(wdir, L"logs");
 
     // 絶対パス判定（ドライブレター "X:" か UNC "\\\\" で始まる）
     // 注意：シングルバックスラッシュ始まり（例：\Windows\Temp）はドライブ相対パスだが
