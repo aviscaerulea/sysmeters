@@ -1,4 +1,5 @@
 # vim: set ft=yaml fenc=utf-8 ff=unix sw=2 ts=2 et :
+$schema: https://taskfile.dev/schema.json
 version: "3"
 
 vars:
@@ -8,8 +9,14 @@ vars:
   ARCH: x64
 
 tasks:
+  default:
+    desc: クリーンビルドを実行
+    cmds:
+      - task clean
+      - task build
+
   kill:
-    desc: 実行中の sysmeters.exe を強制終了（起動していない場合は無視）
+    desc: 実行中のアプリケーションを強制終了（起動していない場合は無視）
     cmds:
       - cmd: taskkill /IM {{.APP_NAME}}.exe /F
         ignore_error: true
@@ -18,22 +25,31 @@ tasks:
     desc: out/ 以下のファイルを削除
     deps: [kill]
     cmds:
-      - cmd: pwsh.exe -NoProfile -Command "if (Test-Path out) { Remove-Item -Recurse -Force out }"
+      - rm -rf out
 
   gen-hashes:
     desc: PawnIO バイナリの SHA-256 ハッシュヘッダを生成（src/pawnio_hashes.hpp）
     cmds:
       - cmd: pwsh.exe -NoProfile -File scripts/fetch-deps.ps1
 
+  copy-assets:
+    desc: ビルド成果物ディレクトリへのアセットコピー
+    internal: true
+    cmds:
+      - cp {{.APP_NAME}}.toml out/
+      - cp data/IntelMSR.bin out/
+      - cp data/AMDFamily17.bin out/
+      - cp data/alert.wav out/
+      - cmd: cp -f *.local.* out/
+        ignore_error: true
+
   build:
     desc: デバッグビルド（out/sysmeters.exe）
     deps: [kill, gen-hashes]
     cmds:
+      - mkdir -p out
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Debug
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item '{{.APP_NAME}}.toml' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/IntelMSR.bin' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/AMDFamily17.bin' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/alert.wav' 'out/'"
+      - task: copy-assets
 
   rebuild:
     desc: 実行中のバイナリを停止し、クリーンビルドして再起動する
@@ -43,13 +59,16 @@ tasks:
       - cmd: pwsh.exe -NoProfile -Command "Start-Process 'out/{{.APP_NAME}}.exe'"
 
   release:
-    desc: リリースビルド + zip パッケージング
+    desc: リリースビルド（デバッグ情報なし＋最適化）と zip 作成
     deps: [clean]
     cmds:
+      - mkdir -p out
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item '{{.APP_NAME}}.toml' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/IntelMSR.bin' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/AMDFamily17.bin' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Copy-Item 'data/alert.wav' 'out/'"
-      - cmd: pwsh.exe -NoProfile -Command "Compress-Archive -Path 'out/{{.APP_NAME}}.exe','out/{{.APP_NAME}}.toml','out/IntelMSR.bin','out/AMDFamily17.bin','out/alert.wav' -DestinationPath 'out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip' -Force"
+      - task: copy-assets
+      - >-
+        pwsh.exe -NoProfile -Command '
+        Compress-Archive
+        -Path out\{{.APP_NAME}}.exe, out\{{.APP_NAME}}.toml, out\IntelMSR.bin, out\AMDFamily17.bin, out\alert.wav
+        -DestinationPath "out\{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"
+        -Force'
       - cmd: echo "Package out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"
