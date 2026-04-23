@@ -70,9 +70,9 @@ private:
 
     // プロセス優先度自動制御
     DWORD current_priority_class_  = NORMAL_PRIORITY_CLASS;      // 直前に適用した優先度クラス（差分検知用キャッシュ）
-    int   compute_occlusion_percent();  // ウィンドウ隠蔽率を 0〜100 で返す（100 が完全隠蔽）
-    void  update_process_priority();    // 隠蔽率を計測し、必要なら SetPriorityClass を呼ぶ
-    void  restore_process_priority();   // 終了時に NORMAL へ戻す
+    int   compute_occlusion_percent();
+    void  update_process_priority();
+    void  restore_process_priority();
 
     static LRESULT CALLBACK wnd_proc(HWND, UINT, WPARAM, LPARAM);
     LRESULT handle_message(HWND, UINT, WPARAM, LPARAM);

@@ -296,21 +296,25 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
     }
     if (n == 0) return;
 
-    // ラベル合計長が szInfo の容量（256 wchar）を超えても invalid parameter handler を
-    // 発火させないため、_snwprintf_s に _TRUNCATE を指定してオーバーフロー時は切り詰める
-    const size_t cap = std::size(nid.szInfo);
+    // ラベル最大長は AlertManager::label の最長文字列で約 17 wchar、
+    // 4 行で 70 wchar 程度と szInfo 容量（256 wchar）に十分収まる
+    // ※ Win11 新通知 UI（XAML）では szInfo 先頭の改行がトリムされる OS バージョンがある
+    const size_t cap  = std::size(nid.szInfo);
+    const int    show = (n <= 3) ? n : 2;
+    size_t       off  = 0;
+    // 1 件のみのときは Toast 3 行領域の中央（2 行目）に寄せるため先頭に空行を入れる
     if (n == 1) {
-        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"\n　%s\n", labels[0]);
+        int r = swprintf_s(nid.szInfo, cap, L"\n");
+        if (r > 0) off += static_cast<size_t>(r);
     }
-    else if (n == 2) {
-        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"　%s\n　%s", labels[0], labels[1]);
+    for (int i = 0; i < show; i++) {
+        if (off >= cap) break;
+        const bool need_lf = (i + 1 < show) || (n > 3) || (n == 1);
+        int r = swprintf_s(nid.szInfo + off, cap - off, L"　%s%s", labels[i], need_lf ? L"\n" : L"");
+        if (r > 0) off += static_cast<size_t>(r);
     }
-    else if (n == 3) {
-        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"　%s\n　%s\n　%s", labels[0], labels[1], labels[2]);
-    }
-    else {
-        _snwprintf_s(nid.szInfo, cap, _TRUNCATE, L"　%s\n　%s\n　ほか %d 件", labels[0], labels[1], n - 2);
-    }
+    if (n > 3 && off < cap)
+        swprintf_s(nid.szInfo + off, cap - off, L"　ほか %d 件", n - 2);
 
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
@@ -413,25 +417,29 @@ void AppWindow::apply_topmost() {
 
 // 優先度切り替え閾値（単位：%、隠蔽率）
 //
-// 隠蔽率 10% 未満をほぼ全面可視、90% 以上をほぼ全面隠蔽として扱う。
-// 境界値付近での連続遷移は計測周期（デフォルト 3 秒）で自然に緩慢化する。
-static constexpr int OCC_PCT_ABOVE_NORMAL = 10;   // これ未満なら ABOVE_NORMAL
-static constexpr int OCC_PCT_BELOW_NORMAL = 90;   // これ以上なら BELOW_NORMAL
+// 隠蔽率がこれ未満なら全面可視扱い（ABOVE_NORMAL）、これ以上なら全面隠蔽扱い（BELOW_NORMAL）とする。
+// 境界値付近での連続遷移は計測周期（デフォルト 5 秒）で自然に緩慢化する。
+static constexpr int OCC_PCT_FULLY_VISIBLE = 10;
+static constexpr int OCC_PCT_FULLY_HIDDEN  = 90;
 
 int AppWindow::compute_occlusion_percent() {
-    if (!hwnd_)                  return 100;
-    if (IsIconic(hwnd_))         return 100;
-    if (!IsWindowVisible(hwnd_)) return 100;
-
     RECT rc;
-    if (!GetWindowRect(hwnd_, &rc)) return 100;
+    if (!hwnd_ || IsIconic(hwnd_) || !IsWindowVisible(hwnd_) || !GetWindowRect(hwnd_, &rc))
+        return 100;
     const int w = rc.right  - rc.left;
     const int h = rc.bottom - rc.top;
-    if (w <= 0 || h <= 0)        return 100;
+    if (w <= 0 || h <= 0) return 100;
 
     // グリッドセルの中心座標をサンプリングする（枠端の影響を避けるため中心を使う）
+    //
+    // 直前のヒット HWND をキャッシュし、同一 HWND なら GetAncestor 呼び出しを省く。
+    // 重なり領域は空間相関が強いため有効打率は高い。
+    // 制約：DPI スケーリング・マルチモニタ・WS_EX_LAYERED（透過）は考慮しない。
+    // オフスクリーン配置時は全点が NULL → 完全隠蔽（100%）として扱われる。
     constexpr int GRID = 10;
-    int visible = 0;
+    int  visible  = 0;
+    HWND prev_top = nullptr;
+    bool prev_own = false;
     for (int iy = 0; iy < GRID; ++iy) {
         for (int ix = 0; ix < GRID; ++ix) {
             POINT p = {
@@ -440,22 +448,31 @@ int AppWindow::compute_occlusion_percent() {
             };
             // NULL は画面外（ユーザから不可視）なので隠蔽として扱う
             HWND top = WindowFromPoint(p);
-            if (top == hwnd_ || (top && GetAncestor(top, GA_ROOT) == hwnd_))
-                ++visible;
+            bool own;
+            if (top == prev_top) own = prev_own;
+            else                 own = (top == hwnd_) || (top && GetAncestor(top, GA_ROOT) == hwnd_);
+            if (own) ++visible;
+            prev_top = top;
+            prev_own = own;
         }
     }
-    return 100 - visible;
+    // GRID * GRID で正規化する（GRID 変更時に数値が壊れないようにする）
+    return (GRID * GRID - visible) * 100 / (GRID * GRID);
 }
 
 void AppWindow::update_process_priority() {
     const int hidden = compute_occlusion_percent();
     DWORD target;
-    if      (hidden >= OCC_PCT_BELOW_NORMAL) target = BELOW_NORMAL_PRIORITY_CLASS;
-    else if (hidden >= OCC_PCT_ABOVE_NORMAL) target = NORMAL_PRIORITY_CLASS;
-    else                                     target = ABOVE_NORMAL_PRIORITY_CLASS;
+    // 隠蔽率が OCC_PCT_FULLY_VISIBLE 未満なら全面可視、OCC_PCT_FULLY_HIDDEN 以上なら全面隠蔽
+    if      (hidden < OCC_PCT_FULLY_VISIBLE) target = ABOVE_NORMAL_PRIORITY_CLASS;
+    else if (hidden < OCC_PCT_FULLY_HIDDEN)  target = NORMAL_PRIORITY_CLASS;
+    else                                     target = BELOW_NORMAL_PRIORITY_CLASS;
 
     if (target == current_priority_class_) return;
-    SetPriorityClass(GetCurrentProcess(), target);
+    if (!SetPriorityClass(GetCurrentProcess(), target)) {
+        log_error("priority: SetPriorityClass failed (err=%lu)", GetLastError());
+        return;  // キャッシュ更新スキップ（次周期で再試行される）
+    }
     current_priority_class_ = target;
 }
 
@@ -474,6 +491,9 @@ void AppWindow::run() {
 }
 
 void AppWindow::destroy() {
+    // wnd_proc 経由の遅延メッセージが解放済みメンバを参照しないようにする
+    g_window = nullptr;
+
     if (hwnd_) {
         KillTimer(hwnd_, TIMER_CPU);
         KillTimer(hwnd_, TIMER_FAST);
@@ -488,17 +508,17 @@ void AppWindow::destroy() {
     restore_process_priority();
     remove_tray_icon();
 
-    if (alert_)      { alert_->shutdown();      delete alert_;      }
-    if (col_cpu_)    { col_cpu_->shutdown();    delete col_cpu_;    }
-    if (col_gpu_)    { col_gpu_->shutdown();    delete col_gpu_;    }
-    if (col_disk_)   { col_disk_->shutdown();   delete col_disk_;   }
-    if (col_net_)    { col_net_->shutdown();    delete col_net_;    }
-    if (col_claude_) { col_claude_->shutdown(); delete col_claude_; }
-    if (col_ip_)     { col_ip_->shutdown();     delete col_ip_; }
-    if (col_mem_)   { col_mem_->shutdown();   delete col_mem_;   }
-    if (renderer_)   { renderer_->shutdown(); delete renderer_; }
-    delete metrics_;
-    delete cfg_;
+    if (alert_)      { alert_->shutdown();      delete alert_;      alert_      = nullptr; }
+    if (col_cpu_)    { col_cpu_->shutdown();    delete col_cpu_;    col_cpu_    = nullptr; }
+    if (col_gpu_)    { col_gpu_->shutdown();    delete col_gpu_;    col_gpu_    = nullptr; }
+    if (col_disk_)   { col_disk_->shutdown();   delete col_disk_;   col_disk_   = nullptr; }
+    if (col_net_)    { col_net_->shutdown();    delete col_net_;    col_net_    = nullptr; }
+    if (col_claude_) { col_claude_->shutdown(); delete col_claude_; col_claude_ = nullptr; }
+    if (col_ip_)     { col_ip_->shutdown();     delete col_ip_;     col_ip_     = nullptr; }
+    if (col_mem_)    { col_mem_->shutdown();    delete col_mem_;    col_mem_    = nullptr; }
+    if (renderer_)   { renderer_->shutdown();   delete renderer_;   renderer_   = nullptr; }
+    delete metrics_;  metrics_ = nullptr;
+    delete cfg_;      cfg_     = nullptr;
 }
 
 LRESULT CALLBACK AppWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {

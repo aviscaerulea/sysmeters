@@ -7,12 +7,16 @@
 AppConfig load_config(const std::string& path) {
     AppConfig cfg;
 
+    // バイナリモードで開く
+    // toml11 の istream 版がテキストモードの CRLF 変換でバッファ末尾に NUL を埋め込むバグへの回避策。
+    // バイナリモードのまま toml11 に渡しても CRLF は許容される。
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) return cfg;  // ファイルなし → デフォルト値で返す
 
     try {
         auto data = toml::parse(ifs, path);
 
+        // 型別の TOML 値取得ヘルパ（キー不在・型不一致・パースエラー時はデフォルト値を返す）
         auto get_int = [&](const char* sec, const char* key, int def) -> int {
             try { return toml::find_or(data, sec, key, def); }
             catch (...) { return def; }
@@ -30,6 +34,10 @@ AppConfig load_config(const std::string& path) {
             try { return static_cast<float>(toml::find_or<double>(data, sec, key, static_cast<double>(def))); }
             catch (...) {}
             try { return static_cast<float>(toml::find_or<int64_t>(data, sec, key, static_cast<int64_t>(def))); }
+            catch (...) { return def; }
+        };
+        auto get_bool = [&](const char* sec, const char* key, bool def) -> bool {
+            try { return toml::find_or<bool>(data, sec, key, def); }
             catch (...) { return def; }
         };
 
@@ -62,8 +70,7 @@ AppConfig load_config(const std::string& path) {
         cfg.warn_threads       = get_int  ("threshold", "threads",       cfg.warn_threads);
         cfg.warn_handles       = get_int  ("threshold", "handles",       cfg.warn_handles);
 
-        try { cfg.alert_sound = toml::find_or<bool>(data, "threshold", "alert_sound", cfg.alert_sound); }
-        catch (...) {}
+        cfg.alert_sound         = get_bool ("threshold", "alert_sound",         cfg.alert_sound);
         cfg.reset_cpu_pct       = get_float("threshold", "reset_cpu_pct",       cfg.reset_cpu_pct);
         cfg.reset_gpu_pct       = get_float("threshold", "reset_gpu_pct",       cfg.reset_gpu_pct);
         cfg.reset_mem_pct       = get_float("threshold", "reset_mem_pct",       cfg.reset_mem_pct);
@@ -72,8 +79,8 @@ AppConfig load_config(const std::string& path) {
         cfg.reset_claude_5h_pct = get_float("threshold", "reset_claude_5h_pct", cfg.reset_claude_5h_pct);
         cfg.reset_claude_7d_pct = get_float("threshold", "reset_claude_7d_pct", cfg.reset_claude_7d_pct);
 
-        try { cfg.priority_control_enable     = toml::find_or<bool>(data, "process", "priority_control",   cfg.priority_control_enable); } catch (...) {}
-        cfg.priority_check_interval_sec = get_int("process", "check_interval_sec", cfg.priority_check_interval_sec);
+        cfg.priority_control_enable     = get_bool("process", "priority_control",   cfg.priority_control_enable);
+        cfg.priority_check_interval_sec = get_int ("process", "check_interval_sec", cfg.priority_check_interval_sec);
 
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
     }
@@ -104,7 +111,7 @@ AppConfig load_config(const std::string& path) {
     cfg.warn_uptime_days = std::max(0, cfg.warn_uptime_days);
     cfg.warn_processes   = std::clamp(cfg.warn_processes, 0, 999999);
     cfg.warn_threads     = std::clamp(cfg.warn_threads,   0, 999999);
-    cfg.warn_handles     = std::clamp(cfg.warn_handles,   0, 999999);
+    cfg.warn_handles     = std::clamp(cfg.warn_handles,   0, 9999999);
 
     // 警告音リセット閾値のサニティチェック
     //

@@ -28,18 +28,16 @@ static std::string get_config_path() {
 }
 
 int main() {
-    // 多重起動の排他（Named Mutex）
+    // 多重起動排他（Named Mutex）
+    // 既存インスタンスに WM_CLOSE を送り、最大 3 秒待って終了しなければ自分が終了する
     HANDLE mutex = CreateMutexW(nullptr, FALSE, L"sysmeters-mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        // 既存プロセスのウィンドウを探して終了要求
         HWND prev = FindWindowW(L"SystemMetersWnd", nullptr);
         if (prev) PostMessage(prev, WM_CLOSE, 0, 0);
-        // 最大 3 秒待機して既存プロセスの終了を確認する
         for (int i = 0; i < 30; ++i) {
             if (!FindWindowW(L"SystemMetersWnd", nullptr)) break;
             Sleep(100);
         }
-        // タイムアウト：既存プロセスが終了しなければ自分が終了する
         if (FindWindowW(L"SystemMetersWnd", nullptr)) {
             ReleaseMutex(mutex);
             CloseHandle(mutex);
