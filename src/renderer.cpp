@@ -945,6 +945,16 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         return std::clamp(static_cast<float>((window_secs - remaining) / window_secs * 100.0), 0.f, 100.f);
     };
 
+    // Claude レートリミット横バーを 1 本描画する
+    //
+    // lbl:          ラベル文字列（"5h"/"7d"）
+    // pct:          現在使用率（0〜100%）
+    // reset:        リセット時刻文字列（avail=false のとき nullptr 可）
+    // avail:        データ取得済みなら true（false のときグレー表示）
+    // expected_pct: 均等消費ペースの理想位置（%）。0 のとき計算不可
+    // tick_count:   ペースマーカーの縦線本数（0 のとき縦線なし）
+    // warn_pct:     理想ペースからの超過率の警告閾値（%）
+    // peak_frac:    ピーク時間帯の開始・終了位置（バー幅に対する比率）。{0,0} のとき非表示
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
                          std::pair<float, float> peak_frac = {0.f, 0.f}) {

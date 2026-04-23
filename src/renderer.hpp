@@ -46,7 +46,7 @@ private:
     IDWriteTextFormat*     font_small_bold_ = nullptr;  // 小テキスト太字（18pt bold）
     IDWriteTextFormat*     font_tiny_       = nullptr;  // 極小テキスト（16pt）
     IDWriteTextFormat*     font_large_      = nullptr;  // グラフ内オーバーレイ（22pt bold）
-    IDWriteTextFormat*     font_xlarge_     = nullptr;  // CPU/GPU 使用率オーバーレイ（33pt bold）
+    IDWriteTextFormat*     font_xlarge_     = nullptr;  // CPU/GPU 使用率オーバーレイ（40pt bold）
 
     // ブラシキャッシュ（色別に使い回す）
     ID2D1SolidColorBrush*  brush_text_  = nullptr;

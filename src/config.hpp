@@ -35,7 +35,7 @@ struct AppConfig {
     int   warn_uptime_days   = 7;     // OS アップタイム（日）
     int   warn_processes     = 1000;  // プロセス数の警告閾値
     int   warn_threads       = 10000; // スレッド数の警告閾値
-    int   warn_handles       = 250000;// ハンドル数の警告閾値
+    int   warn_handles       = 1000000; // ハンドル数の警告閾値
 
     // 警告音設定
     bool  alert_sound        = true;  // 警告音有効/無効
@@ -49,7 +49,7 @@ struct AppConfig {
 
     // プロセス優先度制御
     bool priority_control_enable     = false;  // 隠蔽率に応じた優先度自動制御の ON/OFF
-    int  priority_check_interval_sec = 3;      // 隠蔽率チェック周期（秒）
+    int  priority_check_interval_sec = 5;      // 隠蔽率チェック周期（秒）
 
     // ログ出力先ディレクトリ（実行ファイルからの相対パス、または絶対パス）
     std::string log_dir = "logs";
