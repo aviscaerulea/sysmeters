@@ -501,14 +501,11 @@ void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_); 
 bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, DEF_TOAST_ALERT); }
 void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_);           }
 
-// Windows スタートアップ用レジストリキー（HKCU\...\Run\sysmeters）
+// Windows スタートアップ用レジストリ（HKCU\Software\Microsoft\Windows\CurrentVersion\Run キー配下の sysmeters 値）
 static constexpr LPCWSTR STARTUP_KEY   = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 static constexpr LPCWSTR STARTUP_VALUE = L"sysmeters";
 
-// Windows スタートアップ登録の有無を返す
-//
-// HKCU\Software\Microsoft\Windows\CurrentVersion\Run\sysmeters が存在すれば true。
-// タスクマネージャ等から外部で変更される可能性があるため、メニュー表示時に都度判定する。
+// スタートアップ登録の有無を返す
 bool AppWindow::is_startup_registered() {
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_KEY, 0, KEY_READ, &key) != ERROR_SUCCESS)
@@ -519,11 +516,9 @@ bool AppWindow::is_startup_registered() {
     return result == ERROR_SUCCESS;
 }
 
-// Windows スタートアップへ現在の実行ファイルを登録 / 解除する
+// スタートアップへ現在の実行ファイルを登録 / 解除する
 //
-// enable=true：現在の sysmeters.exe フルパスをダブルクォートで括って REG_SZ 値として書き込む
-//              （パスに空白が含まれる環境でも Explorer が正しく解釈できるようにするため）。
-// enable=false：値を削除する（キー自体は他アプリも使うため残す）。
+// 登録時はパスに空白が含まれる環境でも Explorer が正しく解釈できるようダブルクォートで括って書き込む。
 void AppWindow::set_startup(bool enable) {
     if (enable) {
         wchar_t exe[MAX_PATH] = {};
@@ -534,8 +529,7 @@ void AppWindow::set_startup(bool enable) {
         swprintf_s(command, L"\"%s\"", exe);
 
         HKEY key;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, STARTUP_KEY, 0, nullptr,
-                            0, KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_KEY, 0, KEY_WRITE, &key) != ERROR_SUCCESS)
             return;
         DWORD size = static_cast<DWORD>((wcslen(command) + 1) * sizeof(wchar_t));
         RegSetValueExW(key, STARTUP_VALUE, 0, REG_SZ,
