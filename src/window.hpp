@@ -81,6 +81,8 @@ private:
     void apply_topmost();       // SetWindowPos で最前面状態を反映
     bool load_toast_alert();    // レジストリから Toast 通知設定を読む（未設定時は true）
     void save_toast_alert();    // レジストリに Toast 通知設定を書く
+    bool is_startup_registered(); // Windows スタートアップ（HKCU\...\Run）の登録有無を返す
+    void set_startup(bool enable);// Windows スタートアップに現在の実行ファイルを登録 / 解除する
 
     // プロセス優先度自動制御
     DWORD current_priority_class_  = NORMAL_PRIORITY_CLASS;      // 直前に適用した優先度クラス（差分検知用キャッシュ）

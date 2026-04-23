@@ -420,6 +420,8 @@ void AppWindow::show_context_menu() {
                 IDM_TOPMOST, L"常に最前面に表示");
     AppendMenuW(menu, MF_STRING | (toast_alert_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_ALERT_TOAST, L"Toast 通知");
+    AppendMenuW(menu, MF_STRING | (is_startup_registered() ? MF_CHECKED : MF_UNCHECKED),
+                IDM_STARTUP, L"スタートアップ登録");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG, L"設定ファイル");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"ログファイル");
@@ -498,6 +500,56 @@ bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     DEF_
 void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_);               }
 bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, DEF_TOAST_ALERT); }
 void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_);           }
+
+// Windows スタートアップ用レジストリキー（HKCU\...\Run\sysmeters）
+static constexpr LPCWSTR STARTUP_KEY   = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+static constexpr LPCWSTR STARTUP_VALUE = L"sysmeters";
+
+// Windows スタートアップ登録の有無を返す
+//
+// HKCU\Software\Microsoft\Windows\CurrentVersion\Run\sysmeters が存在すれば true。
+// タスクマネージャ等から外部で変更される可能性があるため、メニュー表示時に都度判定する。
+bool AppWindow::is_startup_registered() {
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_KEY, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        return false;
+
+    LONG result = RegQueryValueExW(key, STARTUP_VALUE, nullptr, nullptr, nullptr, nullptr);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS;
+}
+
+// Windows スタートアップへ現在の実行ファイルを登録 / 解除する
+//
+// enable=true：現在の sysmeters.exe フルパスをダブルクォートで括って REG_SZ 値として書き込む
+//              （パスに空白が含まれる環境でも Explorer が正しく解釈できるようにするため）。
+// enable=false：値を削除する（キー自体は他アプリも使うため残す）。
+void AppWindow::set_startup(bool enable) {
+    if (enable) {
+        wchar_t exe[MAX_PATH] = {};
+        // 戻り値 == MAX_PATH は切り詰められた可能性あり（Windows 10 未満では NUL 終端保証なし）
+        DWORD len = GetModuleFileNameW(hinst_, exe, MAX_PATH);
+        if (len == 0 || len >= MAX_PATH) return;
+        wchar_t command[MAX_PATH + 4];
+        swprintf_s(command, L"\"%s\"", exe);
+
+        HKEY key;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, STARTUP_KEY, 0, nullptr,
+                            0, KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+            return;
+        DWORD size = static_cast<DWORD>((wcslen(command) + 1) * sizeof(wchar_t));
+        RegSetValueExW(key, STARTUP_VALUE, 0, REG_SZ,
+                       reinterpret_cast<const BYTE*>(command), size);
+        RegCloseKey(key);
+    }
+    else {
+        HKEY key;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, STARTUP_KEY, 0, KEY_WRITE, &key) != ERROR_SUCCESS)
+            return;
+        RegDeleteValueW(key, STARTUP_VALUE);
+        RegCloseKey(key);
+    }
+}
 
 void AppWindow::apply_topmost() {
     SetWindowPos(hwnd_, topmost_ ? HWND_TOPMOST : HWND_NOTOPMOST,
@@ -710,6 +762,9 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_ALERT_TOAST:
             toast_alert_ = !toast_alert_;
             save_toast_alert();
+            break;
+        case IDM_STARTUP:
+            set_startup(!is_startup_registered());
             break;
         case IDM_GITHUB:       ShellExecuteW(nullptr, L"open", GITHUB_URL, nullptr, nullptr, SW_SHOW); break;
         case IDM_OPEN_CONFIG: open_config_file(); break;
