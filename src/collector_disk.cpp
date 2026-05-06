@@ -175,6 +175,7 @@ void DiskCollector::update_space(DiskMetrics& c, DiskMetrics& d) {
 // 取得成功時は dm.smart_avail = true をセットする
 static void query_nvme_smart(int phys_drive, DiskMetrics& dm) {
     dm.smart_avail = false;
+    dm.smart_temp_avail = false;
     if (phys_drive < 0) return;
 
     wchar_t drv_path[32];
