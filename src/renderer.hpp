@@ -36,7 +36,7 @@ public:
     //
     // WM_COMMAND の表示トグル時、SetWindowPos を paint() より先行させるために使う。
     // paint() のセクション加算式と厳密に一致させる必要がある。
-    int compute_preferred_height(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis) const;
+    int compute_preferred_height(const AllMetrics& m, const Visibility& vis) const;
 
     // コアバーの補間アニメーションを 1 ステップ進める
     //
