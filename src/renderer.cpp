@@ -60,9 +60,10 @@ static constexpr float INFO_LINE_H = 27.f;  // Space 下テキスト行高さ（
 
 // セクションごとの縦幅ヘルパー
 //
-// paint() の各 draw_* と compute_preferred_height() で同じ高さ計算を共有することで、
-// レイアウト変更時に paint と事前計算がズレる事故を防ぐ。
-// 各式は対応する draw_* 内の y 累積と一致させる。
+// compute_preferred_height() が paint() を実行せず縦幅を見積るために使う。
+// paint() 側は draw_*() の戻り値で y を累積する設計を維持しており、
+// 各式は対応する draw_*() 内の y 累積と数値上一致させる必要がある。
+// レイアウト定数（SECTION_H 等）を変更した場合は両側を必ず揃える。
 namespace {
 inline float section_h_os()             { return SECTION_H; }
 inline float section_h_cpu()            { return SECTION_H + GRAPH_H_LG + GAP + CORE_BAR_H + GAP + SECTION_H; }
@@ -1150,8 +1151,7 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
     }
 }
 
-int Renderer::compute_preferred_height(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis) const {
-    (void)cfg;
+int Renderer::compute_preferred_height(const AllMetrics& m, const Visibility& vis) const {
     float y = PAD;
     y += section_h_os();                                       y += SECTION_GAP;
     if (vis.cpu)    { y += section_h_cpu();                    y += SECTION_GAP; }

@@ -236,17 +236,21 @@ void AppWindow::update_os_label() {
     }
 }
 
-// ウィンドウ高さを renderer の preferred_height に合わせて調整する
+// タイマー経路用の薄いラッパ
 //
-// タイマー駆動経路（WM_TIMER）で使用する。
-// 表示トグル経路は compute_preferred_height で計算した値を apply_window_height に直接渡す。
+// renderer の preferred_height は paint() 末尾で確定するため、
+// WM_TIMER 駆動でレイアウト変化を後追いする経路として使う。
 void AppWindow::update_window_size() {
     apply_window_height(renderer_->preferred_height());
 }
 
+// 指定の client 領域高さでウィンドウをリサイズする
+//
+// MIN_CLIENT_H クランプ・モニタ作業領域クランプ・キャッシュ判定・renderer.resize() を行う。
+// 表示トグル経路は呼び出し前に last_pref_h_ = 0 を設定してキャッシュを無効化する。
 void AppWindow::apply_window_height(int target_client_h) {
     int client_h = max(target_client_h, MIN_CLIENT_H);
-    if (client_h <= 10 || client_h == last_pref_h_) return;
+    if (client_h == last_pref_h_) return;
     last_pref_h_ = client_h;
 
     RECT adj = {0, 0, cfg_->win_width, client_h};
@@ -257,9 +261,10 @@ void AppWindow::apply_window_height(int target_client_h) {
     MONITORINFO mi{};
     mi.cbSize = sizeof(mi);
     HMONITOR hmon = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
-    GetMonitorInfoW(hmon, &mi);
-    int max_h = mi.rcWork.bottom - mi.rcWork.top;
-    if (full_h > max_h) full_h = max_h;
+    if (GetMonitorInfoW(hmon, &mi)) {
+        int max_h = mi.rcWork.bottom - mi.rcWork.top;
+        if (full_h > max_h) full_h = max_h;
+    }
 
     RECT rc;
     GetWindowRect(hwnd_, &rc);
@@ -807,7 +812,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_STARTUP:
             set_startup(!is_startup_registered());
             break;
-        // 表示項目トグル：フラグ反転 → 永続化 → ウィンドウ縦幅キャッシュを無効化 → 再描画
+        // 表示項目トグル：フラグ反転 → 永続化 → 高さ事前計算 → 先行リサイズ → 同期再描画
         case IDM_VIS_CPU:
         case IDM_VIS_GPU:
         case IDM_VIS_MEM:
@@ -824,10 +829,9 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             save_visibility();
 
-            // ウィンドウを先にリサイズしてから同期再描画する。
-            // 最初のフレームから「新サイズ + 新コンテンツ」が成立し、
-            // 「コンテンツ更新 → 縦幅追従」の二段階が視認される問題を解消する。
-            int new_pref_h = renderer_->compute_preferred_height(*metrics_, *cfg_, vis_);
+            // 先にリサイズして最初のフレームで「新サイズ + 新コンテンツ」を成立させ、
+            // 縦幅が遅れて追従する二段表示を防ぐ。
+            int new_pref_h = renderer_->compute_preferred_height(*metrics_, vis_);
             last_pref_h_ = 0;  // apply_window_height のキャッシュを無効化
             apply_window_height(new_pref_h);
             InvalidateRect(hwnd_, nullptr, FALSE);
