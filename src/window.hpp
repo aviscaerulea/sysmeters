@@ -4,9 +4,10 @@
 #include <windows.h>
 #include <string>
 
+#include "renderer.hpp"
+
 struct AppConfig;
 struct AllMetrics;
-class Renderer;
 class CpuCollector;
 class GpuCollector;
 class MemCollector;
@@ -45,6 +46,7 @@ private:
     int  last_pref_h_  = 0;            // update_window_size 早期リターン用キャッシュ
     bool topmost_      = DEF_TOPMOST;
     bool toast_alert_  = DEF_TOAST_ALERT;
+    Visibility vis_;                   // セクション表示フラグ（カテゴリ単位の表示/非表示）
     UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
     int  last_check_min_ = -1;         // 前回通知チェック時の分（エッジ検出用、-1 = 未初期化）
 
@@ -81,6 +83,8 @@ private:
     void apply_topmost();       // SetWindowPos で最前面状態を反映
     bool load_toast_alert();    // レジストリから Toast 通知設定を読む（未設定時は true）
     void save_toast_alert();    // レジストリに Toast 通知設定を書く
+    void load_visibility();     // レジストリからセクション表示フラグ 6 個を一括読み込み（未設定時は true）
+    void save_visibility();     // レジストリにセクション表示フラグ 6 個を一括保存
     bool is_startup_registered(); // Windows スタートアップ（HKCU\...\Run）の登録有無を返す
     void set_startup(bool enable);// Windows スタートアップに現在の実行ファイルを登録 / 解除する
 
