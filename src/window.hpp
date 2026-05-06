@@ -63,6 +63,12 @@ private:
     AlertManager*    alert_       = nullptr;
 
     void update_window_size();
+    // 指定の client 領域高さでウィンドウをリサイズする
+    //
+    // MIN_CLIENT_H クランプ・モニタ作業領域クランプ・キャッシュ判定・renderer.resize() を行う。
+    // 表示トグル時は compute_preferred_height で先回り計算した値を直接渡し、
+    // 通常のタイマー駆動経路は update_window_size 経由で renderer の preferred_height を渡す。
+    void apply_window_height(int target_client_h);
     void update_os_label();  // OS バージョンラベルをレジストリから再取得する
     void add_tray_icon();
     void remove_tray_icon();

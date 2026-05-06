@@ -58,6 +58,24 @@ static constexpr float TOTAL_W    = 50.f;   // RAM/VRAM 総量テキスト幅（
 static constexpr float DISK_GAP   = 20.f;  // Disk I/O グラフと Space バーの間ギャップ
 static constexpr float INFO_LINE_H = 27.f;  // Space 下テキスト行高さ（容量/GB/h）
 
+// セクションごとの縦幅ヘルパー
+//
+// paint() の各 draw_* と compute_preferred_height() で同じ高さ計算を共有することで、
+// レイアウト変更時に paint と事前計算がズレる事故を防ぐ。
+// 各式は対応する draw_* 内の y 累積と一致させる。
+namespace {
+inline float section_h_os()             { return SECTION_H; }
+inline float section_h_cpu()            { return SECTION_H + GRAPH_H_LG + GAP + CORE_BAR_H + GAP + SECTION_H; }
+inline float section_h_gpu(bool avail)  { return avail ? (SECTION_H + GRAPH_H_LG + GAP)
+                                                       : (SECTION_H + LINE_H + GAP); }
+inline float section_h_mem()            { return LINE_H + 2.f + BAR_H + GAP; }
+inline float section_h_vram(bool avail) { return avail ? (LINE_H + 2.f + BAR_H + GAP)
+                                                       : (LINE_H + GAP); }
+inline float section_h_disk()           { return LINE_H + (LINE_H + GRAPH_H + GAP) * 2.f; }
+inline float section_h_net()            { return LINE_H + LINE_H + GRAPH_H + GAP; }
+inline float section_h_claude()         { return LINE_H + (SECTION_H + GAP) * 2.f; }
+}
+
 // リングバッファの最大値を返す
 static float buf_max(const RingBuffer<float, 60>& b) {
     float m = 0.f;
@@ -1130,4 +1148,18 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
     if (hr == D2DERR_RECREATE_TARGET) {
         release_device_resources();
     }
+}
+
+int Renderer::compute_preferred_height(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis) const {
+    (void)cfg;
+    float y = PAD;
+    y += section_h_os();                                       y += SECTION_GAP;
+    if (vis.cpu)    { y += section_h_cpu();                    y += SECTION_GAP; }
+    if (vis.gpu)    { y += section_h_gpu(m.gpu.avail);         y += SECTION_GAP;
+                      y += section_h_vram(m.vram.avail);       y += SECTION_GAP; }
+    if (vis.mem)    { y += section_h_mem();                    y += SECTION_GAP; }
+    if (vis.disk)   { y += section_h_disk();                   y += SECTION_GAP; }
+    if (vis.net)    { y += section_h_net();                    y += SECTION_GAP; }
+    if (vis.claude) { y += section_h_claude(); }
+    return static_cast<int>(y + PAD);
 }
