@@ -236,9 +236,16 @@ void AppWindow::update_os_label() {
     }
 }
 
-// ウィンドウ高さをコンテンツに合わせて調整する
+// ウィンドウ高さを renderer の preferred_height に合わせて調整する
+//
+// タイマー駆動経路（WM_TIMER）で使用する。
+// 表示トグル経路は compute_preferred_height で計算した値を apply_window_height に直接渡す。
 void AppWindow::update_window_size() {
-    int client_h = max(renderer_->preferred_height(), MIN_CLIENT_H);
+    apply_window_height(renderer_->preferred_height());
+}
+
+void AppWindow::apply_window_height(int target_client_h) {
+    int client_h = max(target_client_h, MIN_CLIENT_H);
     if (client_h <= 10 || client_h == last_pref_h_) return;
     last_pref_h_ = client_h;
 
@@ -816,9 +823,15 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case IDM_VIS_CLAUDE: vis_.claude = !vis_.claude; break;
             }
             save_visibility();
-            last_pref_h_ = 0;  // update_window_size のキャッシュを無効化
+
+            // ウィンドウを先にリサイズしてから同期再描画する。
+            // 最初のフレームから「新サイズ + 新コンテンツ」が成立し、
+            // 「コンテンツ更新 → 縦幅追従」の二段階が視認される問題を解消する。
+            int new_pref_h = renderer_->compute_preferred_height(*metrics_, *cfg_, vis_);
+            last_pref_h_ = 0;  // apply_window_height のキャッシュを無効化
+            apply_window_height(new_pref_h);
             InvalidateRect(hwnd_, nullptr, FALSE);
-            update_window_size();
+            UpdateWindow(hwnd_);
             break;
         }
         case IDM_GITHUB:       ShellExecuteW(nullptr, L"open", GITHUB_URL, nullptr, nullptr, SW_SHOW); break;
