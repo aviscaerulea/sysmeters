@@ -12,3 +12,5 @@ src/pawnio_hashes.hpp
 **/.env
 .serena/
 .task/
+# Added by code-review-graph
+.code-review-graph/
