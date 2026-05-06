@@ -321,8 +321,10 @@ void ClaudeCollector::do_fetch() {
 
     if (usage_j != nullptr) {
         try {
-            auto fh = usage_j["five_hour"];
-            auto sd = usage_j["seven_day"];
+            // 非 const operator[] は存在しないキーを自動挿入するため、value() で副作用なく読む
+            const json empty_obj = json::object();
+            const json& fh = usage_j.contains("five_hour") ? usage_j.at("five_hour") : empty_obj;
+            const json& sd = usage_j.contains("seven_day") ? usage_j.at("seven_day") : empty_obj;
             // utilization は API から 0〜100 の % 値で返る
             result.five_h_pct  = static_cast<float>(fh.value("utilization", 0.0));
             result.seven_d_pct = static_cast<float>(sd.value("utilization", 0.0));
@@ -338,8 +340,8 @@ void ClaudeCollector::do_fetch() {
             result.avail = true;
 
             // 超過料金情報（extra_usage）
-            if (usage_j["extra_usage"].is_object()) {
-                auto eu = usage_j["extra_usage"];
+            if (usage_j.contains("extra_usage") && usage_j.at("extra_usage").is_object()) {
+                const json& eu = usage_j.at("extra_usage");
                 result.extra_enabled      = eu.value("is_enabled", false);
                 result.extra_used_dollars = static_cast<float>(eu.value("used_credits", 0.0)) / 100.f;
             }
@@ -450,7 +452,10 @@ void ClaudeCollector::shutdown() {
 
     // スレッドの完了を待つ（最大 15 秒：2 リクエスト × タイムアウト 1500ms × 4 フェーズ + 余裕）
     if (fetch_thread_) {
-        WaitForSingleObject(fetch_thread_, 15000);
+        DWORD wr = WaitForSingleObject(fetch_thread_, 15000);
+        if (wr != WAIT_OBJECT_0) {
+            log_error("ClaudeCollector::shutdown fetch_thread did not exit (wait=%lu)", wr);
+        }
         CloseHandle(fetch_thread_);
         fetch_thread_ = nullptr;
     }

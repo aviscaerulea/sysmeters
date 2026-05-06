@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <ctime>
 #include <cwchar>
+#include <limits>
 #include <string>
 
 // 警告色（各セクション共通）
@@ -144,11 +145,17 @@ void Renderer::create_device_resources(const AppConfig& cfg) {
     D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties();
     D2D1_HWND_RENDER_TARGET_PROPERTIES hwnd_props = D2D1::HwndRenderTargetProperties(hwnd_, size);
 
-    d2d_factory_->CreateHwndRenderTarget(props, hwnd_props, &render_target_);
-    if (!render_target_) return;
+    HRESULT hr = d2d_factory_->CreateHwndRenderTarget(props, hwnd_props, &render_target_);
+    if (FAILED(hr) || !render_target_) {
+        safe_release(&render_target_);
+        return;
+    }
 
-    render_target_->CreateSolidColorBrush(from_rgb(cfg.col_text),       &brush_text_);
-    render_target_->CreateSolidColorBrush(from_rgb(cfg.col_graph_fill), &brush_fill_);
+    // ブラシ生成失敗時は次回 paint() でやり直せるようリソースを巻き戻す
+    hr = render_target_->CreateSolidColorBrush(from_rgb(cfg.col_text), &brush_text_);
+    if (FAILED(hr) || !brush_text_) { release_device_resources(); return; }
+    hr = render_target_->CreateSolidColorBrush(from_rgb(cfg.col_graph_fill), &brush_fill_);
+    if (FAILED(hr) || !brush_fill_) { release_device_resources(); return; }
 }
 
 void Renderer::release_device_resources() {
@@ -834,14 +841,18 @@ static time_t systemtime_to_timet(const SYSTEMTIME& st)
 // 戻り値は [left_frac, right_frac]（バー上の 0.0-1.0 割合）。
 // ピーク区間がない場合は {0, 0} を返す。
 // resets_ts は 5h ごとにしか変わらないため結果をキャッシュする。
+// 取得未完了（resets_ts<=0）も同値で再呼び出しされ続けるためキャッシュ対象とする。
 static std::pair<float, float> calc_peak_overlap(time_t resets_ts)
 {
-    static time_t s_cached_ts = -1;
+    static time_t s_cached_ts = (std::numeric_limits<time_t>::min)();
     static std::pair<float, float> s_cached_result = {0.f, 0.f};
-    if (resets_ts <= 0)
-        return {0.f, 0.f};
     if (resets_ts == s_cached_ts)
         return s_cached_result;
+    if (resets_ts <= 0) {
+        s_cached_ts     = resets_ts;
+        s_cached_result = {0.f, 0.f};
+        return s_cached_result;
+    }
 
     const auto& tz = get_pacific_tz();
     constexpr double WINDOW_SECS = 5.0 * 3600.0;

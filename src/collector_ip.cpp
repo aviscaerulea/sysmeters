@@ -143,7 +143,10 @@ void IpCollector::shutdown() {
     }
     // スレッドの完了を待つ（最大 15 秒：タイムアウト 3000ms × 4 フェーズ + 余裕）
     if (fetch_thread_) {
-        WaitForSingleObject(fetch_thread_, 15000);
+        DWORD wr = WaitForSingleObject(fetch_thread_, 15000);
+        if (wr != WAIT_OBJECT_0) {
+            log_error("IpCollector::shutdown fetch_thread did not exit (wait=%lu)", wr);
+        }
         CloseHandle(fetch_thread_);
         fetch_thread_ = nullptr;
     }

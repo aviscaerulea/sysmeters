@@ -157,14 +157,17 @@ AppConfig load_config(const std::string& path) {
     cfg.reset_disk_gbh      = std::max(0.f, cfg.reset_disk_gbh);
     cfg.reset_claude_5h_pct = std::clamp(cfg.reset_claude_5h_pct, 0.f, 100.f);
     cfg.reset_claude_7d_pct = std::clamp(cfg.reset_claude_7d_pct, 0.f, 100.f);
-    if (cfg.reset_cpu_pct       >= cfg.warn_cpu_pct)       cfg.reset_cpu_pct       = std::max(0.f, cfg.warn_cpu_pct       - 5.f);
-    if (cfg.reset_gpu_pct       >= cfg.warn_gpu_pct)       cfg.reset_gpu_pct       = std::max(0.f, cfg.warn_gpu_pct       - 5.f);
-    if (cfg.reset_mem_pct        >= cfg.warn_mem_pct)        cfg.reset_mem_pct        = std::max(0.f, cfg.warn_mem_pct        - 5.f);
-    if (cfg.reset_disk_space_pct >= cfg.warn_disk_space_pct) cfg.reset_disk_space_pct = std::max(0.f, cfg.warn_disk_space_pct - 5.f);
-    if (cfg.reset_temp          >= cfg.warn_temp_critical) cfg.reset_temp          = std::max(0.f, cfg.warn_temp_critical - 5.f);
-    if (cfg.reset_disk_gbh      >= cfg.warn_disk_gbh)      cfg.reset_disk_gbh      = std::max(0.f, cfg.warn_disk_gbh      - 1.f);
-    if (cfg.reset_claude_5h_pct >= cfg.warn_claude_5h_pct) cfg.reset_claude_5h_pct = std::max(0.f, cfg.warn_claude_5h_pct - 5.f);
-    if (cfg.reset_claude_7d_pct >= cfg.warn_claude_7d_pct) cfg.reset_claude_7d_pct = std::max(0.f, cfg.warn_claude_7d_pct - 5.f);
+    auto clamp_below = [](float& reset, float warn, float margin) {
+        if (reset >= warn) reset = std::max(0.f, warn - margin);
+    };
+    clamp_below(cfg.reset_cpu_pct,        cfg.warn_cpu_pct,        5.f);
+    clamp_below(cfg.reset_gpu_pct,        cfg.warn_gpu_pct,        5.f);
+    clamp_below(cfg.reset_mem_pct,        cfg.warn_mem_pct,        5.f);
+    clamp_below(cfg.reset_disk_space_pct, cfg.warn_disk_space_pct, 5.f);
+    clamp_below(cfg.reset_temp,           cfg.warn_temp_critical,  5.f);
+    clamp_below(cfg.reset_disk_gbh,       cfg.warn_disk_gbh,       1.f);
+    clamp_below(cfg.reset_claude_5h_pct,  cfg.warn_claude_5h_pct,  5.f);
+    clamp_below(cfg.reset_claude_7d_pct,  cfg.warn_claude_7d_pct,  5.f);
 
     return cfg;
 }
