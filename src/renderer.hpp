@@ -8,6 +8,19 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+// セクション表示フラグ（カテゴリ単位の表示/非表示制御）
+//
+// gpu フラグは GPU + VRAM 両方を、net フラグは NIC グラフ + IP 表示を一括制御する。
+// OS 行は常時表示でフラグの対象外。
+struct Visibility {
+    bool cpu    = true;
+    bool gpu    = true;
+    bool mem    = true;
+    bool disk   = true;
+    bool net    = true;
+    bool claude = true;
+};
+
 // Direct2D による描画エンジン
 //
 // WM_PAINT で Paint() を呼び出すと AllMetrics の内容を描画する。
@@ -17,7 +30,7 @@ public:
     bool init(HWND hwnd, const AppConfig& cfg);
 
     // メトリクスを描画する（WM_PAINT から呼ぶ）
-    void paint(const AllMetrics& m, const AppConfig& cfg);
+    void paint(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis);
 
     // コアバーの補間アニメーションを 1 ステップ進める
     //

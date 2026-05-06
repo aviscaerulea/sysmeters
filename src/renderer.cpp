@@ -1107,7 +1107,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
 // ---- メイン描画 ----
 
-void Renderer::paint(const AllMetrics& m, const AppConfig& cfg) {
+void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis) {
     if (!render_target_) create_device_resources(cfg);
     if (!render_target_) return;
 
@@ -1115,14 +1115,14 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg) {
     render_target_->Clear(from_rgb(cfg.col_background));
 
     float y = PAD;
-    y = draw_os(m.os, cfg, y);          y += SECTION_GAP;
-    y = draw_cpu(m.cpu, m.mem, cfg, y); y += SECTION_GAP;
-    y = draw_gpu(m.gpu, cfg, y);        y += SECTION_GAP;
-    y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP;
-    y = draw_vram(m.vram, cfg, y);      y += SECTION_GAP;
-    y = draw_disk(m.disk_c, m.disk_d, cfg, y); y += SECTION_GAP;
-    y = draw_net(m.net, cfg, y);        y += SECTION_GAP;
-    y = draw_claude(m.claude, cfg, y);
+    y = draw_os(m.os, cfg, y);                            y += SECTION_GAP;
+    if (vis.cpu)    { y = draw_cpu(m.cpu, m.mem, cfg, y); y += SECTION_GAP; }
+    if (vis.gpu)    { y = draw_gpu(m.gpu, cfg, y);        y += SECTION_GAP;
+                      y = draw_vram(m.vram, cfg, y);      y += SECTION_GAP; }
+    if (vis.mem)    { y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP; }
+    if (vis.disk)   { y = draw_disk(m.disk_c, m.disk_d, cfg, y); y += SECTION_GAP; }
+    if (vis.net)    { y = draw_net(m.net, cfg, y);        y += SECTION_GAP; }
+    if (vis.claude) { y = draw_claude(m.claude, cfg, y); }
 
     preferred_h_ = static_cast<int>(y + PAD);
 

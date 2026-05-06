@@ -15,6 +15,13 @@
 #define IDM_GITHUB       104
 #define IDM_ALERT_TOAST  105
 #define IDM_STARTUP      106
+// 表示項目サブメニュー（カテゴリ単位の表示/非表示切替）
+#define IDM_VIS_CPU      110
+#define IDM_VIS_GPU      111
+#define IDM_VIS_MEM      112
+#define IDM_VIS_DISK     113
+#define IDM_VIS_NET      114
+#define IDM_VIS_CLAUDE   115
 // Claude API バックグラウンド完了通知
 #define WM_CLAUDE_DONE  (WM_USER + 2)
 // IP 取得バックグラウンド完了通知

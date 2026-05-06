@@ -47,7 +47,7 @@ static constexpr int TIMER_DISK_SPACE_MS  = 5000;      // 5 秒
 static constexpr int TIMER_SMART_MS       = 3600000;   // 1 時間
 static constexpr int TIMER_IP_MS          = 300000;    // 5 分
 static constexpr int TIMER_ANIM_MS        = 33;        // ≒ 30fps
-static constexpr int MIN_CLIENT_H = 430;  // コンテンツ高さの最低値（px）
+static constexpr int MIN_CLIENT_H = 80;   // コンテンツ高さの最低値（px、OS 行 + ドラッグ余白のみ確保）
 
 // ウィンドウスタイル定数
 static constexpr DWORD WND_STYLE    = WS_CAPTION | WS_SYSMENU;
@@ -194,6 +194,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     topmost_     = load_topmost();
     apply_topmost();
     toast_alert_ = load_toast_alert();
+    load_visibility();
 
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     UpdateWindow(hwnd_);
@@ -422,6 +423,17 @@ void AppWindow::show_context_menu() {
                 IDM_ALERT_TOAST, L"Toast 通知");
     AppendMenuW(menu, MF_STRING | (is_startup_registered() ? MF_CHECKED : MF_UNCHECKED),
                 IDM_STARTUP, L"スタートアップ登録");
+
+    // 表示項目サブメニュー（カテゴリ単位の表示/非表示）
+    HMENU view_menu = CreatePopupMenu();
+    AppendMenuW(view_menu, MF_STRING | (vis_.cpu    ? MF_CHECKED : 0), IDM_VIS_CPU,    L"CPU");
+    AppendMenuW(view_menu, MF_STRING | (vis_.gpu    ? MF_CHECKED : 0), IDM_VIS_GPU,    L"GPU / VRAM");
+    AppendMenuW(view_menu, MF_STRING | (vis_.mem    ? MF_CHECKED : 0), IDM_VIS_MEM,    L"Memory");
+    AppendMenuW(view_menu, MF_STRING | (vis_.disk   ? MF_CHECKED : 0), IDM_VIS_DISK,   L"Disk");
+    AppendMenuW(view_menu, MF_STRING | (vis_.net    ? MF_CHECKED : 0), IDM_VIS_NET,    L"Network");
+    AppendMenuW(view_menu, MF_STRING | (vis_.claude ? MF_CHECKED : 0), IDM_VIS_CLAUDE, L"Claude");
+    AppendMenuW(menu, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(view_menu), L"表示項目");
+
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG, L"設定ファイル");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG, L"ログファイル");
@@ -466,6 +478,13 @@ void AppWindow::open_log_file() {
 static constexpr LPCWSTR REG_KEY         = L"Software\\sysmeters";  // HKCU 以下のキーパス
 static constexpr LPCWSTR REG_TOPMOST     = L"Topmost";              // 最前面設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_ALERT_TOAST = L"AlertToast";           // Toast 通知設定の値名（REG_DWORD、0 or 1）
+// セクション表示フラグの値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_VIS_CPU     = L"Visible_CPU";
+static constexpr LPCWSTR REG_VIS_GPU     = L"Visible_GPU";
+static constexpr LPCWSTR REG_VIS_MEM     = L"Visible_Memory";
+static constexpr LPCWSTR REG_VIS_DISK    = L"Visible_Disk";
+static constexpr LPCWSTR REG_VIS_NET     = L"Visible_Network";
+static constexpr LPCWSTR REG_VIS_CLAUDE  = L"Visible_Claude";
 
 // HKCU\Software\sysmeters の DWORD 値を bool として読む
 //
@@ -500,6 +519,24 @@ bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     DEF_
 void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_);               }
 bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, DEF_TOAST_ALERT); }
 void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_);           }
+
+void AppWindow::load_visibility() {
+    vis_.cpu    = load_reg_bool(REG_VIS_CPU,    true);
+    vis_.gpu    = load_reg_bool(REG_VIS_GPU,    true);
+    vis_.mem    = load_reg_bool(REG_VIS_MEM,    true);
+    vis_.disk   = load_reg_bool(REG_VIS_DISK,   true);
+    vis_.net    = load_reg_bool(REG_VIS_NET,    true);
+    vis_.claude = load_reg_bool(REG_VIS_CLAUDE, true);
+}
+
+void AppWindow::save_visibility() {
+    save_reg_bool(REG_VIS_CPU,    vis_.cpu);
+    save_reg_bool(REG_VIS_GPU,    vis_.gpu);
+    save_reg_bool(REG_VIS_MEM,    vis_.mem);
+    save_reg_bool(REG_VIS_DISK,   vis_.disk);
+    save_reg_bool(REG_VIS_NET,    vis_.net);
+    save_reg_bool(REG_VIS_CLAUDE, vis_.claude);
+}
 
 // Windows スタートアップ用レジストリ（HKCU\Software\Microsoft\Windows\CurrentVersion\Run キー配下の sysmeters 値）
 static constexpr LPCWSTR STARTUP_KEY   = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -733,7 +770,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
-        renderer_->paint(*metrics_, *cfg_);
+        renderer_->paint(*metrics_, *cfg_, vis_);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -763,6 +800,27 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_STARTUP:
             set_startup(!is_startup_registered());
             break;
+        // 表示項目トグル：フラグ反転 → 永続化 → ウィンドウ縦幅キャッシュを無効化 → 再描画
+        case IDM_VIS_CPU:
+        case IDM_VIS_GPU:
+        case IDM_VIS_MEM:
+        case IDM_VIS_DISK:
+        case IDM_VIS_NET:
+        case IDM_VIS_CLAUDE: {
+            switch (LOWORD(wp)) {
+            case IDM_VIS_CPU:    vis_.cpu    = !vis_.cpu;    break;
+            case IDM_VIS_GPU:    vis_.gpu    = !vis_.gpu;    break;
+            case IDM_VIS_MEM:    vis_.mem    = !vis_.mem;    break;
+            case IDM_VIS_DISK:   vis_.disk   = !vis_.disk;   break;
+            case IDM_VIS_NET:    vis_.net    = !vis_.net;    break;
+            case IDM_VIS_CLAUDE: vis_.claude = !vis_.claude; break;
+            }
+            save_visibility();
+            last_pref_h_ = 0;  // update_window_size のキャッシュを無効化
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            update_window_size();
+            break;
+        }
         case IDM_GITHUB:       ShellExecuteW(nullptr, L"open", GITHUB_URL, nullptr, nullptr, SW_SHOW); break;
         case IDM_OPEN_CONFIG: open_config_file(); break;
         case IDM_OPEN_LOG:    open_log_file(); break;
