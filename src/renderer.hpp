@@ -32,6 +32,12 @@ public:
     // メトリクスを描画する（WM_PAINT から呼ぶ）
     void paint(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis);
 
+    // vis に基づき paint() を実行せずに preferred_height を事前計算する
+    //
+    // WM_COMMAND の表示トグル時、SetWindowPos を paint() より先行させるために使う。
+    // paint() のセクション加算式と厳密に一致させる必要がある。
+    int compute_preferred_height(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis) const;
+
     // コアバーの補間アニメーションを 1 ステップ進める
     //
     // core_disp_ を m.core_pct に向けて lerp し、合計変化量が閾値を超えれば true を返す。
