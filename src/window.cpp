@@ -641,15 +641,18 @@ void AppWindow::destroy() {
     restore_process_priority();
     remove_tray_icon();
 
-    if (alert_)      { alert_->shutdown();      delete alert_;      alert_      = nullptr; }
-    if (col_cpu_)    { col_cpu_->shutdown();    delete col_cpu_;    col_cpu_    = nullptr; }
-    if (col_gpu_)    { col_gpu_->shutdown();    delete col_gpu_;    col_gpu_    = nullptr; }
-    if (col_disk_)   { col_disk_->shutdown();   delete col_disk_;   col_disk_   = nullptr; }
-    if (col_net_)    { col_net_->shutdown();    delete col_net_;    col_net_    = nullptr; }
-    if (col_claude_) { col_claude_->shutdown(); delete col_claude_; col_claude_ = nullptr; }
-    if (col_ip_)     { col_ip_->shutdown();     delete col_ip_;     col_ip_     = nullptr; }
-    if (col_mem_)    { col_mem_->shutdown();    delete col_mem_;    col_mem_    = nullptr; }
-    if (renderer_)   { renderer_->shutdown();   delete renderer_;   renderer_   = nullptr; }
+    auto destroy_obj = [](auto*& p) {
+        if (p) { p->shutdown(); delete p; p = nullptr; }
+    };
+    destroy_obj(alert_);
+    destroy_obj(col_cpu_);
+    destroy_obj(col_gpu_);
+    destroy_obj(col_disk_);
+    destroy_obj(col_net_);
+    destroy_obj(col_claude_);
+    destroy_obj(col_ip_);
+    destroy_obj(col_mem_);
+    destroy_obj(renderer_);
     delete metrics_;  metrics_ = nullptr;
     delete cfg_;      cfg_     = nullptr;
 }
