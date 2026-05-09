@@ -1115,7 +1115,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         y += SECTION_H + GAP;
     };
 
-    auto peak = calc_peak_overlap(m.five_h_resets_ts);
+    auto peak = cfg.show_peak_bar ? calc_peak_overlap(m.five_h_resets_ts)
+                                  : std::pair<float, float>{0.f, 0.f};
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
              calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct, peak);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
