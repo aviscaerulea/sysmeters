@@ -104,6 +104,8 @@ AppConfig load_config(const std::string& path) {
 
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
 
+        cfg.show_peak_bar = get_bool("claude", "show_peak_bar", cfg.show_peak_bar);
+
         cfg.notify_peak_limit_enable = get_bool ("notify", "peak_limit_enable", cfg.notify_peak_limit_enable);
         cfg.notify_peak_limit_sound  = get_bool ("notify", "peak_limit_sound",  cfg.notify_peak_limit_sound);
         cfg.notify_peak_limit_title  = get_wstr ("notify", "peak_limit_title",  cfg.notify_peak_limit_title);
