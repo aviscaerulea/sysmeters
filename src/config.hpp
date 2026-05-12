@@ -50,7 +50,7 @@ struct AppConfig {
     float reset_claude_7d_pct =  0.f;  // Claude 7d の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット
 
     // Claude Code 表示設定
-    // 5h バー上に PT 平日 5:00-10:59 を暗赤色で重ねるピーク時間帯背景表示。
+    // 5h バー上に PT 平日 5:00〜10:59 を暗赤色で重ねるピーク時間帯背景表示。
     // 2026-05 に Anthropic がピーク時間帯レート制限を撤廃したためデフォルト OFF。
     bool show_peak_bar = false;
 
