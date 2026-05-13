@@ -360,13 +360,15 @@ void ClaudeCollector::do_fetch() {
                 plan_j = nullptr;
             }
             else {
-                std::string tier = ms[0]["organization"]["rate_limit_tier"].get<std::string>();
+                const auto& tier_j = ms[0]["organization"]["rate_limit_tier"];
+                std::string tier = tier_j.is_string() ? tier_j.get<std::string>() : "";
                 std::string label;
                 if (tier.find("20x") != std::string::npos)      label = "Max20";
                 else if (tier.find("5x") != std::string::npos)  label = "Max5";
                 else if (tier.find("max") != std::string::npos) label = "Max";
                 else if (tier.find("pro") != std::string::npos) label = "Pro";
-                else                                             label = tier;
+                else if (!tier.empty())                          label = tier;
+                else                                             label = u8"不明";
 
                 plan_j = json{{"label", label}, {"_ts", now_ts()}};
                 std::ofstream ofs(cache_plan_path());
