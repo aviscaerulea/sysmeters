@@ -20,7 +20,7 @@ public:
     // 1秒ごとに呼び出す（セッション数取得 + 非同期 API トリガー）
     void update(ClaudeMetrics& out);
 
-    // バックグラウンドスレッドから呼ばれる（WM_CLAUDE_DONE で通知後に呼ぶ）
+    // 取得結果を out へ反映する（WM_CLAUDE_DONE 受信後、メインスレッドから呼ぶ）
     void apply_result(ClaudeMetrics& out);
 
     void shutdown();
