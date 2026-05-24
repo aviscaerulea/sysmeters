@@ -92,11 +92,12 @@ void IpCollector::do_fetch() {
 
     // shutdown 後に PostMessage が到達しないよう atomic で取得してからチェック
     if (HWND wnd = notify_wnd_.load()) PostMessage(wnd, WM_IP_DONE, 0, 0);
-    fetching_.store(false);
 }
 
 DWORD WINAPI IpCollector::fetch_thread(LPVOID param) {
-    reinterpret_cast<IpCollector*>(param)->do_fetch();
+    auto* self = reinterpret_cast<IpCollector*>(param);
+    self->do_fetch();
+    self->fetching_.store(false);  // do_fetch 完了後の最終命令として実行
     return 0;
 }
 
@@ -116,7 +117,8 @@ void IpCollector::update() {
     bool expected = false;
     if (!fetching_.compare_exchange_strong(expected, true)) return;
     if (fetch_thread_) {
-        // CAS 成功時点でフェッチ完了（fetching_.store(false)）は保証されているため安全にクローズできる
+        // 前回スレッドのハンドルクローズ
+        // fetching_.store(false) はスレッド関数の最終命令のため、CAS 成功時点でスレッドはほぼ終了済みである
         CloseHandle(fetch_thread_);
         fetch_thread_ = nullptr;
     }
