@@ -13,6 +13,7 @@
 #include "collector_net.hpp"
 #include "collector_claude.hpp"
 #include "collector_ip.hpp"
+#include "update_check.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
@@ -21,6 +22,8 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dwmapi.lib")
 #include <filesystem>
+#include <thread>
+#include <cstring>
 namespace fs = std::filesystem;
 
 #ifndef APP_VERSION
@@ -29,6 +32,8 @@ namespace fs = std::filesystem;
 
 // GitHub リポジトリ URL
 static constexpr LPCWSTR GITHUB_URL = L"https://github.com/aviscaerulea/sysmeters";
+// GitHub リリース一覧 URL（新版が存在するときにバージョン項目から開く）
+static constexpr LPCWSTR GITHUB_RELEASES_URL = L"https://github.com/aviscaerulea/sysmeters/releases";
 
 static constexpr int TIMER_CPU        = 1;  // CPU/GPU タイマー ID（0.9 秒）
 static constexpr int TIMER_FAST       = 2;  // 高速タイマー ID（Disk/Net）
@@ -201,6 +206,9 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
 
     // 起動時点でピーク期間内なら即時通知
     check_peak_limit_on_startup();
+
+    // GitHub の更新チェックを開始（設定有効時のみ、別スレッドで非同期実行）
+    start_update_check();
 
     return true;
 }
@@ -398,8 +406,8 @@ void AppWindow::check_peak_limit_notify() {
 
 // 起動時にピーク期間内なら即時通知する（create() から 1 度だけ呼ぶ）
 //
-// ローカル平日 21:00-翌 03:00 を近似ピーク期間とみなす。
-// 夏時間中は PT 5:00-11:00 と 1 時間ずれるが、時刻固定方針に従う。
+// ローカル平日 21:00〜翌 03:00 を近似ピーク期間とみなす。
+// 夏時間中は PT 5:00〜11:00 と 1 時間ずれるが、時刻固定方針に従う。
 void AppWindow::check_peak_limit_on_startup() {
     if (!cfg_->notify_peak_limit_enable) return;
 
@@ -421,10 +429,33 @@ void AppWindow::check_peak_limit_on_startup() {
     log_info("notify: startup peak limit toast fired");
 }
 
+// GitHub リリースチェックを別スレッドで開始する
+//
+// 設定無効時は何もしない。取得は detach スレッドで行い、新版があれば WM_UPDATE_DONE を post する。
+// 取得失敗・新版なしの場合は何も通知しない（UI は通常表示のまま）。
+void AppWindow::start_update_check() {
+    if (!cfg_->update_check_enabled) return;
+
+    HWND hwnd = hwnd_;
+    std::wstring current(APP_VERSION, APP_VERSION + std::strlen(APP_VERSION));
+    std::thread([hwnd, current]() {
+        UpdateResult r = check_for_updates(current);
+        if (!r.available) return;
+        // 最新 tag を heap に載せて UI スレッドへ引き渡す（受信側が delete する）
+        // PostMessage 失敗時（キューフル等）はポインタをここで解放する
+        auto* tag_ptr = new std::wstring(r.latest_tag);
+        if (!PostMessage(hwnd, WM_UPDATE_DONE, 0, reinterpret_cast<LPARAM>(tag_ptr)))
+            delete tag_ptr;
+    }).detach();
+}
+
 void AppWindow::show_context_menu() {
-    // メニュー最上部に「アプリ名 vX.Y.Z」を表示
-    wchar_t label[64];
-    swprintf_s(label, L"sysmeters v%hs", APP_VERSION);
+    // メニュー最上部に「アプリ名 vX.Y.Z」を表示（新版があれば「→ v新版」を併記）
+    wchar_t label[96];
+    if (update_available_)
+        swprintf_s(label, L"sysmeters v%hs → %ls", APP_VERSION, update_latest_tag_.c_str());
+    else
+        swprintf_s(label, L"sysmeters v%hs", APP_VERSION);
 
     HMENU menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, IDM_GITHUB, label);
@@ -497,6 +528,8 @@ static constexpr LPCWSTR REG_VIS_MEM     = L"Visible_Memory";
 static constexpr LPCWSTR REG_VIS_DISK    = L"Visible_Disk";
 static constexpr LPCWSTR REG_VIS_NET     = L"Visible_Network";
 static constexpr LPCWSTR REG_VIS_CLAUDE  = L"Visible_Claude";
+// 更新通知済みバージョンの値名（REG_SZ）。同一版の Toast 通知を 1 回に抑えるために保持する
+static constexpr LPCWSTR REG_NOTIFIED_VERSION = L"NotifiedUpdateVersion";
 
 // HKCU\Software\sysmeters の DWORD 値を bool として読む
 //
@@ -525,6 +558,62 @@ static void save_reg_bool(LPCWSTR name, bool value) {
     DWORD val = value ? 1 : 0;
     RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&val), sizeof(val));
     RegCloseKey(key);
+}
+
+// HKCU\Software\sysmeters の REG_SZ 値を読む
+//
+// キーや値が存在しないか型が不正な場合は空文字を返す。
+static std::wstring load_reg_string(LPCWSTR name) {
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &key) != ERROR_SUCCESS)
+        return {};
+
+    DWORD type = 0, bytes = 0;
+    LONG r = RegQueryValueExW(key, name, nullptr, &type, nullptr, &bytes);
+    if (r != ERROR_SUCCESS || type != REG_SZ || bytes < sizeof(wchar_t)) {
+        RegCloseKey(key);
+        return {};
+    }
+
+    std::wstring buf(bytes / sizeof(wchar_t), L'\0');
+    r = RegQueryValueExW(key, name, nullptr, nullptr,
+                         reinterpret_cast<BYTE*>(buf.data()), &bytes);
+    RegCloseKey(key);
+    if (r != ERROR_SUCCESS) return {};
+    // 末尾の NUL 終端を取り除く
+    if (!buf.empty() && buf.back() == L'\0') buf.pop_back();
+    return buf;
+}
+
+// HKCU\Software\sysmeters に REG_SZ 値を書く
+static void save_reg_string(LPCWSTR name, const std::wstring& value) {
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr,
+                        0, KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return;
+
+    DWORD bytes = static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t));
+    RegSetValueExW(key, name, 0, REG_SZ,
+                   reinterpret_cast<const BYTE*>(value.c_str()), bytes);
+    RegCloseKey(key);
+}
+
+// 新版状態を確定し、未通知版なら Toast 通知する（WM_UPDATE_DONE 受信時に UI スレッドで呼ぶ）
+//
+// 通知済みバージョンをレジストリに先書きし、前回値と異なるときだけ通知する。
+// これにより同一版の通知が起動ごとに繰り返されるのを防ぐ。
+void AppWindow::on_update_available(const std::wstring& latest_tag) {
+    update_available_  = true;
+    update_latest_tag_ = latest_tag;
+
+    std::wstring notified = load_reg_string(REG_NOTIFIED_VERSION);
+    save_reg_string(REG_NOTIFIED_VERSION, latest_tag);
+    if (notified == latest_tag) return;  // この版は通知済み
+
+    wchar_t body[128];
+    swprintf_s(body, L"sysmeters v%hs → %ls", APP_VERSION, latest_tag.c_str());
+    show_notify(L"新しいバージョンがあります", body);
+    log_info("update available: notified");
 }
 
 bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     DEF_TOPMOST);     }
@@ -686,6 +775,7 @@ void AppWindow::destroy() {
         KillTimer(hwnd_, TIMER_IP);
         KillTimer(hwnd_, TIMER_ANIM);
         KillTimer(hwnd_, TIMER_PRIORITY);
+        KillTimer(hwnd_, TIMER_NOTIFY_SCHED);
     }
     restore_process_priority();
     remove_tray_icon();
@@ -838,7 +928,12 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             UpdateWindow(hwnd_);
             break;
         }
-        case IDM_GITHUB:       ShellExecuteW(nullptr, L"open", GITHUB_URL, nullptr, nullptr, SW_SHOW); break;
+        case IDM_GITHUB: {
+            // 新版あり時はリリース一覧、なし時はリポジトリトップを開く
+            LPCWSTR url = update_available_ ? GITHUB_RELEASES_URL : GITHUB_URL;
+            ShellExecuteW(nullptr, L"open", url, nullptr, nullptr, SW_SHOW);
+            break;
+        }
         case IDM_OPEN_CONFIG: open_config_file(); break;
         case IDM_OPEN_LOG:    open_log_file(); break;
         case IDM_EXIT:        DestroyWindow(hwnd); break;
@@ -855,6 +950,16 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
+
+    case WM_UPDATE_DONE: {
+        // lParam は new した最新 tag。所有権を受け取り、必ず delete する
+        std::wstring* tag = reinterpret_cast<std::wstring*>(lp);
+        if (tag) {
+            if (cfg_) on_update_available(*tag);  // 破棄後の遅延到着に対する二重防御
+            delete tag;
+        }
+        return 0;
+    }
 
     // WS_POPUP ウィンドウで DefWindowProc が SC_CLOSE を無視する場合の保険
     case WM_SYSCOMMAND:
