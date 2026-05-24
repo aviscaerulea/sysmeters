@@ -59,7 +59,11 @@ struct AppConfig {
     bool         notify_peak_limit_enable = false;
     bool         notify_peak_limit_sound  = false;
     std::wstring notify_peak_limit_title  = L"Claude Code";
-    std::wstring notify_peak_limit_body   = L"平日 21:00-03:00 ピーク制限時間です";
+    std::wstring notify_peak_limit_body   = L"平日 21:00〜03:00 ピーク制限時間です";
+
+    // 更新チェック設定
+    // 起動時に GitHub の最新リリースを確認し、新版があれば Toast 通知とトレイメニューで知らせる。
+    bool update_check_enabled = true;
 
     // プロセス優先度制御
     bool priority_control_enable     = false;  // 隠蔽率に応じた優先度自動制御の ON/OFF

@@ -50,6 +50,10 @@ private:
     UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
     int  last_check_min_ = -1;         // 前回通知チェック時の分（エッジ検出用、-1 = 未初期化）
 
+    // 更新チェック状態（UI スレッドのみが参照する。WM_UPDATE_DONE 受信時に確定）
+    bool         update_available_ = false;  // GitHub に新版ありなら true
+    std::wstring update_latest_tag_;         // 最新リリースの tag_name（新版あり時のみ）
+
     AppConfig*       cfg_     = nullptr;
     AllMetrics*      metrics_ = nullptr;
     Renderer*        renderer_ = nullptr;
@@ -77,6 +81,10 @@ private:
     void check_peak_limit_notify();
     // 起動時にピーク期間内なら即時通知する（create() から 1 度だけ呼ぶ）
     void check_peak_limit_on_startup();
+    // 起動時に GitHub リリースチェックを detach スレッドで開始する（create() から 1 度だけ呼ぶ）
+    void start_update_check();
+    // WM_UPDATE_DONE 受信時に新版状態を確定し、未通知版なら Toast 通知する
+    void on_update_available(const std::wstring& latest_tag);
     void show_context_menu();
     void open_config_file();
     void open_log_file();

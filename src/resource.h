@@ -26,3 +26,5 @@
 #define WM_CLAUDE_DONE  (WM_USER + 2)
 // IP 取得バックグラウンド完了通知
 #define WM_IP_DONE      (WM_USER + 3)
+// 更新チェックバックグラウンド完了通知（lParam = new std::wstring* の最新 tag、受信側が delete する）
+#define WM_UPDATE_DONE  (WM_USER + 4)
