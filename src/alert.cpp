@@ -396,7 +396,7 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg) {
         check_item(TEMP_NVME_C, m.disk_c.smart_temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
     if (m.disk_d.smart_avail && m.disk_d.smart_temp_avail)
         check_item(TEMP_NVME_D, m.disk_d.smart_temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
-    {
+    if (m.disk_c.smart_avail || m.disk_d.smart_avail) {
         float gbh = std::max(m.disk_c.smart_write_gbh, m.disk_d.smart_write_gbh);
         check_item(DISK_GBH, gbh, cfg.warn_disk_gbh, cfg.reset_disk_gbh);
     }
