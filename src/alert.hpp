@@ -36,7 +36,7 @@ public:
 
     // 全メトリクスを評価し、新規に発火した項目のビットマスクを返す
     //
-    // 戻り値: 新規発火した Id のビットが立った uint32_t（0 = 発火なし）。
+    // 戻り値：新規発火した Id のビットが立った uint32_t（0 = 発火なし）。
     // 警告音・Toast の発行は window 側が戻り値を見て行う。
     uint32_t check(const AllMetrics& m, const AppConfig& cfg);
 

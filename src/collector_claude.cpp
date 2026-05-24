@@ -368,7 +368,7 @@ void ClaudeCollector::do_fetch() {
                 else if (tier.find("max") != std::string::npos) label = "Max";
                 else if (tier.find("pro") != std::string::npos) label = "Pro";
                 else if (!tier.empty())                          label = tier;
-                else                                             label = u8"不明";
+                else                                             label = "不明";
 
                 plan_j = json{{"label", label}, {"_ts", now_ts()}};
                 std::ofstream ofs(cache_plan_path());
