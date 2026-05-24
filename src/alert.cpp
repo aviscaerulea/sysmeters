@@ -12,10 +12,6 @@ namespace fs = std::filesystem;
 
 // BLE ヘッドフォン対策定数
 
-// 冒頭不可聴トーンの時間（ミリ秒）
-static constexpr int    BLE_LEADING_TONE_MS  = 1500;
-// 末尾不可聴トーンの時間（ミリ秒）
-static constexpr int    BLE_TRAILING_TONE_MS = 2000;
 // 不可聴トーンの周波数（Hz）。BLE デバイスの省電力移行を防止する
 static constexpr int    TONE_FREQ_HZ         = 19000;
 // 不可聴トーンの振幅（int16_t、フルスケール 32767 の約 3%）
@@ -26,6 +22,7 @@ static constexpr double PI                   = 3.14159265358979323846;
 struct SoundParam {
     wchar_t              wav_path[MAX_PATH];
     const volatile bool* shutdown;
+    int                  tone_ms;   // ガードトーン長（冒頭・末尾共通、ms）
 };
 
 // 19kHz 不可聴トーンをバッファに書き込む
@@ -80,9 +77,9 @@ static void play_tone_segment(IAudioClient* client, IAudioRenderClient* render,
 //
 // path: 16bit PCM WAV ファイルのフルパス
 // shutdown: true になると再生を中断して終了する
-// BLE 対策として冒頭 BLE_LEADING_TONE_MS + 末尾 BLE_TRAILING_TONE_MS の 19kHz トーンを挿入する。
-// WAV ファイル自体は変更しない（オンメモリで構成する）。
-static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) {
+// tone_ms: 冒頭・末尾に挿入する 19kHz トーンの長さ（共通、ms）。0 以下なら挿入しない。
+// BLE 対策として再生前後に不可聴トーンを挿入する。WAV ファイル自体は変更しない（オンメモリで構成する）。
+static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown, int tone_ms) {
     HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ,
                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
@@ -203,8 +200,9 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) 
         }
 
         // 冒頭不可聴トーン挿入（BLE ヘッドフォン省電力移行防止）
-        play_tone_segment(client, render, hEvent, bufFrames, fmt,
-                          fmt.nSamplesPerSec * BLE_LEADING_TONE_MS / 1000, shutdown);
+        if (tone_ms > 0)
+            play_tone_segment(client, render, hEvent, bufFrames, fmt,
+                              fmt.nSamplesPerSec * tone_ms / 1000, shutdown);
 
         // data チャンク先頭にシーク
         SetFilePointer(hFile, (LONG)dataStart, nullptr, FILE_BEGIN);
@@ -254,9 +252,9 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown) 
         }
 
         // 末尾不可聴トーン挿入（BLE ヘッドフォン省電力移行防止）
-        if (eof)
+        if (eof && tone_ms > 0)
             play_tone_segment(client, render, hEvent, bufFrames, fmt,
-                              fmt.nSamplesPerSec * BLE_TRAILING_TONE_MS / 1000, shutdown);
+                              fmt.nSamplesPerSec * tone_ms / 1000, shutdown);
 
         ok = eof;
     }
@@ -278,7 +276,7 @@ DWORD WINAPI AlertManager::sound_thread_func(LPVOID param) {
     auto* p  = static_cast<SoundParam*>(param);
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (hr == S_OK || hr == S_FALSE) {
-        play_wav_wasapi(p->wav_path, p->shutdown);
+        play_wav_wasapi(p->wav_path, p->shutdown, p->tone_ms);
         CoUninitialize();
     }
     else {
@@ -288,7 +286,8 @@ DWORD WINAPI AlertManager::sound_thread_func(LPVOID param) {
     return 0;
 }
 
-void AlertManager::init() {
+void AlertManager::init(const AppConfig& cfg) {
+    guard_tone_ms_ = cfg.guard_tone_ms;
     wchar_t exe[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     auto wav = fs::path(exe).parent_path() / L"alert.wav";
@@ -325,6 +324,7 @@ void AlertManager::play() {
     auto* p = new SoundParam{};
     wcscpy_s(p->wav_path, wav_path_);
     p->shutdown = &shutdown_;
+    p->tone_ms  = guard_tone_ms_;
     HANDLE h = CreateThread(nullptr, 0, sound_thread_func, p, 0, nullptr);
     if (h) {
         sound_thread_ = h;

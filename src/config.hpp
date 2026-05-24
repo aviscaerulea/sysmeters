@@ -40,6 +40,9 @@ struct AppConfig {
 
     // 警告音設定
     bool  alert_sound        = true;  // 警告音有効/無効
+    // ガードトーン長（ミリ秒、再生前後の 19kHz 不可聴トーン）
+    // BLE ヘッドフォンの省電力移行を防ぐ。冒頭・末尾に共通で適用する。0 で無効。
+    int   guard_tone_ms      = 1500;
     float reset_cpu_pct      = 90.f;  // CPU 使用率の警告音リセット閾値（%）
     float reset_gpu_pct      = 90.f;  // GPU 使用率の警告音リセット閾値（%）
     float reset_mem_pct       = 85.f;  // RAM/VRAM の警告音リセット閾値（%）
