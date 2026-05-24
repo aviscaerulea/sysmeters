@@ -393,7 +393,9 @@ void CpuCollector::update(CpuMetrics& out) {
         // AMD: SMN レジスタ THM_TCON_CUR_TMP（0x59800）から Tctl 温度を取得
         // 温度 = (raw >> 21) * 125 / 1000、ビット 19 = オフセットフラグ（-49°C）
         if (impl_->hmutex_pci) {
-            if (WaitForSingleObject(impl_->hmutex_pci, 100) != WAIT_OBJECT_0) {
+            DWORD wr = WaitForSingleObject(impl_->hmutex_pci, 100);
+            // WAIT_ABANDONED（前所有者の異常終了）でも所有権を得ているため通常と同様に続行する
+            if (wr != WAIT_OBJECT_0 && wr != WAIT_ABANDONED) {
                 out.temp_avail = false;
                 return;
             }
