@@ -97,6 +97,8 @@ AppConfig load_config(const std::string& path) {
         cfg.reset_claude_5h_pct = get_float("threshold", "reset_claude_5h_pct", cfg.reset_claude_5h_pct);
         cfg.reset_claude_7d_pct = get_float("threshold", "reset_claude_7d_pct", cfg.reset_claude_7d_pct);
 
+        cfg.update_check_enabled = get_bool("update", "enabled", cfg.update_check_enabled);
+
         cfg.priority_control_enable     = get_bool("process", "priority_control",   cfg.priority_control_enable);
         cfg.priority_check_interval_sec = get_int ("process", "check_interval_sec", cfg.priority_check_interval_sec);
         cfg.priority_visible_range_pct  = get_int ("process", "visible_range_pct",  cfg.priority_visible_range_pct);
