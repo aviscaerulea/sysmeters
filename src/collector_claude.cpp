@@ -173,8 +173,9 @@ static time_t parse_iso8601_utc(const std::string& iso) {
     int year, mon, day, hour, min, sec;
     if (sscanf_s(iso.c_str(), "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &hour, &min, &sec) < 6)
         return -1;
-    // パース値の妥当性チェック（_mkgmtime の暗黙補正を防ぐ）
-    if (mon < 1 || mon > 12 || day < 1 || day > 31 ||
+    // パース値の妥当性チェック（_mkgmtime の暗黙補正と年フィールドのオーバーフローを防ぐ）
+    if (year < 1970 || year > 2200 ||
+        mon < 1 || mon > 12 || day < 1 || day > 31 ||
         hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 60)
         return -1;
     struct tm utc_t{};
