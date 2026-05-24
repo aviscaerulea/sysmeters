@@ -98,7 +98,8 @@ private:
     // 温度色（3段階）を返す
     static uint32_t temp_color(float celsius, float caution, float critical);
 
-    // セクション名（"CPU"/"GPU"）+ モデル名の 2 段階ラベル描画
+    // セクション名 + モデル名の 2 段ラベル描画
+    // ww はレイアウト幅。model_name が空のときはモデル名行を省略する
     void draw_section_label_with_model(float x, float y, float ww,
         const wchar_t* prefix, const char* model_name, const AppConfig& cfg);
 
