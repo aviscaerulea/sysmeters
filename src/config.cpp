@@ -97,6 +97,8 @@ AppConfig load_config(const std::string& path) {
         cfg.reset_claude_5h_pct = get_float("threshold", "reset_claude_5h_pct", cfg.reset_claude_5h_pct);
         cfg.reset_claude_7d_pct = get_float("threshold", "reset_claude_7d_pct", cfg.reset_claude_7d_pct);
 
+        cfg.guard_tone_ms = get_int("guard", "tone_ms", cfg.guard_tone_ms);
+
         cfg.update_check_enabled = get_bool("update", "enabled", cfg.update_check_enabled);
 
         cfg.priority_control_enable     = get_bool("process", "priority_control",   cfg.priority_control_enable);
@@ -125,6 +127,9 @@ AppConfig load_config(const std::string& path) {
     // 各値を [0, 49] にクランプする。両者の合計が最大 98 に抑えられるため NORMAL 範囲（100 - visible - hidden > 0）の消失を防ぐ。
     cfg.priority_visible_range_pct  = std::clamp(cfg.priority_visible_range_pct,  0, 49);
     cfg.priority_hidden_range_pct   = std::clamp(cfg.priority_hidden_range_pct,   0, 49);
+
+    // ガードトーン長のサニティチェック（0〜10 秒）
+    cfg.guard_tone_ms = std::clamp(cfg.guard_tone_ms, 0, 10000);
 
     // win_width のサニティチェック
     //

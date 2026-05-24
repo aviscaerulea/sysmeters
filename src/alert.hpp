@@ -25,7 +25,8 @@ public:
     static const wchar_t* label(Id id);
 
     // exe ディレクトリから alert.wav パスを解決し、存在確認する
-    void init();
+    // cfg からガードトーン長を保持する。
+    void init(const AppConfig& cfg);
 
     // シャットダウンフラグを立て、再生スレッドの終了を待つ
     void shutdown();
@@ -47,6 +48,7 @@ private:
     bool           fired_[COUNT_] = {};     // true = 発火済み（リセット閾値未達まで再発火しない）
     wchar_t        wav_path_[MAX_PATH] = {};
     bool           wav_avail_    = false;
+    int            guard_tone_ms_ = 1500;   // ガードトーン長（再生前後の 19kHz 不可聴トーン、ms）
     HANDLE         sound_thread_ = nullptr;
     volatile bool  shutdown_     = false;   // true = アプリ終了中（再生中断用）
 

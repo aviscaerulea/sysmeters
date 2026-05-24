@@ -146,7 +146,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
 
     // 警告音マネージャ初期化
     alert_ = new AlertManager();
-    alert_->init();
+    alert_->init(*cfg_);
 
     // Explorer 再起動によるタスクバー再生成通知を登録
     WM_TASKBAR_CREATED_ = RegisterWindowMessageW(L"TaskbarCreated");
