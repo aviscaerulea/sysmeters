@@ -24,9 +24,9 @@ struct CpuMetrics {
     float temp_celsius = 0.f;           // CPU 温度
     bool  temp_avail   = false;         // PawnIO 温度取得成功フラグ
     char  name[48]     = {};            // CPU ブランド名（CPUID 取得）
-    int processes = 0;
-    int threads   = 0;
-    int handles   = 0;
+    int processes = 0;  // 実行中プロセス数
+    int threads   = 0;  // 実行中スレッド数
+    int handles   = 0;  // オープン中ハンドル数
 };
 
 // GPU：使用率（面グラフ）+ 温度（横バー）

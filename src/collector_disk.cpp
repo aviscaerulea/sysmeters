@@ -171,8 +171,8 @@ void DiskCollector::update_space(DiskMetrics& c, DiskMetrics& d) {
     fetch(impl_->drives[1], d);
 }
 
-// NVMe S.M.A.R.T. データを指定した物理ドライブから取得して dm に書き込む
-// 取得成功時は dm.smart_avail = true をセットする
+// NVMe S.M.A.R.T. データ取得
+// 指定した物理ドライブから S.M.A.R.T. データを取得して dm に書き込む。取得成功時は dm.smart_avail = true をセットする
 static void query_nvme_smart(int phys_drive, DiskMetrics& dm) {
     dm.smart_avail = false;
     dm.smart_temp_avail = false;
