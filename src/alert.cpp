@@ -305,6 +305,8 @@ void AlertManager::init(const AppConfig& cfg) {
 void AlertManager::shutdown() {
     shutdown_ = true;
     if (sound_thread_) {
+        // shutdown_ を true にすると play_tone_segment / WAV 供給ループが最大 200ms 以内に停止する
+        // guard_tone_ms の設定値に関わらず 5 秒のタイムアウトで十分
         WaitForSingleObject(sound_thread_, 5000);
         CloseHandle(sound_thread_);
         sound_thread_ = nullptr;
