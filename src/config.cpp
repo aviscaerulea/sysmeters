@@ -7,6 +7,23 @@
 #define NOMINMAX
 #include <windows.h>
 
+// TOML テーブルの再帰上書きマージ
+// over 側の値を base に上書きする。両者がテーブルのキーは再帰、それ以外は置換。
+static void merge_overrides(toml::value& base, const toml::value& over) {
+    if (!base.is_table() || !over.is_table()) {
+        base = over;
+        return;
+    }
+    auto& bt = base.as_table();
+    for (const auto& kv : over.as_table()) {
+        auto it = bt.find(kv.first);
+        if (it != bt.end() && it->second.is_table() && kv.second.is_table())
+            merge_overrides(it->second, kv.second);
+        else
+            bt[kv.first] = kv.second;
+    }
+}
+
 AppConfig load_config(const std::string& path) {
     AppConfig cfg;
 
@@ -18,6 +35,28 @@ AppConfig load_config(const std::string& path) {
 
     try {
         auto data = toml::parse(ifs, path);
+
+        // local 設定ファイルの読み込みとマージ
+        // ".toml" の直前に ".local" を挿入してパスを導出する（例：sysmeters.local.toml）。
+        // ファイルが存在する場合のみ適用し、解析失敗時は base 設定を維持する。
+        {
+            std::string local_path = path;
+            const std::string ext = ".toml";
+            if (local_path.size() >= ext.size() &&
+                local_path.compare(local_path.size() - ext.size(), ext.size(), ext) == 0)
+                local_path.insert(local_path.size() - ext.size(), ".local");
+
+            std::ifstream lifs(local_path, std::ios::binary);
+            if (lifs.is_open()) {
+                try {
+                    auto local = toml::parse(lifs, local_path);
+                    merge_overrides(data, local);
+                }
+                catch (...) {
+                    cfg.config_error = "TOML parse failed: " + local_path;
+                }
+            }
+        }
 
         // 型別の TOML 値取得ヘルパ（キー不在・型不一致・パースエラー時はデフォルト値を返す）
         auto get_int = [&](const char* sec, const char* key, int def) -> int {

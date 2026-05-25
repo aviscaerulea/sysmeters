@@ -65,10 +65,12 @@ tasks:
       - mkdir -p out
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
       - task: copy-assets
+      - cp {{.APP_NAME}}.toml out/{{.APP_NAME}}.toml.example
+      - printf '' > out/{{.APP_NAME}}.local.toml
       - >-
         pwsh.exe -NoProfile -Command '
         Compress-Archive
-        -Path out\{{.APP_NAME}}.exe, out\{{.APP_NAME}}.toml, out\IntelMSR.bin, out\AMDFamily17.bin, out\alert.wav
+        -Path out\{{.APP_NAME}}.exe, out\{{.APP_NAME}}.toml, out\{{.APP_NAME}}.toml.example, out\{{.APP_NAME}}.local.toml, out\IntelMSR.bin, out\AMDFamily17.bin, out\alert.wav
         -DestinationPath "out\{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"
         -Force'
       - cmd: echo "Package out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"

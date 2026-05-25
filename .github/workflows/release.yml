@@ -37,12 +37,14 @@ jobs:
           Copy-Item 'data/IntelMSR.bin' 'out/'
           Copy-Item 'data/AMDFamily17.bin' 'out/'
           Copy-Item 'data/alert.wav' 'out/'
+          Copy-Item 'sysmeters.toml' 'out/sysmeters.toml.example'
+          New-Item -ItemType File -Path 'out/sysmeters.local.toml' -Force | Out-Null
 
       - name: Create zip package
         shell: pwsh
         run: |
           $zipName = "sysmeters-$env:TAG_NAME-x64.zip"
-          Compress-Archive -Path 'out/sysmeters.exe','out/sysmeters.toml','out/IntelMSR.bin','out/AMDFamily17.bin','out/alert.wav' -DestinationPath "out/$zipName" -Force
+          Compress-Archive -Path 'out/sysmeters.exe','out/sysmeters.toml','out/sysmeters.toml.example','out/sysmeters.local.toml','out/IntelMSR.bin','out/AMDFamily17.bin','out/alert.wav' -DestinationPath "out/$zipName" -Force
           echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
 
       - name: Upload release asset
