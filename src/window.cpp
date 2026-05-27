@@ -431,14 +431,15 @@ void AppWindow::check_peak_limit_on_startup() {
 
 // GitHub リリースチェックを別スレッドで開始する
 //
-// 設定無効時は何もしない。取得は detach スレッドで行い、新版があれば WM_UPDATE_DONE を post する。
+// 設定無効時は何もしない。取得はバックグラウンドスレッドで行い、新版があれば WM_UPDATE_DONE を post する。
+// スレッドは update_thread_ に保持し、destroy() で join する。
 // 取得失敗・新版なしの場合は何も通知しない（UI は通常表示のまま）。
 void AppWindow::start_update_check() {
     if (!cfg_->update_check_enabled) return;
 
     HWND hwnd = hwnd_;
     std::wstring current(APP_VERSION, APP_VERSION + std::strlen(APP_VERSION));
-    std::thread([hwnd, current]() {
+    update_thread_ = std::thread([hwnd, current]() {
         UpdateResult r = check_for_updates(current);
         if (!r.available) return;
         // 最新 tag を heap に載せて UI スレッドへ引き渡す（受信側が delete する）
@@ -446,7 +447,7 @@ void AppWindow::start_update_check() {
         auto* tag_ptr = new std::wstring(r.latest_tag);
         if (!PostMessage(hwnd, WM_UPDATE_DONE, 0, reinterpret_cast<LPARAM>(tag_ptr)))
             delete tag_ptr;
-    }).detach();
+    });
 }
 
 void AppWindow::show_context_menu() {
@@ -762,6 +763,12 @@ void AppWindow::run() {
 }
 
 void AppWindow::destroy() {
+    // 更新チェックスレッドの終了待ち
+    //
+    // detach せず join することで、ウィンドウ破棄後・最悪 CRT 破棄後にスレッドが
+    // 通知を投函する未定義動作を防ぐ。取得が進行中なら HTTP タイムアウトまで待つ。
+    if (update_thread_.joinable()) update_thread_.join();
+
     // wnd_proc 経由の遅延メッセージが解放済みメンバを参照しないようにする
     g_window = nullptr;
 

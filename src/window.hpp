@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <string>
+#include <thread>
 
 #include "renderer.hpp"
 
@@ -54,6 +55,12 @@ private:
     bool         update_available_ = false;  // GitHub に新版ありなら true
     std::wstring update_latest_tag_;         // 最新リリースの tag_name（新版あり時のみ）
 
+    // 起動時の GitHub リリースチェックを実行するバックグラウンドスレッド
+    //
+    // start_update_check() で起動し、destroy() で join する。
+    // 他のコレクタと同様に終了処理で待ち合わせ、ウィンドウ破棄後の通知投函を防ぐ。
+    std::thread  update_thread_;
+
     AppConfig*       cfg_     = nullptr;
     AllMetrics*      metrics_ = nullptr;
     Renderer*        renderer_ = nullptr;
@@ -81,7 +88,7 @@ private:
     void check_peak_limit_notify();
     // 起動時にピーク期間内なら即時通知する（create() から 1 度だけ呼ぶ）
     void check_peak_limit_on_startup();
-    // 起動時に GitHub リリースチェックを detach スレッドで開始する（create() から 1 度だけ呼ぶ）
+    // 起動時に GitHub リリースチェックをバックグラウンドスレッドで開始する（create() から 1 度だけ呼ぶ）
     void start_update_check();
     // WM_UPDATE_DONE 受信時に新版状態を確定し、未通知版なら Toast 通知する
     void on_update_available(const std::wstring& latest_tag);
