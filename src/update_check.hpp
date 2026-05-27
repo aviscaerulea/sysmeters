@@ -16,5 +16,5 @@ struct UpdateResult {
 // current_version: 比較元のバージョン文字列（例: "1.14.2" / "v1.14.2" / "dev"）。
 // api.github.com の releases/latest を同期 GET し、tag_name を semver 比較する。
 // 通信失敗・JSON 不正・バージョンパース失敗時はすべて available=false を返す。
-// 起動時に detach したスレッドから 1 回だけ呼ぶ想定。
+// 起動時にバックグラウンドスレッドから 1 回だけ呼ぶ想定。
 UpdateResult check_for_updates(const std::wstring& current_version);
