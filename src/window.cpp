@@ -438,7 +438,11 @@ void AppWindow::start_update_check() {
     if (!cfg_->update_check_enabled) return;
 
     HWND hwnd = hwnd_;
-    std::wstring current(APP_VERSION, APP_VERSION + std::strlen(APP_VERSION));
+    // APP_VERSION を 1 度だけ評価してから範囲を作る
+    // 同一行に 2 回展開すると、文字列プーリング無効のデバッグビルドでは
+    // 2 つのリテラルが別アドレスに置かれ、不正なポインタ範囲で異常終了する
+    const char* ver = APP_VERSION;
+    std::wstring current(ver, ver + std::strlen(ver));
     update_thread_ = std::thread([hwnd, current]() {
         UpdateResult r = check_for_updates(current);
         if (!r.available) return;
