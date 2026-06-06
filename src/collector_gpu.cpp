@@ -38,6 +38,7 @@ struct GpuCollector::Impl {
     HMODULE dll = nullptr;
     nvmlDevice_t device = nullptr;
     bool nvml_initialized = false;  // nvmlInit() 成功済みフラグ
+    bool needs_reinit = false;      // TDR 後の再初期化フラグ
 
     PFN_nvmlInit                       fn_init           = nullptr;
     PFN_nvmlShutdown                   fn_shutdown        = nullptr;
@@ -102,45 +103,75 @@ bool GpuCollector::init() {
 }
 
 // GPU 使用率・温度を更新する
-// usage_pct と usage_history を同一サンプルで更新し、描画時の乖離を防ぐ
+// usage_pct と usage_history を同一サンプルで更新し、描画時の乖離を防ぐ。
+// TDR によるドライバリセット後は needs_reinit フラグを見て再初期化を試みる。
 void GpuCollector::update_gpu(GpuMetrics& gpu) {
+    // TDR 後の再初期化：nvml_initialized を落として shutdown() 内の fn_shutdown 呼び出しを抑制する
+    if (impl_ && impl_->needs_reinit) {
+        log_error("NVML: reinitializing after TDR");
+        impl_->nvml_initialized = false;
+        shutdown();
+        if (!init()) {
+            gpu.avail = false;
+            return;
+        }
+    }
+
     if (!impl_ || !impl_->device) {
         gpu.avail = false;
         return;
     }
 
-    nvmlUtilization_t util{};
-    if (impl_->fn_get_util(impl_->device, &util) == NVML_SUCCESS) {
-        gpu.usage_pct = static_cast<float>(util.gpu);
-        gpu.usage_history.push(gpu.usage_pct);
-        gpu.avail = true;
-    }
+    __try {
+        nvmlUtilization_t util{};
+        if (impl_->fn_get_util(impl_->device, &util) == NVML_SUCCESS) {
+            gpu.usage_pct = static_cast<float>(util.gpu);
+            gpu.usage_history.push(gpu.usage_pct);
+            gpu.avail = true;
+        }
 
-    unsigned int temp = 0;
-    if (impl_->fn_get_temp(impl_->device, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
-        gpu.temp_celsius = static_cast<float>(temp);
-    }
+        unsigned int temp = 0;
+        if (impl_->fn_get_temp(impl_->device, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
+            gpu.temp_celsius = static_cast<float>(temp);
+        }
 
-    // GPU 名をメトリクスにコピー
-    memcpy(gpu.name, impl_->gpu_name, sizeof(gpu.name));
+        memcpy(gpu.name, impl_->gpu_name, sizeof(gpu.name));
+    }
+    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
+              ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        log_error("NVML: access violation in update_gpu — scheduling reinit");
+        impl_->device = nullptr;
+        impl_->needs_reinit = true;
+        gpu.avail = false;
+    }
 }
 
 // VRAM を更新する
-// GPU 使用率・温度は update_gpu に一元化しているため、ここでは扱わない
+// GPU 使用率・温度は update_gpu に一元化しているため、ここでは扱わない。
+// TDR 後の再初期化は update_gpu 側で行う。
 void GpuCollector::update_vram(VramMetrics& vram) {
     if (!impl_ || !impl_->device) {
         vram.avail = false;
         return;
     }
 
-    nvmlMemory_t mem{};
-    if (impl_->fn_get_mem(impl_->device, &mem) == NVML_SUCCESS) {
-        constexpr float GB = 1024.f * 1024.f * 1024.f;
-        vram.total_gb  = static_cast<float>(mem.total) / GB;
-        vram.used_gb   = static_cast<float>(mem.used)  / GB;
-        vram.usage_pct = (vram.total_gb > 0.f) ? (vram.used_gb / vram.total_gb * 100.f) : 0.f;
-        vram.usage_history.push(vram.usage_pct);
-        vram.avail = true;
+    __try {
+        nvmlMemory_t mem{};
+        if (impl_->fn_get_mem(impl_->device, &mem) == NVML_SUCCESS) {
+            constexpr float GB = 1024.f * 1024.f * 1024.f;
+            vram.total_gb  = static_cast<float>(mem.total) / GB;
+            vram.used_gb   = static_cast<float>(mem.used)  / GB;
+            vram.usage_pct = (vram.total_gb > 0.f) ? (vram.used_gb / vram.total_gb * 100.f) : 0.f;
+            vram.usage_history.push(vram.usage_pct);
+            vram.avail = true;
+        }
+    }
+    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
+              ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+        log_error("NVML: access violation in update_vram — scheduling reinit");
+        impl_->device = nullptr;
+        impl_->needs_reinit = true;
+        vram.avail = false;
     }
 }
 
