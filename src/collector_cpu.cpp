@@ -127,22 +127,27 @@ bool CpuCollector::init() {
     }
 
     // 全体使用率カウンタ
-    if (PdhAddEnglishCounterW(impl_->query, L"\\Processor(_Total)\\% Processor Time",
+    if (PdhAddEnglishCounterW(impl_->query, L"\\Processor Information(_Total)\\% Processor Time",
                               0, &impl_->counter_total) != ERROR_SUCCESS) {
         log_error("CPU PDH: Failed to add total counter");
         return false;
     }
 
-    // 論理コア別カウンタ（GetSystemInfo で取得した論理コア数分を登録）
-    SYSTEM_INFO si{};
-    GetSystemInfo(&si);
-    const int n_cores = static_cast<int>(si.dwNumberOfProcessors);
-    for (int i = 0; i < n_cores; ++i) {
-        wchar_t buf[64];
-        swprintf_s(buf, L"\\Processor(%d)\\%% Processor Time", i);
-        PDH_HCOUNTER hc = nullptr;
-        if (PdhAddEnglishCounterW(impl_->query, buf, 0, &hc) == ERROR_SUCCESS) {
-            impl_->counter_cores.push_back(hc);
+    // 論理コア別カウンタ（全プロセッサグループ分を登録）
+    //
+    // レガシー \Processor オブジェクトは現在のプロセッサグループ（最大 64 論理プロセッサ）しか
+    // 扱えないため、マルチグループ対応の Processor Information オブジェクトを使う。
+    // インスタンス名「グループ,コア」を番号から直接組み立てるため、登録順がコア番号順になる。
+    const WORD n_groups = GetActiveProcessorGroupCount();
+    for (WORD g = 0; g < n_groups; ++g) {
+        const DWORD group_cores = GetActiveProcessorCount(g);
+        for (DWORD i = 0; i < group_cores; ++i) {
+            wchar_t buf[64];
+            swprintf_s(buf, L"\\Processor Information(%u,%lu)\\%% Processor Time", g, i);
+            PDH_HCOUNTER hc = nullptr;
+            if (PdhAddEnglishCounterW(impl_->query, buf, 0, &hc) == ERROR_SUCCESS) {
+                impl_->counter_cores.push_back(hc);
+            }
         }
     }
     impl_->core_count = static_cast<int>(impl_->counter_cores.size());
@@ -241,7 +246,14 @@ bool CpuCollector::init() {
 
     // exe と同ディレクトリの IntelMSR.bin を読み込む
     wchar_t exe_path[MAX_PATH] = {};
-    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    const DWORD path_len = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    if (path_len == 0 || path_len >= MAX_PATH) {
+        // 取得失敗または MAX_PATH 到達（切り詰め）は温度なしで継続
+        log_error("PawnIO: failed to resolve exe path");
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
     // exe パスの末尾ファイル名を IntelMSR.bin に置換
     wchar_t* last_sep = wcsrchr(exe_path, L'\\');
     if (!last_sep) {
@@ -251,7 +263,15 @@ bool CpuCollector::init() {
         return true;
     }
     const wchar_t* bin_name = (impl_->vendor == CpuVendor::Amd) ? L"AMDFamily17.bin" : L"IntelMSR.bin";
-    wcscpy_s(last_sep + 1, MAX_PATH - (last_sep + 1 - exe_path), bin_name);
+    // コピー先の残り幅がバイナリ名＋終端に足りない場合は wcscpy_s が abort するため事前に検査する
+    const size_t remain = MAX_PATH - (last_sep + 1 - exe_path);
+    if (remain < wcslen(bin_name) + 1) {
+        log_error("PawnIO: exe directory path too long for %ls", bin_name);
+        CloseHandle(impl_->hdev_pawnio);
+        impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
+        return true;
+    }
+    wcscpy_s(last_sep + 1, remain, bin_name);
 
     HANDLE hfile = CreateFileW(exe_path, GENERIC_READ, FILE_SHARE_READ,
                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -381,7 +401,7 @@ void CpuCollector::update(CpuMetrics& out) {
         // 温度 = TjMax - Digital Readout
         ULONG64 therm_val = 0;
         if (!pawnio_call(impl_->hdev_pawnio, "ioctl_read_msr", MSR_IA32_PACKAGE_THERM_STATUS, therm_val)
-                || (therm_val >> 31) == 0) {
+                || ((therm_val >> 31) & 1) == 0) {
             out.temp_avail = false;
             return;
         }

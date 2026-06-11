@@ -11,8 +11,9 @@
 // checkip.amazonaws.com から IP 文字列を取得する
 //
 // 成功時はレスポンスボディ（IP アドレス文字列）を返す。失敗時は空文字列。
-// タイムアウトは全フェーズ 3000ms に設定する（shutdown() 最大待機 15 秒に収まる）。
-static std::string fetch_ip_body() {
+// タイムアウトは全フェーズ 3000ms に設定する。
+// cancel が true になると読み取りループを早期中断する（shutdown() の待機を有界にする）。
+static std::string fetch_ip_body(const std::atomic<bool>& cancel) {
     HINTERNET session = WinHttpOpen(L"sysmeters/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nullptr, nullptr, 0);
     if (!session) return {};
@@ -25,12 +26,16 @@ static std::string fetch_ip_body() {
         nullptr, nullptr, nullptr, WINHTTP_FLAG_SECURE);
     if (!req) { WinHttpCloseHandle(conn); WinHttpCloseHandle(session); return {}; }
 
-    // 全フェーズのタイムアウトを設定（shutdown() の最大待機 15 秒に収まるようにする）
+    // 全フェーズのタイムアウトを設定（失敗してもログを残して続行する）
     DWORD timeout_ms = 3000;
-    WinHttpSetOption(req, WINHTTP_OPTION_RESOLVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
-    WinHttpSetOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
-    WinHttpSetOption(req, WINHTTP_OPTION_SEND_TIMEOUT,    &timeout_ms, sizeof(timeout_ms));
-    WinHttpSetOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout_ms, sizeof(timeout_ms));
+    auto set_timeout = [req, &timeout_ms](DWORD option) {
+        if (!WinHttpSetOption(req, option, &timeout_ms, sizeof(timeout_ms)))
+            log_error("IP fetch: WinHttpSetOption(%lu) failed (err=%lu)", option, GetLastError());
+    };
+    set_timeout(WINHTTP_OPTION_RESOLVE_TIMEOUT);
+    set_timeout(WINHTTP_OPTION_CONNECT_TIMEOUT);
+    set_timeout(WINHTTP_OPTION_SEND_TIMEOUT);
+    set_timeout(WINHTTP_OPTION_RECEIVE_TIMEOUT);
 
     // IP アドレス文字列用途のため 4KB で十分
     static constexpr size_t MAX_RESP_BYTES = 4 * 1024;
@@ -38,8 +43,17 @@ static std::string fetch_ip_body() {
     std::string body;
     if (WinHttpSendRequest(req, nullptr, 0, nullptr, 0, 0, 0) &&
         WinHttpReceiveResponse(req, nullptr)) {
+        // 受信タイムアウトは部分受信 1 回ごとに適用され合計時間に上限がないため、
+        // 総時間デッドラインと cancel チェックでループを有界にする
+        const ULONGLONG deadline = GetTickCount64() + 30000;
         DWORD size = 0;
         do {
+            if (cancel.load()) { body.clear(); break; }
+            if (GetTickCount64() > deadline) {
+                log_error("IP fetch: read deadline exceeded");
+                body.clear();
+                break;
+            }
             if (!WinHttpQueryDataAvailable(req, &size)) break;
             if (size == 0) break;
             if (body.size() + size > MAX_RESP_BYTES) {
@@ -61,7 +75,7 @@ static std::string fetch_ip_body() {
 }
 
 void IpCollector::do_fetch() {
-    std::string body = fetch_ip_body();
+    std::string body = fetch_ip_body(shutting_down_);
 
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.front()))) body.erase(body.begin());
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))  body.pop_back();
@@ -103,7 +117,9 @@ DWORD WINAPI IpCollector::fetch_thread(LPVOID param) {
 
 void IpCollector::init(HWND notify_wnd) {
     notify_wnd_.store(notify_wnd);
-    NotifyIpInterfaceChange(AF_UNSPEC, on_ip_change, this, FALSE, &notify_handle_);
+    // 登録失敗時も 5 分周期タイマーで追従できるため動作は継続する
+    DWORD err = NotifyIpInterfaceChange(AF_UNSPEC, on_ip_change, this, FALSE, &notify_handle_);
+    if (err != NO_ERROR) log_error("NotifyIpInterfaceChange failed (err=%lu)", err);
 }
 
 void WINAPI IpCollector::on_ip_change(PVOID context,
@@ -133,6 +149,9 @@ void IpCollector::apply_result(NetMetrics& out) {
 }
 
 void IpCollector::shutdown() {
+    // 取得スレッドの読み取りループを早期中断させる
+    shutting_down_.store(true);
+
     // PostMessage が破棄済み HWND に到達しないよう先に nullptr にする
     notify_wnd_.store(nullptr);
 
@@ -143,7 +162,9 @@ void IpCollector::shutdown() {
         CancelMibChangeNotify2(notify_handle_);
         notify_handle_ = nullptr;
     }
-    // スレッドの完了を待つ（最大 15 秒：タイムアウト 3000ms × 4 フェーズ + 余裕）
+    // スレッドの完了を待つ
+    // shutting_down_ により読み取りループはブロッキング呼び出し 1 回分（最大 3000ms）で
+    // 中断するため、接続系フェーズ 3000ms × 4 + 余裕の 15 秒で十分
     if (fetch_thread_) {
         DWORD wr = WaitForSingleObject(fetch_thread_, 15000);
         if (wr != WAIT_OBJECT_0) {

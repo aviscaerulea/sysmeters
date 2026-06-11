@@ -6,6 +6,7 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 namespace fs = std::filesystem;
@@ -18,11 +19,16 @@ static constexpr int    TONE_FREQ_HZ         = 19000;
 static constexpr int    TONE_AMPLITUDE       = 1000;
 static constexpr double PI                   = 3.14159265358979323846;
 
+// 再生中断フラグ
+// AlertManager の delete 後も残存スレッドが安全に参照できるよう、
+// メンバではなくプロセス生存期間の static 記憶域に置く。
+static std::atomic<bool> g_shutdown{false};
+
 // 再生スレッドに渡すパラメータ
 struct SoundParam {
-    wchar_t              wav_path[MAX_PATH];
-    const volatile bool* shutdown;
-    int                  tone_ms;   // ガードトーン長（冒頭・末尾共通、ms）
+    wchar_t                  wav_path[MAX_PATH];
+    const std::atomic<bool>* shutdown;   // g_shutdown を指す
+    int                      tone_ms;    // ガードトーン長（冒頭・末尾共通、ms）
 };
 
 // 19kHz 不可聴トーンをバッファに書き込む
@@ -51,23 +57,23 @@ static void fill_tone_buffer(BYTE* buf, UINT32 frames,
 static void play_tone_segment(IAudioClient* client, IAudioRenderClient* render,
                                HANDLE hEvent, UINT32 bufFrames,
                                const WAVEFORMATEX& fmt, UINT32 toneFrames,
-                               const volatile bool* shutdown) {
+                               const std::atomic<bool>* shutdown) {
     UINT32 written = 0;
     double phase   = 0.0;
     client->Start();
     while (written < toneFrames && !*shutdown) {
         WaitForSingleObject(hEvent, 200);
         UINT32 padding = 0;
-        client->GetCurrentPadding(&padding);
+        // デバイス消失（AUDCLNT_E_DEVICE_INVALIDATED 等）時は脱出してスレッドを終了させる
+        if (FAILED(client->GetCurrentPadding(&padding))) break;
         UINT32 avail  = bufFrames - padding;
         UINT32 frames = std::min(avail, toneFrames - written);
         if (frames == 0) continue;
         BYTE* buf = nullptr;
-        if (SUCCEEDED(render->GetBuffer(frames, &buf))) {
-            fill_tone_buffer(buf, frames, fmt, phase);
-            render->ReleaseBuffer(frames, 0);
-            written += frames;
-        }
+        if (FAILED(render->GetBuffer(frames, &buf))) break;
+        fill_tone_buffer(buf, frames, fmt, phase);
+        if (FAILED(render->ReleaseBuffer(frames, 0))) break;
+        written += frames;
     }
     client->Stop();
     client->Reset();
@@ -79,7 +85,7 @@ static void play_tone_segment(IAudioClient* client, IAudioRenderClient* render,
 // shutdown: true になると再生を中断して終了する
 // tone_ms: 冒頭・末尾に挿入する 19kHz トーンの長さ（共通、ms）。0 以下なら挿入しない。
 // BLE 対策として再生前後に不可聴トーンを挿入する。WAV ファイル自体は変更しない（オンメモリで構成する）。
-static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown, int tone_ms) {
+static bool play_wav_wasapi(const wchar_t* path, const std::atomic<bool>* shutdown, int tone_ms) {
     HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ,
                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) {
@@ -215,7 +221,9 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown, 
             while (!eof && !*shutdown) {
                 WaitForSingleObject(hEvent, 200);
                 UINT32 padding = 0;
-                client->GetCurrentPadding(&padding);
+                // デバイス消失（AUDCLNT_E_DEVICE_INVALIDATED 等）時は脱出してスレッドを終了させる。
+                // 次回の play() が新しい既定デバイスで再生をやり直す
+                if (FAILED(client->GetCurrentPadding(&padding))) break;
                 UINT32 avail = bufFrames - padding;
                 if (avail == 0) continue;
                 UINT32 frames = std::min(avail, static_cast<UINT32>(totalFrames - sentFrames));
@@ -223,30 +231,28 @@ static bool play_wav_wasapi(const wchar_t* path, const volatile bool* shutdown, 
                     // 全フレーム送信済み。残りバッファが再生されるまで待機（最大約 1 秒）
                     for (int i = 0; i < 100 && !*shutdown; i++) {
                         UINT32 rem = 0;
-                        client->GetCurrentPadding(&rem);
-                        if (rem == 0) break;
+                        if (FAILED(client->GetCurrentPadding(&rem)) || rem == 0) break;
                         Sleep(10);
                     }
                     eof = true;
                     break;
                 }
                 BYTE* buf = nullptr;
-                if (SUCCEEDED(render->GetBuffer(frames, &buf))) {
-                    DWORD nActual = 0;
-                    DWORD bufBytes = frames * fmt.nBlockAlign;
-                    ReadFile(hFile, buf, bufBytes, &nActual, nullptr);
-                    if (nActual == 0) {
-                        render->ReleaseBuffer(0, 0);
-                        eof = true;
-                        break;
-                    }
-                    // ノイズ防止のため残りバッファをゼロ埋め
-                    if (nActual < bufBytes)
-                        memset(buf + nActual, 0, bufBytes - nActual);
-                    UINT32 framesRead = nActual / fmt.nBlockAlign;
-                    render->ReleaseBuffer(framesRead, 0);
-                    sentFrames += framesRead;
+                if (FAILED(render->GetBuffer(frames, &buf))) break;
+                DWORD nActual = 0;
+                DWORD bufBytes = frames * fmt.nBlockAlign;
+                ReadFile(hFile, buf, bufBytes, &nActual, nullptr);
+                if (nActual == 0) {
+                    render->ReleaseBuffer(0, 0);
+                    eof = true;
+                    break;
                 }
+                // ノイズ防止のため残りバッファをゼロ埋め
+                if (nActual < bufBytes)
+                    memset(buf + nActual, 0, bufBytes - nActual);
+                UINT32 framesRead = nActual / fmt.nBlockAlign;
+                if (FAILED(render->ReleaseBuffer(framesRead, 0))) break;
+                sentFrames += framesRead;
             }
             client->Stop();
         }
@@ -303,10 +309,12 @@ void AlertManager::init(const AppConfig& cfg) {
 }
 
 void AlertManager::shutdown() {
-    shutdown_ = true;
+    g_shutdown = true;
     if (sound_thread_) {
-        // shutdown_ を true にすると play_tone_segment / WAV 供給ループが最大 200ms 以内に停止する
-        // guard_tone_ms の設定値に関わらず 5 秒のタイムアウトで十分
+        // g_shutdown を true にすると play_tone_segment / WAV 供給ループが最大 200ms 以内に停止する
+        // guard_tone_ms の設定値に関わらず 5 秒のタイムアウトで十分。
+        // タイムアウトしてスレッドが残存しても、参照先は static の g_shutdown と
+        // スレッド自身が所有する SoundParam のみのため、本体の delete は安全。
         WaitForSingleObject(sound_thread_, 5000);
         CloseHandle(sound_thread_);
         sound_thread_ = nullptr;
@@ -325,7 +333,7 @@ void AlertManager::play() {
     }
     auto* p = new SoundParam{};
     wcscpy_s(p->wav_path, wav_path_);
-    p->shutdown = &shutdown_;
+    p->shutdown = &g_shutdown;
     p->tone_ms  = guard_tone_ms_;
     HANDLE h = CreateThread(nullptr, 0, sound_thread_func, p, 0, nullptr);
     if (h) {

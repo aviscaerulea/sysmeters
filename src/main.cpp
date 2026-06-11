@@ -16,8 +16,10 @@ namespace fs = std::filesystem;
 
 // 実行ファイルと同じディレクトリの設定ファイルパスを返す（UTF-8 エンコード）
 static std::string get_config_path() {
-    wchar_t exe_path[MAX_PATH];
-    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    wchar_t exe_path[MAX_PATH] = {};
+    DWORD exe_len = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    // 取得失敗または切り詰め時はカレントディレクトリ基準の相対パスへフォールバック
+    if (exe_len == 0 || exe_len >= MAX_PATH) return "sysmeters.toml";
 
     std::wstring ws = (fs::path(exe_path).parent_path() / L"sysmeters.toml").wstring();
     int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -29,17 +31,14 @@ static std::string get_config_path() {
 
 int main() {
     // 多重起動排他（Named Mutex）
-    // 既存インスタンスに WM_CLOSE を送り、最大 3 秒待って終了しなければ自分が終了する
-    HANDLE mutex = CreateMutexW(nullptr, FALSE, L"sysmeters-mutex");
+    // 排他の根拠はミューテックスの所有権獲得とする。既存インスタンスに WM_CLOSE を送り、
+    // 旧プロセスの解放を最大 3 秒待つ。獲得できなければ多重起動と判断して自分が終了する
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"sysmeters-mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND prev = FindWindowW(L"SystemMetersWnd", nullptr);
         if (prev) PostMessage(prev, WM_CLOSE, 0, 0);
-        for (int i = 0; i < 30; ++i) {
-            if (!FindWindowW(L"SystemMetersWnd", nullptr)) break;
-            Sleep(100);
-        }
-        if (FindWindowW(L"SystemMetersWnd", nullptr)) {
-            ReleaseMutex(mutex);
+        DWORD wait = WaitForSingleObject(mutex, 3000);
+        if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
             CloseHandle(mutex);
             return 0;
         }

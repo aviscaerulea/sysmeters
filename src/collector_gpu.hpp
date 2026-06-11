@@ -21,4 +21,7 @@ public:
 private:
     struct Impl;
     Impl* impl_ = nullptr;
+    // TDR 後の再初期化フラグ
+    // init() 失敗で impl_ が破棄されても保持し、次タイマーで再試行を継続する。
+    bool needs_reinit_ = false;
 };

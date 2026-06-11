@@ -72,11 +72,15 @@ AppConfig load_config(const std::string& path) {
         };
         auto get_float = [&](const char* sec, const char* key, float def) -> float {
             // TOML 数値型の互換取得
-            // 整数リテラル（例：95）と浮動小数点リテラル（例：95.0）の両方に対応する
-            try { return static_cast<float>(toml::find_or<double>(data, sec, key, static_cast<double>(def))); }
-            catch (...) {}
-            try { return static_cast<float>(toml::find_or<int64_t>(data, sec, key, static_cast<int64_t>(def))); }
-            catch (...) { return def; }
+            // 整数リテラル（例：95）と浮動小数点リテラル（例：95.0）の両方に対応する。
+            // find_or は型不一致を黙ってデフォルト値に置き換えるため、find で取得して型を自前判定する。
+            try {
+                const auto& v = toml::find(data, sec, key);
+                if (v.is_floating()) return static_cast<float>(v.as_floating());
+                if (v.is_integer())  return static_cast<float>(v.as_integer());
+                return def;  // 数値以外の型
+            }
+            catch (...) { return def; }  // キー不在など
         };
         auto get_bool = [&](const char* sec, const char* key, bool def) -> bool {
             try { return toml::find_or<bool>(data, sec, key, def); }
@@ -154,8 +158,14 @@ AppConfig load_config(const std::string& path) {
         cfg.notify_peak_limit_title  = get_wstr ("notify", "peak_limit_title",  cfg.notify_peak_limit_title);
         cfg.notify_peak_limit_body   = get_wstr ("notify", "peak_limit_body",   cfg.notify_peak_limit_body);
         // szInfoTitle は 64 wchar、szInfo は 256 wchar が上限
-        if (cfg.notify_peak_limit_title.size() > 63) cfg.notify_peak_limit_title.resize(63);
-        if (cfg.notify_peak_limit_body.size()  > 255) cfg.notify_peak_limit_body.resize(255);
+        // 境界直前が上位サロゲート（0xD800〜0xDBFF）の場合、ペアの途中で分断しないよう 1 文字分短くする
+        auto trim_wstr = [](std::wstring& s, size_t max) {
+            if (s.size() <= max) return;
+            if (max > 0 && s[max - 1] >= 0xD800 && s[max - 1] <= 0xDBFF) --max;
+            s.resize(max);
+        };
+        trim_wstr(cfg.notify_peak_limit_title, 63);
+        trim_wstr(cfg.notify_peak_limit_body,  255);
     }
     catch (...) {
         cfg.config_error = "TOML parse failed: " + path;

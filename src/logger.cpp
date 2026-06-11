@@ -2,6 +2,8 @@
 #include "logger.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shlobj.h>
+#pragma comment(lib, "shell32.lib")
 #include <cstdarg>
 #include <cstdio>
 
@@ -26,9 +28,10 @@ static void open_or_rotate() {
         g_file = INVALID_HANDLE_VALUE;
     }
 
+    // パスが上限長を超える場合はログファイルを開かない（プロセスを殺さない）
     wchar_t path[MAX_PATH];
-    swprintf_s(path, L"%s\\sysmeters_%04d%02d%02d.log",
-               g_log_dir, st.wYear, st.wMonth, st.wDay);
+    if (_snwprintf_s(path, _TRUNCATE, L"%s\\sysmeters_%04d%02d%02d.log",
+                     g_log_dir, st.wYear, st.wMonth, st.wDay) < 0) return;
 
     g_file = CreateFileW(path,
         GENERIC_WRITE, FILE_SHARE_READ,
@@ -53,7 +56,7 @@ static void purge_old_logs() {
     constexpr ULONGLONG DAYS30 = 30ULL * 24 * 3600 * 10000000;
 
     wchar_t pattern[MAX_PATH];
-    swprintf_s(pattern, L"%s\\sysmeters_*.log", g_log_dir);
+    if (_snwprintf_s(pattern, _TRUNCATE, L"%s\\sysmeters_*.log", g_log_dir) < 0) return;
 
     WIN32_FIND_DATAW fd;
     HANDLE h_find = FindFirstFileW(pattern, &fd);
@@ -72,8 +75,9 @@ static void purge_old_logs() {
                 ULONGLONG file_ul = (static_cast<ULONGLONG>(file_ft.dwHighDateTime) << 32) | file_ft.dwLowDateTime;
                 if (now_ul > file_ul && now_ul - file_ul > DAYS30) {
                     wchar_t del_path[MAX_PATH];
-                    swprintf_s(del_path, L"%s\\%s", g_log_dir, fd.cFileName);
-                    DeleteFileW(del_path);
+                    if (_snwprintf_s(del_path, _TRUNCATE, L"%s\\%s",
+                                     g_log_dir, fd.cFileName) >= 0)
+                        DeleteFileW(del_path);
                 }
             }
         }
@@ -136,14 +140,19 @@ void log_init(const std::string& dir) {
     }
     else {
         // 相対パス → 実行ファイルのディレクトリを基準に解決する
-        wchar_t exe[MAX_PATH];
+        wchar_t exe[MAX_PATH] = {};
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
         wchar_t* sep = wcsrchr(exe, L'\\');
         if (sep) sep[1] = L'\0';  // ファイル名を除去してディレクトリのみに（末尾 \ を保持）
-        swprintf_s(g_log_dir, L"%s%s", exe, wdir);
+        // 連結結果が上限長を超える場合は exe ディレクトリ直下へフォールバック
+        if (_snwprintf_s(g_log_dir, _TRUNCATE, L"%s%s", exe, wdir) < 0)
+            wcscpy_s(g_log_dir, exe);
     }
 
-    CreateDirectoryW(g_log_dir, nullptr);  // 既存の場合は ERROR_ALREADY_EXISTS で無視される
+    // 多階層パスに対応するため再帰作成する（既存の場合は ERROR_ALREADY_EXISTS / ERROR_FILE_EXISTS で無視される）
+    int dir_err = SHCreateDirectoryExW(nullptr, g_log_dir, nullptr);
+    if (dir_err != ERROR_SUCCESS && dir_err != ERROR_ALREADY_EXISTS && dir_err != ERROR_FILE_EXISTS)
+        OutputDebugStringW(L"sysmeters: log directory creation failed\n");
     open_or_rotate();
     purge_old_logs();
 }

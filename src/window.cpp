@@ -68,6 +68,14 @@ static COLORREF rgb_to_colorref(uint32_t rgb) {
     return ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF);
 }
 
+// SYSTEMTIME → FILETIME 形式（100ns 単位）の 64bit 値変換
+// UTC 変換ではなく、ローカル時刻同士の前後比較・境界判定にのみ使う。
+static ULONGLONG to_100ns(const SYSTEMTIME& st) {
+    FILETIME ft{};
+    SystemTimeToFileTime(&st, &ft);
+    return (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+}
+
 static AppWindow* g_window = nullptr;
 
 bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
@@ -174,6 +182,13 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     // 制限強化時間 通知チェックタイマー（60 秒周期）
     SetTimer(hwnd_, TIMER_NOTIFY_SCHED, 60'000, nullptr);
 
+    // 通知境界判定の前回時刻を起動時刻で初期化（初回 tick から境界またぎを検出できるようにする）
+    {
+        SYSTEMTIME lt;
+        GetLocalTime(&lt);
+        last_notify_tick_ = to_100ns(lt);
+    }
+
     // OS 情報初期取得（マシン名は不変、OS ラベルは 1 時間ごとに update_os_label で再取得）
     {
         DWORD sz = MAX_COMPUTERNAME_LENGTH + 1;
@@ -223,14 +238,16 @@ void AppWindow::update_os_label() {
             0, KEY_READ, &key) == ERROR_SUCCESS) {
         wchar_t prod[128] = {}, disp[16] = {}, build[8] = {};
         DWORD siz;
+        // 各値とも切り捨て時・NUL 終端なし格納時に備えて末尾 NUL を強制する
         siz = sizeof(prod);
-        if (RegQueryValueExW(key, L"ProductName", nullptr, nullptr,
-                             reinterpret_cast<BYTE*>(prod), &siz) == ERROR_MORE_DATA)
-            prod[_countof(prod) - 1] = L'\0';  // 切り捨て時に NUL 終端を保証
+        RegQueryValueExW(key, L"ProductName", nullptr, nullptr, reinterpret_cast<BYTE*>(prod), &siz);
+        prod[_countof(prod) - 1] = L'\0';
         siz = sizeof(disp);
         RegQueryValueExW(key, L"DisplayVersion", nullptr, nullptr, reinterpret_cast<BYTE*>(disp), &siz);
+        disp[_countof(disp) - 1] = L'\0';
         siz = sizeof(build);
         RegQueryValueExW(key, L"CurrentBuildNumber", nullptr, nullptr, reinterpret_cast<BYTE*>(build), &siz);
+        build[_countof(build) - 1] = L'\0';
 
         // ProductName が Windows 11 でも "Windows 10" を返す MS 既知仕様の補正
         // ビルド番号 22000 以降は Windows 11
@@ -239,7 +256,8 @@ void AppWindow::update_os_label() {
             if (p) p[9] = L'1';
         }
 
-        swprintf_s(metrics_->os.os_label, L"%s (%s %s)", prod, disp, build);
+        // 入力合計は os_label（64 文字）を超え得るため、あふれ時は切り詰める（swprintf_s は abort する）
+        _snwprintf_s(metrics_->os.os_label, _TRUNCATE, L"%s (%s %s)", prod, disp, build);
         RegCloseKey(key);
     }
 }
@@ -372,31 +390,31 @@ void AppWindow::show_notify(const wchar_t* title, const wchar_t* body) {
 
 // Claude Code 制限強化時間 通知の発火判定（60 秒周期タイマーから呼ばれる）
 //
-// ローカル平日 21:00 の分境界をまたいだタイミングで 1 回だけ発火する。
-// 初回呼び出しは分を記録するのみで発火しない（起動直後の誤発火抑止）。
+// 前回 tick と今回 tick の間にローカル平日 21:00 の境界をまたいだとき 1 回だけ発火する。
+// 時刻差で判定するため、タイマー遅延やスリープ復帰で分 0 の tick を飛ばしても取りこぼさない。
+// 前回時刻は create() で起動時刻に初期化される（20:59 台起動 → 21:00 台初回 tick でも発火する）。
 void AppWindow::check_peak_limit_notify() {
-    if (!cfg_->notify_peak_limit_enable) {
-        last_check_min_ = -1;
-        return;
-    }
+    if (!cfg_->notify_peak_limit_enable) return;
 
     SYSTEMTIME lt;
     GetLocalTime(&lt);
-    int cur_min = lt.wMinute;
+    const ULONGLONG now  = to_100ns(lt);
+    const ULONGLONG prev = last_notify_tick_;
+    last_notify_tick_ = now;
+    if (prev >= now) return;  // 時計の巻き戻し等は発火しない
 
-    if (last_check_min_ < 0) {
-        last_check_min_ = cur_min;
-        return;
-    }
+    // 今日の通知時刻（ローカル 21:00）の境界が (prev, now] に含まれるか
+    // 境界は常に今日の日付で計算するため、前回 tick が前日でも当日分以外は発火しない
+    SYSTEMTIME bt = lt;
+    bt.wHour         = PEAK_NOTIFY_HOUR;
+    bt.wMinute       = PEAK_NOTIFY_MIN;
+    bt.wSecond       = 0;
+    bt.wMilliseconds = 0;
+    const ULONGLONG boundary = to_100ns(bt);
+    if (boundary <= prev || boundary > now) return;
 
-    int prev = last_check_min_;
-    last_check_min_ = cur_min;
-
-    // 発火条件：平日、21:00、分境界をまたいだ
+    // 平日のみ発火（境界の属する日 = 今日）
     if (lt.wDayOfWeek < 1 || lt.wDayOfWeek > 5) return;
-    if (lt.wHour != PEAK_NOTIFY_HOUR)             return;
-    if (cur_min  != PEAK_NOTIFY_MIN)               return;
-    if (prev == cur_min)                           return;
 
     show_notify(cfg_->notify_peak_limit_title.c_str(),
                 cfg_->notify_peak_limit_body.c_str());
@@ -458,7 +476,8 @@ void AppWindow::show_context_menu() {
     // メニュー最上部に「アプリ名 vX.Y.Z」を表示（新版があれば「→ v新版」を併記）
     wchar_t label[96];
     if (update_available_)
-        swprintf_s(label, L"sysmeters v%hs → %ls", APP_VERSION, update_latest_tag_.c_str());
+        // tag は GitHub 由来で長さ無制限のため、あふれ時は切り詰める（swprintf_s は abort する）
+        _snwprintf_s(label, _TRUNCATE, L"sysmeters v%hs → %ls", APP_VERSION, update_latest_tag_.c_str());
     else
         swprintf_s(label, L"sysmeters v%hs", APP_VERSION);
 
@@ -491,6 +510,8 @@ void AppWindow::show_context_menu() {
     POINT pt;
     GetCursorPos(&pt);
     TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
+    // 通知領域メニューが閉じない既知の不具合の回避策（KB135788、SetForegroundWindow と対）
+    PostMessage(hwnd_, WM_NULL, 0, 0);
     DestroyMenu(menu);
 }
 
@@ -616,7 +637,8 @@ void AppWindow::on_update_available(const std::wstring& latest_tag) {
     if (notified == latest_tag) return;  // この版は通知済み
 
     wchar_t body[128];
-    swprintf_s(body, L"sysmeters v%hs → %ls", APP_VERSION, latest_tag.c_str());
+    // tag は GitHub 由来で長さ無制限のため、あふれ時は切り詰める（swprintf_s は abort する）
+    _snwprintf_s(body, _TRUNCATE, L"sysmeters v%hs → %ls", APP_VERSION, latest_tag.c_str());
     show_notify(L"新しいバージョンがあります", body);
     log_info("update available: notified");
 }
