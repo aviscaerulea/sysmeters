@@ -50,7 +50,6 @@ private:
     bool           wav_avail_    = false;
     int            guard_tone_ms_ = 1500;   // ガードトーン長（再生前後の 19kHz 不可聴トーン、ms）
     HANDLE         sound_thread_ = nullptr;
-    volatile bool  shutdown_     = false;   // true = アプリ終了中（再生中断用）
 
     // バックグラウンドスレッドで WASAPI 再生を開始する
     void play();

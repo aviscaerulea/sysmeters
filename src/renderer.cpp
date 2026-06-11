@@ -265,7 +265,7 @@ void Renderer::draw_area_graph(const RingBuffer<float, 60>& buf,
 
     float w = rect.right - rect.left;
     float h = rect.bottom - rect.top;
-    float dx = w / 60.f;
+    float dx = w / 59.f;  // 点数−1 で割り、最後の点（i=59）を右端に到達させる
 
     ID2D1PathGeometry* path = nullptr;
     if (FAILED(d2d_factory_->CreatePathGeometry(&path))) {
@@ -455,21 +455,20 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
 
     // コア別縦バー（論理コア数本横並び、画面幅に合わせて動的計算）
     const int   N_CORES = static_cast<int>(m.core_pct.size());
-    if (N_CORES == 0) {
-        y += CORE_BAR_H + GAP;
-        return y;
-    }
-    if (static_cast<int>(core_disp_.size()) != N_CORES) {
-        core_disp_.assign(m.core_pct.begin(), m.core_pct.end());
-    }
-    constexpr float GAP_BAR = 2.f;  // バー間ギャップ
-    float bar_w = (ww - GAP_BAR * (N_CORES - 1)) / N_CORES;
-    float core_x = x;
-    for (int i = 0; i < N_CORES; ++i) {
-        D2D1_RECT_F cr = D2D1::RectF(core_x, y, core_x + bar_w, y + CORE_BAR_H);
-        uint32_t core_col = (core_disp_[i] > cfg.warn_cpu_pct) ? COL_WARN_RED : cfg.col_cpu_core;
-        draw_vbar(core_disp_[i], cr, core_col);
-        core_x += bar_w + GAP_BAR;
+    if (N_CORES > 0) {
+        if (static_cast<int>(core_disp_.size()) != N_CORES) {
+            core_disp_.assign(m.core_pct.begin(), m.core_pct.end());
+        }
+        constexpr float GAP_BAR = 2.f;  // バー間ギャップ
+        float bar_w = (ww - GAP_BAR * (N_CORES - 1)) / N_CORES;
+        bar_w = max(bar_w, 1.f);  // 高コア数×狭幅で負値にならないようクランプ（右端のはみ出しはクリップ許容）
+        float core_x = x;
+        for (int i = 0; i < N_CORES; ++i) {
+            D2D1_RECT_F cr = D2D1::RectF(core_x, y, core_x + bar_w, y + CORE_BAR_H);
+            uint32_t core_col = (core_disp_[i] > cfg.warn_cpu_pct) ? COL_WARN_RED : cfg.col_cpu_core;
+            draw_vbar(core_disp_[i], cr, core_col);
+            core_x += bar_w + GAP_BAR;
+        }
     }
     y += CORE_BAR_H + GAP;
 
@@ -1028,7 +1027,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             pct_font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             render_target_->DrawText(pct_buf, static_cast<UINT32>(wcslen(pct_buf)), pct_font, lr, brush_text_);
             pct_font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            pct_font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         }
 
         // バー（ラベル右端からリセット時刻左端まで）
@@ -1111,7 +1109,9 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             }
             font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         }
+        // 段落整列の復元はリセット時刻描画後に行う（途中で戻すと警告状態で縦位置が変動する）
         font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+        font_small_bold_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         y += SECTION_H + GAP;
     };
 

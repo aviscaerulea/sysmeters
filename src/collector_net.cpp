@@ -24,12 +24,14 @@ bool NetCollector::init() {
     // ワイルドカードで全 NIC のインスタンスを取得する
     // Network Interface オブジェクトには _Total インスタンスが存在しないため、
     // 個別 NIC を列挙して update 側で合算する
-    PdhAddEnglishCounterW(impl_->query,
+    PDH_STATUS st = PdhAddEnglishCounterW(impl_->query,
         L"\\Network Interface(*)\\Bytes Sent/sec",
         0, &impl_->counter_send);
-    PdhAddEnglishCounterW(impl_->query,
+    if (st != ERROR_SUCCESS) log_error("Net PDH add counter (send) failed (0x%08lX)", st);
+    st = PdhAddEnglishCounterW(impl_->query,
         L"\\Network Interface(*)\\Bytes Received/sec",
         0, &impl_->counter_recv);
+    if (st != ERROR_SUCCESS) log_error("Net PDH add counter (recv) failed (0x%08lX)", st);
 
     PdhCollectQueryData(impl_->query);
     log_info("Net collector initialized");
@@ -61,8 +63,12 @@ void NetCollector::update(NetMetrics& out) {
             return 0.f;
 
         double total = 0.0;
-        for (DWORD i = 0; i < item_count; ++i)
+        for (DWORD i = 0; i < item_count; ++i) {
+            // NIC 新規出現直後などは要素単位で無効データが混入する（doubleValue は未定義値）ためスキップする
+            DWORD cs = items[i].FmtValue.CStatus;
+            if (cs != PDH_CSTATUS_VALID_DATA && cs != PDH_CSTATUS_NEW_DATA) continue;
             total += items[i].FmtValue.doubleValue;
+        }
         return bytes_to_kb(total);
     };
 

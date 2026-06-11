@@ -35,6 +35,7 @@ public:
 private:
     std::atomic<HWND> notify_wnd_{nullptr};  // shutdown 後の PostMessage を防ぐため atomic
     std::atomic<bool> fetching_ = false;
+    std::atomic<bool> shutting_down_ = false;  // 取得スレッドの読み取りループを早期中断させる
     HANDLE            fetch_thread_ = nullptr;
     std::mutex result_mutex_;
     HANDLE notify_handle_       = nullptr;  // NotifyIpInterfaceChange の登録ハンドル
