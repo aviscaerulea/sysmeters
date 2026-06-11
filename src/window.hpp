@@ -49,7 +49,7 @@ private:
     bool toast_alert_  = DEF_TOAST_ALERT;
     Visibility vis_;                   // セクション表示フラグ（カテゴリ単位の表示/非表示）
     UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
-    int  last_check_min_ = -1;         // 前回通知チェック時の分（エッジ検出用、-1 = 未初期化）
+    ULONGLONG last_notify_tick_ = 0;   // 前回通知チェック時のローカル時刻（FILETIME 形式 100ns 単位、境界またぎ検出用）
 
     // 更新チェック状態（UI スレッドのみが参照する。WM_UPDATE_DONE 受信時に確定）
     bool         update_available_ = false;  // GitHub に新版ありなら true

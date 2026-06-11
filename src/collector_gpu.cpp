@@ -33,12 +33,21 @@ typedef nvmlReturn_t (*PFN_nvmlDeviceGetName)(nvmlDevice_t, char*, unsigned int)
 static constexpr unsigned int NVML_TEMPERATURE_GPU = 0;
 // NVML_SUCCESS = 0
 static constexpr nvmlReturn_t NVML_SUCCESS = 0;
+// NVML_ERROR_UNINITIALIZED = 1
+static constexpr nvmlReturn_t NVML_ERROR_UNINITIALIZED = 1;
+// NVML_ERROR_GPU_IS_LOST = 15
+static constexpr nvmlReturn_t NVML_ERROR_GPU_IS_LOST = 15;
+
+// デバイスロスト系エラーの判定
+// TDR 後の NVML はアクセス違反ではなくエラーコードを返すのが文書化された正常系。
+static bool is_device_lost(nvmlReturn_t ret) {
+    return ret == NVML_ERROR_GPU_IS_LOST || ret == NVML_ERROR_UNINITIALIZED;
+}
 
 struct GpuCollector::Impl {
     HMODULE dll = nullptr;
     nvmlDevice_t device = nullptr;
     bool nvml_initialized = false;  // nvmlInit() 成功済みフラグ
-    bool needs_reinit = false;      // TDR 後の再初期化フラグ
 
     PFN_nvmlInit                       fn_init           = nullptr;
     PFN_nvmlShutdown                   fn_shutdown        = nullptr;
@@ -54,8 +63,8 @@ struct GpuCollector::Impl {
 bool GpuCollector::init() {
     impl_ = new Impl();
 
-    // nvml.dll を NVIDIA ドライバディレクトリから検索
-    impl_->dll = LoadLibraryW(L"nvml.dll");
+    // nvml.dll を System32 に限定してロードする（カレントディレクトリへの DLL 植え付け対策）
+    impl_->dll = LoadLibraryExW(L"nvml.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!impl_->dll) {
         // 別パスも試みる
         impl_->dll = LoadLibraryW(L"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
@@ -106,15 +115,18 @@ bool GpuCollector::init() {
 // usage_pct と usage_history を同一サンプルで更新し、描画時の乖離を防ぐ。
 // TDR によるドライバリセット後は needs_reinit フラグを見て再初期化を試みる。
 void GpuCollector::update_gpu(GpuMetrics& gpu) {
-    // TDR 後の再初期化：nvml_initialized を落として shutdown() 内の fn_shutdown 呼び出しを抑制する
-    if (impl_ && impl_->needs_reinit) {
+    // TDR 後の再初期化
+    // init() 失敗時も needs_reinit_ は保持され、次タイマーで再試行を継続する。
+    // アクセス違反経路では捕捉時に nvml_initialized を落としており、shutdown() 内の
+    // fn_shutdown 呼び出しは抑制される。エラーコード経路では NVML は生きているため呼んでよい。
+    if (needs_reinit_) {
         log_error("NVML: reinitializing after TDR");
-        impl_->nvml_initialized = false;
         shutdown();
         if (!init()) {
             gpu.avail = false;
             return;
         }
+        needs_reinit_ = false;
     }
 
     if (!impl_ || !impl_->device) {
@@ -124,15 +136,27 @@ void GpuCollector::update_gpu(GpuMetrics& gpu) {
 
     __try {
         nvmlUtilization_t util{};
-        if (impl_->fn_get_util(impl_->device, &util) == NVML_SUCCESS) {
+        nvmlReturn_t ret = impl_->fn_get_util(impl_->device, &util);
+        if (ret == NVML_SUCCESS) {
             gpu.usage_pct = static_cast<float>(util.gpu);
             gpu.usage_history.push(gpu.usage_pct);
             gpu.avail = true;
         }
+        else {
+            // 失敗時は古い値の表示凍結を防ぐため利用不可にする
+            gpu.avail = false;
+            if (is_device_lost(ret)) needs_reinit_ = true;
+        }
 
         unsigned int temp = 0;
-        if (impl_->fn_get_temp(impl_->device, NVML_TEMPERATURE_GPU, &temp) == NVML_SUCCESS) {
+        ret = impl_->fn_get_temp(impl_->device, NVML_TEMPERATURE_GPU, &temp);
+        if (ret == NVML_SUCCESS) {
             gpu.temp_celsius = static_cast<float>(temp);
+        }
+        else if (is_device_lost(ret)) {
+            // 温度未対応 GPU（NOT_SUPPORTED）では表示を維持し、デバイスロスト時のみ落とす
+            gpu.avail = false;
+            needs_reinit_ = true;
         }
 
         memcpy(gpu.name, impl_->gpu_name, sizeof(gpu.name));
@@ -141,7 +165,8 @@ void GpuCollector::update_gpu(GpuMetrics& gpu) {
               ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
         log_error("NVML: access violation in update_gpu — scheduling reinit");
         impl_->device = nullptr;
-        impl_->needs_reinit = true;
+        impl_->nvml_initialized = false;  // 終了時に壊れた NVML へ fn_shutdown を呼ばせない
+        needs_reinit_ = true;
         gpu.avail = false;
     }
 }
@@ -157,7 +182,8 @@ void GpuCollector::update_vram(VramMetrics& vram) {
 
     __try {
         nvmlMemory_t mem{};
-        if (impl_->fn_get_mem(impl_->device, &mem) == NVML_SUCCESS) {
+        nvmlReturn_t ret = impl_->fn_get_mem(impl_->device, &mem);
+        if (ret == NVML_SUCCESS) {
             constexpr float GB = 1024.f * 1024.f * 1024.f;
             vram.total_gb  = static_cast<float>(mem.total) / GB;
             vram.used_gb   = static_cast<float>(mem.used)  / GB;
@@ -165,12 +191,18 @@ void GpuCollector::update_vram(VramMetrics& vram) {
             vram.usage_history.push(vram.usage_pct);
             vram.avail = true;
         }
+        else {
+            // 失敗時は古い値の表示凍結を防ぐため利用不可にする
+            vram.avail = false;
+            if (is_device_lost(ret)) needs_reinit_ = true;
+        }
     }
     __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
               ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
         log_error("NVML: access violation in update_vram — scheduling reinit");
         impl_->device = nullptr;
-        impl_->needs_reinit = true;
+        impl_->nvml_initialized = false;  // 終了時に壊れた NVML へ fn_shutdown を呼ばせない
+        needs_reinit_ = true;
         vram.avail = false;
     }
 }
