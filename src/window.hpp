@@ -32,9 +32,10 @@ public:
     void on_claude_done();
 
 private:
-    // レジストリ未設定時のデフォルト値（load_topmost / load_toast_alert の fallback）
-    static constexpr bool DEF_TOPMOST     = false;
-    static constexpr bool DEF_TOAST_ALERT = true;
+    // レジストリ未設定時のデフォルト値
+    static constexpr bool DEF_TOPMOST        = false;
+    static constexpr bool DEF_TOAST_ALERT    = true;
+    static constexpr bool DEF_FULLSCREEN_MUTE = true;
 
     // Claude Code 制限強化時間 通知の発火時刻（ローカル時刻でハードコード固定）
     static constexpr int PEAK_NOTIFY_HOUR = 21;
@@ -45,8 +46,9 @@ private:
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
     int  last_pref_h_  = 0;            // update_window_size 早期リターン用キャッシュ
-    bool topmost_      = DEF_TOPMOST;
-    bool toast_alert_  = DEF_TOAST_ALERT;
+    bool topmost_        = DEF_TOPMOST;
+    bool toast_alert_    = DEF_TOAST_ALERT;
+    bool fullscreen_mute_ = DEF_FULLSCREEN_MUTE;  // フルスクリーンアプリ実行中は通知・警告音を抑制
     Visibility vis_;                   // セクション表示フラグ（カテゴリ単位の表示/非表示）
     UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
     ULONGLONG last_notify_tick_ = 0;   // 前回通知チェック時のローカル時刻（FILETIME 形式 100ns 単位、境界またぎ検出用）
@@ -100,6 +102,10 @@ private:
     void apply_topmost();       // SetWindowPos で最前面状態を反映
     bool load_toast_alert();    // レジストリから Toast 通知設定を読む（未設定時は true）
     void save_toast_alert();    // レジストリに Toast 通知設定を書く
+    bool load_fullscreen_mute();  // レジストリからフルスクリーン抑制設定を読む（未設定時は true）
+    void save_fullscreen_mute();  // レジストリにフルスクリーン抑制設定を書く
+    // フルスクリーンアプリが実行中か判定する（SHQueryUserNotificationState 使用）
+    bool is_fullscreen_app_running();
     void load_visibility();     // レジストリからセクション表示フラグ 6 個を一括読み込み（未設定時は true）
     void save_visibility();     // レジストリにセクション表示フラグ 6 個を一括保存
     bool is_startup_registered(); // Windows スタートアップ（HKCU\...\Run）の登録有無を返す

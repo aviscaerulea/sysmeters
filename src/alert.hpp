@@ -38,8 +38,9 @@ public:
     // 全メトリクスを評価し、新規に発火した項目のビットマスクを返す
     //
     // 戻り値：新規発火した Id のビットが立った uint32_t（0 = 発火なし）。
-    // 警告音・Toast の発行は window 側が戻り値を見て行う。
-    uint32_t check(const AllMetrics& m, const AppConfig& cfg);
+    // mute が true の場合、閾値判定とヒステリシス管理は通常どおり行うが警告音の再生を抑制する。
+    // Toast の発行は window 側が戻り値を見て行う。
+    uint32_t check(const AllMetrics& m, const AppConfig& cfg, bool mute = false);
 
 private:
     // CPU/GPU 警告判定に使う平均サンプル数（直近 10 サンプル ≒ 約 9 秒）
