@@ -305,7 +305,7 @@ void ClaudeCollector::do_fetch() {
 
     // --- Usage API ---
     int usage_status = 0;
-    json usage_j = fetch_or_cache(cache_usage_path(), 360.0, L"/api/oauth/usage", token, &usage_status, &shutdown_);
+    json usage_j = fetch_or_cache(cache_usage_path(), usage_ttl_, L"/api/oauth/usage", token, &usage_status, &shutdown_);
     if (usage_j == nullptr && !token.empty()) {
         log_error("Claude Usage API failed");
         // 401 は認証切れ → 次回フェッチ時にネガティブキャッシュを削除して即再取得させる
@@ -349,6 +349,35 @@ void ClaudeCollector::do_fetch() {
             }
         }
         catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
+    }
+
+    // --- 5h リセット後の nudge（claude.exe 起動による使用状況の更新促進）---
+    // 初回フェッチでは現在値を記録するのみ（起動直後の意図しない発火を防ぐ）。
+    // 2 回目以降のフェッチでリセット日時が変わった（= 新しいウィンドウに入った）とき発火する。
+    if (nudge_enable_ && usage_j != nullptr && result.avail && result.five_h_resets_ts > 0) {
+        time_t now = static_cast<time_t>(now_ts());
+        if (result.five_h_resets_ts < now &&
+            result.five_h_resets_ts != last_nudge_resets_ts_) {
+            bool should_run = (last_nudge_resets_ts_ != -1);
+            last_nudge_resets_ts_ = result.five_h_resets_ts;
+            if (should_run) {
+                log_info("claude nudge: 5h reset is past, running: %s", nudge_cmd_.c_str());
+                STARTUPINFOA si{};
+                si.cb = sizeof(si);
+                si.dwFlags = STARTF_USESHOWWINDOW;
+                si.wShowWindow = SW_HIDE;
+                PROCESS_INFORMATION pi{};
+                std::string cmd = nudge_cmd_;
+                if (CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, FALSE,
+                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+                    CloseHandle(pi.hThread);
+                    CloseHandle(pi.hProcess);
+                }
+                else {
+                    log_error("claude nudge: CreateProcess failed (err=%lu)", GetLastError());
+                }
+            }
+        }
     }
 
     // --- Account API（プランラベル）---
@@ -407,8 +436,12 @@ DWORD WINAPI ClaudeCollector::fetch_thread(LPVOID param) {
     return 0;
 }
 
-void ClaudeCollector::init(HWND notify_wnd) {
+void ClaudeCollector::init(HWND notify_wnd, int usage_interval_sec,
+                           bool nudge_enable, const std::string& nudge_cmd) {
     notify_wnd_.store(notify_wnd);
+    usage_ttl_ = static_cast<double>(usage_interval_sec);
+    nudge_enable_ = nudge_enable;
+    nudge_cmd_    = nudge_cmd;
 }
 
 int ClaudeCollector::count_claude_sessions() {

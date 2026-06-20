@@ -149,7 +149,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_mem_->init();
     col_disk_->init('C', 'D');
     col_net_->init();
-    col_claude_->init(hwnd_);
+    col_claude_->init(hwnd_, cfg_->claude_usage_interval_sec,
+                      cfg_->claude_nudge_enable, cfg_->claude_nudge_cmd);
     col_ip_->init(hwnd_);
 
     // 警告音マネージャ初期化

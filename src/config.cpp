@@ -151,6 +151,10 @@ AppConfig load_config(const std::string& path) {
 
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
 
+        cfg.claude_usage_interval_sec = get_int("claude", "usage_interval_sec", cfg.claude_usage_interval_sec);
+        cfg.claude_nudge_enable = get_bool("claude", "nudge_enable", cfg.claude_nudge_enable);
+        try { cfg.claude_nudge_cmd = toml::find_or<std::string>(data, "claude", "nudge_cmd", cfg.claude_nudge_cmd); }
+        catch (...) {}
         cfg.show_peak_bar = get_bool("claude", "show_peak_bar", cfg.show_peak_bar);
 
         cfg.notify_peak_limit_enable = get_bool ("notify", "peak_limit_enable", cfg.notify_peak_limit_enable);
@@ -176,6 +180,9 @@ AppConfig load_config(const std::string& path) {
     // 各値を [0, 49] にクランプする。両者の合計が最大 98 に抑えられるため NORMAL 範囲（100 - visible - hidden > 0）の消失を防ぐ。
     cfg.priority_visible_range_pct  = std::clamp(cfg.priority_visible_range_pct,  0, 49);
     cfg.priority_hidden_range_pct   = std::clamp(cfg.priority_hidden_range_pct,   0, 49);
+
+    // Usage API ポーリング間隔のサニティチェック（30〜3600 秒）
+    cfg.claude_usage_interval_sec = std::clamp(cfg.claude_usage_interval_sec, 30, 3600);
 
     // ガードトーン長のサニティチェック（0〜10 秒）
     cfg.guard_tone_ms = std::clamp(cfg.guard_tone_ms, 0, 10000);
