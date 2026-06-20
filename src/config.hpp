@@ -56,6 +56,8 @@ struct AppConfig {
     int  claude_usage_interval_sec = 120;  // Usage API のポーリング間隔（秒）
     // 5h リセット日時が過去なら claude.exe を起動して使用状況の更新を促す
     bool        claude_nudge_enable = false;
+    // nudge 実行時のコマンドライン。最小コストで API 使用状況を更新させるため、
+    // 安全モード・最軽量モデル・最低推論努力で即終了するプロンプトをデフォルトとする。
     std::string claude_nudge_cmd    = "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\"";
 
     // 5h バー上に PT 平日 5:00〜10:59 を暗赤色で重ねるピーク時間帯背景表示。
