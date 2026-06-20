@@ -242,6 +242,23 @@ peak_limit_body = "平日 21:00-03:00 ピーク制限時間です"
 # Claude Code 表示設定
 # ==================================================
 [claude]
+# Usage API ポーリング間隔（秒）
+# Anthropic Usage API の取得間隔。短くすると使用率の反映が速くなるが、
+# 極端に短い値は API レート制限（HTTP 429）を招く可能性がある。
+# 有効範囲: 30〜3600、デフォルト: 120
+# usage_interval_sec = 120
+
+# 5h リセット後の使用状況更新促進
+# 5h ウィンドウのリセット日時が過去になったとき、外部プロセスとして claude.exe を実行し
+# API の使用状況データを更新させる。同一リセット期間中に繰り返し実行されることはない。
+# エラーはログに記録するのみ。デフォルト: false
+# nudge_enable = false
+
+# 更新促進用の claude.exe コマンドライン
+# nudge_enable = true のとき実行されるコマンドライン。
+# デフォルト: "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\""
+# nudge_cmd = 'claude.exe --safe-mode --model haiku --effort low -p "say ''ok''"'
+
 # ピーク時間帯背景バー表示
 # 5h バー上に PT 平日 5:00-10:59 の区間を暗赤色で重ねる表示。
 # 2026-05 に Anthropic が当該レート制限を撤廃したためデフォルト OFF。
