@@ -212,9 +212,10 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     update_window_size();
     InvalidateRect(hwnd_, nullptr, FALSE);
 
-    topmost_     = load_topmost();
+    topmost_        = load_topmost();
     apply_topmost();
-    toast_alert_ = load_toast_alert();
+    toast_alert_    = load_toast_alert();
+    fullscreen_mute_ = load_fullscreen_mute();
     load_visibility();
 
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
@@ -417,6 +418,12 @@ void AppWindow::check_peak_limit_notify() {
     // 平日のみ発火（境界の属する日 = 今日）
     if (lt.wDayOfWeek < 1 || lt.wDayOfWeek > 5) return;
 
+    // フルスクリーン中は通知を保留する。tick を巻き戻して次回 tick で境界を再検出させる
+    if (fullscreen_mute_ && is_fullscreen_app_running()) {
+        last_notify_tick_ = prev;
+        return;
+    }
+
     show_notify(cfg_->notify_peak_limit_title.c_str(),
                 cfg_->notify_peak_limit_body.c_str());
     if (cfg_->notify_peak_limit_sound && alert_) alert_->play_external();
@@ -441,6 +448,7 @@ void AppWindow::check_peak_limit_on_startup() {
         in_peak = true;  // 翌日早朝 00-02 時台（前日が平日 = 今日は火〜土）
     }
     if (!in_peak) return;
+    if (fullscreen_mute_ && is_fullscreen_app_running()) return;
 
     show_notify(cfg_->notify_peak_limit_title.c_str(),
                 cfg_->notify_peak_limit_body.c_str());
@@ -489,6 +497,8 @@ void AppWindow::show_context_menu() {
                 IDM_TOPMOST, L"常に最前面に表示");
     AppendMenuW(menu, MF_STRING | (toast_alert_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_ALERT_TOAST, L"Toast 通知");
+    AppendMenuW(menu, MF_STRING | (fullscreen_mute_ ? MF_CHECKED : MF_UNCHECKED),
+                IDM_FULLSCREEN_MUTE, L"フルスクリーン時は通知しない");
     AppendMenuW(menu, MF_STRING | (is_startup_registered() ? MF_CHECKED : MF_UNCHECKED),
                 IDM_STARTUP, L"スタートアップ登録");
 
@@ -547,7 +557,8 @@ void AppWindow::open_log_file() {
 // レジストリキー定数
 static constexpr LPCWSTR REG_KEY         = L"Software\\sysmeters";  // HKCU 以下のキーパス
 static constexpr LPCWSTR REG_TOPMOST     = L"Topmost";              // 最前面設定の値名（REG_DWORD、0 or 1）
-static constexpr LPCWSTR REG_ALERT_TOAST = L"AlertToast";           // Toast 通知設定の値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_ALERT_TOAST    = L"AlertToast";         // Toast 通知設定の値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_FULLSCREEN_MUTE = L"FullscreenMute";  // フルスクリーン抑制設定の値名（REG_DWORD、0 or 1）
 // セクション表示フラグの値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_VIS_CPU     = L"Visible_CPU";
 static constexpr LPCWSTR REG_VIS_GPU     = L"Visible_GPU";
@@ -627,16 +638,17 @@ static void save_reg_string(LPCWSTR name, const std::wstring& value) {
 
 // 新版状態を確定し、未通知版なら Toast 通知する（WM_UPDATE_DONE 受信時に UI スレッドで呼ぶ）
 //
-// 通知済みバージョンをレジストリに先書きし、前回値と異なるときだけ通知する。
-// これにより同一版の通知が起動ごとに繰り返されるのを防ぐ。
+// 通知済みバージョンをレジストリに記録し、前回値と異なるときだけ通知する。
+// フルスクリーン中は通知済みフラグを書かず保留し、次回起動で再試行される。
 void AppWindow::on_update_available(const std::wstring& latest_tag) {
     update_available_  = true;
     update_latest_tag_ = latest_tag;
 
     std::wstring notified = load_reg_string(REG_NOTIFIED_VERSION);
-    save_reg_string(REG_NOTIFIED_VERSION, latest_tag);
     if (notified == latest_tag) return;  // この版は通知済み
+    if (fullscreen_mute_ && is_fullscreen_app_running()) return;
 
+    save_reg_string(REG_NOTIFIED_VERSION, latest_tag);
     wchar_t body[128];
     // tag は GitHub 由来で長さ無制限のため、あふれ時は切り詰める（swprintf_s は abort する）
     _snwprintf_s(body, _TRUNCATE, L"sysmeters v%hs → %ls", APP_VERSION, latest_tag.c_str());
@@ -648,6 +660,19 @@ bool AppWindow::load_topmost()      { return load_reg_bool(REG_TOPMOST,     DEF_
 void AppWindow::save_topmost()      { save_reg_bool(REG_TOPMOST,     topmost_);               }
 bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, DEF_TOAST_ALERT); }
 void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_);           }
+bool AppWindow::load_fullscreen_mute()  { return load_reg_bool(REG_FULLSCREEN_MUTE, DEF_FULLSCREEN_MUTE); }
+void AppWindow::save_fullscreen_mute()  { save_reg_bool(REG_FULLSCREEN_MUTE, fullscreen_mute_);           }
+
+// フルスクリーンアプリケーション実行中の判定
+// SHQueryUserNotificationState で OS の通知状態を問い合わせ、
+// D3D フルスクリーン・プレゼンテーションモード・ユーザ応答不可状態を検出する。
+bool AppWindow::is_fullscreen_app_running() {
+    QUERY_USER_NOTIFICATION_STATE state = QUNS_ACCEPTS_NOTIFICATIONS;
+    if (FAILED(SHQueryUserNotificationState(&state))) return false;
+    return state == QUNS_RUNNING_D3D_FULL_SCREEN
+        || state == QUNS_PRESENTATION_MODE
+        || state == QUNS_BUSY;
+}
 
 void AppWindow::load_visibility() {
     vis_.cpu    = load_reg_bool(REG_VIS_CPU,    true);
@@ -896,8 +921,9 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         if (alert_) {
-            uint32_t fired = alert_->check(*metrics_, *cfg_);
-            if (fired && toast_alert_) show_balloon(fired);
+            const bool muted = fullscreen_mute_ && is_fullscreen_app_running();
+            uint32_t fired = alert_->check(*metrics_, *cfg_, muted);
+            if (fired && toast_alert_ && !muted) show_balloon(fired);
         }
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -932,6 +958,10 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_ALERT_TOAST:
             toast_alert_ = !toast_alert_;
             save_toast_alert();
+            break;
+        case IDM_FULLSCREEN_MUTE:
+            fullscreen_mute_ = !fullscreen_mute_;
+            save_fullscreen_mute();
             break;
         case IDM_STARTUP:
             set_startup(!is_startup_registered());
