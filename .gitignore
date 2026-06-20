@@ -8,6 +8,7 @@ build.txt
 *.local.*
 include/toml.hpp
 include/json.hpp
+include/doctest.h
 src/pawnio_hashes.hpp
 .clasp.json
 **/.env

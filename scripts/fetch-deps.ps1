@@ -33,6 +33,18 @@ else {
     Write-Host "json.hpp already exists, skipping."
 }
 
+# doctest シングルヘッダ版（ユニットテストフレームワーク）
+$doctestDest = Join-Path $includeDir "doctest.h"
+if (-not (Test-Path $doctestDest)) {
+    Write-Host "Downloading doctest..."
+    $doctestUrl = "https://raw.githubusercontent.com/doctest/doctest/v2.4.11/doctest/doctest.h"
+    Invoke-WebRequest -Uri $doctestUrl -OutFile $doctestDest
+    Write-Host "  -> $doctestDest"
+}
+else {
+    Write-Host "doctest.h already exists, skipping."
+}
+
 # IntelMSR.bin / AMDFamily17.bin（PawnIO.Modules から CPU 温度取得用モジュール）
 $dataDir = Join-Path $PSScriptRoot "..\data"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir | Out-Null }

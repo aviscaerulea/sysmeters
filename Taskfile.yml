@@ -74,3 +74,10 @@ tasks:
         -DestinationPath "out\{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"
         -Force'
       - cmd: echo "Package out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"
+
+  test:
+    desc: ユニットテストをビルド・実行
+    cmds:
+      - mkdir -p out
+      - cmd: pwsh.exe -NoProfile -File build-tests.ps1
+      - cmd: out/test_sysmeters.exe
