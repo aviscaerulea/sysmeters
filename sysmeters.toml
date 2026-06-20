@@ -257,7 +257,7 @@ peak_limit_body = "平日 21:00-03:00 ピーク制限時間です"
 # 更新促進用の claude.exe コマンドライン
 # nudge_enable = true のとき実行されるコマンドライン。
 # デフォルト: "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\""
-# nudge_cmd = 'claude.exe --safe-mode --model haiku --effort low -p "say ''ok''"'
+# nudge_cmd = "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\""
 
 # ピーク時間帯背景バー表示
 # 5h バー上に PT 平日 5:00-10:59 の区間を暗赤色で重ねる表示。
