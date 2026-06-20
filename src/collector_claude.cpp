@@ -229,6 +229,71 @@ static float calc_expected_pct(const std::string& iso, double window_secs) {
     return std::clamp(expected, 0.f, 100.f);
 }
 
+// TTL 無視で前回キャッシュの内容を返す
+//
+// 起動直後の API 取得完了までの空白を埋めるため、期限切れキャッシュからでも
+// 前回値を暫定表示用に取り出す。エラーキャッシュ（"error" フィールドあり）は無効として null を返す。
+static json read_cache_raw(const fs::path& path) {
+    if (path.empty()) return nullptr;
+    std::ifstream ifs(path);
+    if (!ifs.is_open()) return nullptr;
+    try {
+        auto j = json::parse(ifs);
+        if (j.contains("error")) return nullptr;
+        return j;
+    }
+    catch (...) {}
+    return nullptr;
+}
+
+// Usage API レスポンス JSON を ClaudeMetrics に反映する
+//
+// do_fetch（API/キャッシュ経由）と init（前回キャッシュ復元）で共有する。
+// usage_j が null の場合は何もしない。成功時のみ result.avail を true にする。
+static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
+    if (usage_j == nullptr) return;
+    try {
+        // 非 const operator[] は存在しないキーを自動挿入するため、value() で副作用なく読む
+        const json empty_obj = json::object();
+        const json& fh = usage_j.contains("five_hour") ? usage_j.at("five_hour") : empty_obj;
+        const json& sd = usage_j.contains("seven_day") ? usage_j.at("seven_day") : empty_obj;
+        // utilization は API から 0〜100 の % 値で返る
+        result.five_h_pct  = static_cast<float>(fh.value("utilization", 0.0));
+        result.seven_d_pct = static_cast<float>(sd.value("utilization", 0.0));
+
+        std::string fh_resets_at = fh.value("resets_at", "");
+        std::string sd_resets_at = sd.value("resets_at", "");
+        format_reset_time(fh_resets_at, false, result.five_h_reset, _countof(result.five_h_reset));
+        format_reset_time(sd_resets_at, true,  result.seven_d_reset, _countof(result.seven_d_reset));
+        result.five_h_expected_pct  = calc_expected_pct(fh_resets_at, 5.0 * 3600);
+        result.seven_d_expected_pct = calc_expected_pct(sd_resets_at, 7.0 * 24 * 3600);
+        result.five_h_resets_ts  = parse_iso8601_utc(fh_resets_at);
+        result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
+        result.avail = true;
+
+        // 超過料金情報（extra_usage）
+        if (usage_j.contains("extra_usage") && usage_j.at("extra_usage").is_object()) {
+            const json& eu = usage_j.at("extra_usage");
+            result.extra_enabled      = eu.value("is_enabled", false);
+            result.extra_used_dollars = static_cast<float>(eu.value("used_credits", 0.0)) / 100.f;
+        }
+    }
+    catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
+}
+
+// Plan API キャッシュ JSON（label 化済み）を ClaudeMetrics に反映する
+//
+// do_fetch（label 変換後）と init（キャッシュ復元）で共有する。
+// plan_j は {label, _ts} 形式を前提（生の memberships 形式ではない）。
+static void apply_plan_json(const json& plan_j, ClaudeMetrics& result) {
+    if (plan_j == nullptr) return;
+    try {
+        std::string label = plan_j.value("label", "");
+        strncpy_s(result.plan_label, sizeof(result.plan_label), label.c_str(), _TRUNCATE);
+    }
+    catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
+}
+
 // Anthropic API beta ヘッダの値（OAuth エンドポイント有効化用）。API バージョン更新時は要変更。
 static const char* BETA_HEADER = "oauth-2025-04-20";
 
@@ -321,35 +386,7 @@ void ClaudeCollector::do_fetch() {
         catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
     }
 
-    if (usage_j != nullptr) {
-        try {
-            // 非 const operator[] は存在しないキーを自動挿入するため、value() で副作用なく読む
-            const json empty_obj = json::object();
-            const json& fh = usage_j.contains("five_hour") ? usage_j.at("five_hour") : empty_obj;
-            const json& sd = usage_j.contains("seven_day") ? usage_j.at("seven_day") : empty_obj;
-            // utilization は API から 0〜100 の % 値で返る
-            result.five_h_pct  = static_cast<float>(fh.value("utilization", 0.0));
-            result.seven_d_pct = static_cast<float>(sd.value("utilization", 0.0));
-
-            std::string fh_resets_at = fh.value("resets_at", "");
-            std::string sd_resets_at = sd.value("resets_at", "");
-            format_reset_time(fh_resets_at, false, result.five_h_reset, _countof(result.five_h_reset));
-            format_reset_time(sd_resets_at, true,  result.seven_d_reset, _countof(result.seven_d_reset));
-            result.five_h_expected_pct  = calc_expected_pct(fh_resets_at, 5.0 * 3600);
-            result.seven_d_expected_pct = calc_expected_pct(sd_resets_at, 7.0 * 24 * 3600);
-            result.five_h_resets_ts  = parse_iso8601_utc(fh_resets_at);
-            result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
-            result.avail = true;
-
-            // 超過料金情報（extra_usage）
-            if (usage_j.contains("extra_usage") && usage_j.at("extra_usage").is_object()) {
-                const json& eu = usage_j.at("extra_usage");
-                result.extra_enabled      = eu.value("is_enabled", false);
-                result.extra_used_dollars = static_cast<float>(eu.value("used_credits", 0.0)) / 100.f;
-            }
-        }
-        catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
-    }
+    apply_usage_json(usage_j, result);
 
     // --- 5h リセット後の nudge（claude.exe 起動による使用状況の更新促進）---
     // 初回フェッチでは現在値を記録するのみ（起動直後の意図しない発火を防ぐ）。
@@ -415,13 +452,7 @@ void ClaudeCollector::do_fetch() {
         }
     }
 
-    if (plan_j != nullptr) {
-        try {
-            std::string label = plan_j.value("label", "");
-            strncpy_s(result.plan_label, sizeof(result.plan_label), label.c_str(), _TRUNCATE);
-        }
-        catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
-    }
+    apply_plan_json(plan_j, result);
 
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
@@ -442,6 +473,13 @@ void ClaudeCollector::init(HWND notify_wnd, int usage_interval_sec,
     usage_ttl_ = static_cast<double>(usage_interval_sec);
     nudge_enable_ = nudge_enable;
     nudge_cmd_    = nudge_cmd;
+
+    // API 取得完了までの空白を埋めるため、TTL 無視で前回キャッシュを暫定値として読み込む
+    ClaudeMetrics result;
+    apply_usage_json(read_cache_raw(cache_usage_path()), result);
+    apply_plan_json (read_cache_raw(cache_plan_path()),  result);
+    std::lock_guard<std::mutex> lock(result_mutex_);
+    pending_ = result;
 }
 
 int ClaudeCollector::count_claude_sessions() {

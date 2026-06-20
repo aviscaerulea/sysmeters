@@ -1030,7 +1030,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         }
 
         // バー（ラベル右端からリセット時刻左端まで）
-        float bar_right = avail ? (x + ww - RESET_W) : (x + ww);
+        // 未取得時もプレースホルダ "--:--" を右側に描画するため、常に RESET_W 分の余白を確保する
+        float bar_right = x + ww - RESET_W;
         float bar_top   = y + (SECTION_H - CLAUDE_BAR_H) / 2.f;  // 行内で縦中央揃え
         D2D1_RECT_F br  = D2D1::RectF(x + LBL_W + 4.f, bar_top, bar_right, bar_top + CLAUDE_BAR_H);
         set_brush_color(brush_fill_, COL_BAR_BG);
@@ -1074,8 +1075,10 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                 brush_fill_, 3.5f);
         }
 
-        // リセット時刻（右端、未取得時は非表示、font_small_）
+        // リセット時刻（右端、font_small_）
         // 7d 形式（"M/D 曜 HH:MM"）はスペース 2 つで 3 分割し曜日前後を圧縮描画する
+        // 未取得時はグレーのプレースホルダ "--:--" を表示する
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         if (avail) {
             static constexpr float TIME_W = 54.f;  // "HH:MM" 描画幅
             static constexpr float DAY_W  = 22.f;  // 曜日文字（全角 1 文字）描画幅
@@ -1083,7 +1086,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             wchar_t rtbuf[40];
             swprintf_s(rtbuf, L"%.38s", reset);
             set_brush_color(brush_text_, cfg.col_text, 1.0f);
-            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             wchar_t tmp[40];
             wcscpy_s(tmp, rtbuf);
             wchar_t* ctx = nullptr;
@@ -1107,8 +1109,14 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                 render_target_->DrawText(rtbuf, static_cast<UINT32>(wcslen(rtbuf)), font_small_,
                     D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H), brush_text_);
             }
-            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         }
+        else {
+            // 未取得時のプレースホルダ（API 取得完了で本来の時刻に置き換わる）
+            set_brush_color(brush_text_, COL_TEMP_NORMAL, 1.0f);
+            render_target_->DrawText(L"--:--", 5, font_small_,
+                D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H), brush_text_);
+        }
+        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         // 段落整列の復元はリセット時刻描画後に行う（途中で戻すと警告状態で縦位置が変動する）
         font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         font_small_bold_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
