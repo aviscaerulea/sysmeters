@@ -950,11 +950,22 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     set_brush_color(brush_text_, cfg.col_text);
     render_target_->DrawText(plan_name, static_cast<UINT32>(wcslen(plan_name)), font_small_, hsr, brush_text_);
 
+    // Usage API 取得失敗インジケータ（プラン名の右に赤太字で "ERR"）
+    int text_cursor = static_cast<int>(wcslen(plan_name));
+    if (m.fetch_error) {
+        wchar_t err_buf[24] = {};
+        wmemset(err_buf, L' ', text_cursor);
+        swprintf_s(err_buf + text_cursor, static_cast<int>(_countof(err_buf)) - text_cursor, L" ERR");
+        set_brush_color(brush_text_, COL_WARN_RED);
+        render_target_->DrawText(err_buf, static_cast<UINT32>(wcslen(err_buf)), font_small_bold_, hsr, brush_text_);
+        text_cursor = static_cast<int>(wcslen(err_buf));
+    }
+
     // 超過料金テキスト（閾値超で赤）
     // Consolas はモノスペースのためプラン名文字数分スペースを先頭に積むことで横位置を合わせる
     if (m.extra_enabled) {
         wchar_t over_buf[80];
-        int pad = static_cast<int>(wcslen(plan_name));
+        int pad = text_cursor;
         wmemset(over_buf, L' ', pad);
         // _countof は size_t なので int 演算のため明示キャスト。pad は wcslen 起源で常に _countof 以下
         swprintf_s(over_buf + pad, static_cast<int>(_countof(over_buf)) - pad, L"  over $%.1f", m.extra_used_dollars);
