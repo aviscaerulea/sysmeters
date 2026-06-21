@@ -387,6 +387,7 @@ void ClaudeCollector::do_fetch() {
     }
 
     apply_usage_json(usage_j, result);
+    result.fetch_error = (usage_j == nullptr);
 
     // --- 5h リセット後の nudge（claude.exe 起動による使用状況の更新促進）---
     // 初回フェッチでは現在値を記録するのみ（起動直後の意図しない発火を防ぐ）。
