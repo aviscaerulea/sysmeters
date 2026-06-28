@@ -74,7 +74,7 @@ inline float section_h_vram(bool avail) { return avail ? (LINE_H + 2.f + BAR_H +
                                                        : (LINE_H + GAP); }
 inline float section_h_disk()           { return LINE_H + (LINE_H + GRAPH_H + GAP) * 2.f; }
 inline float section_h_net()            { return LINE_H + LINE_H + GRAPH_H + GAP; }
-inline float section_h_claude()         { return LINE_H + (SECTION_H + GAP) * 2.f; }
+inline float section_h_claude()         { return LINE_H + SECTION_H * 2.f + GAP; }
 }
 
 // リングバッファの最大値を返す
@@ -602,14 +602,19 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
         }
     }
 
-    // 総量テキストをバー右側に表示（棒グラフと縦位置を合わせるため上にシフト）
+    // 総量テキストをバー右側に表示。
+    // DirectWrite の PARAGRAPH_ALIGNMENT_FAR はラインボックス下端を矩形下端に揃える。
+    // Consolas のディセント（約 5px）の分だけ視覚的文字底辺はラインボックス下端より
+    // 上にずれるため、矩形下端を BAR_H + 5px に拡張してベースラインをバー下端に合わせる。
     wchar_t totbuf[16];
     swprintf_s(totbuf, L"%2.0fGB", m.total_gb);
     set_brush_color(brush_text_, cfg.col_text);
-    D2D1_RECT_F tr2 = D2D1::RectF(x + ww - TOTAL_W, y - 5.f, x + ww, y + BAR_H);
+    D2D1_RECT_F tr2 = D2D1::RectF(x + ww - TOTAL_W, y, x + ww, y + BAR_H + 3.f);
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
     render_target_->DrawText(totbuf, static_cast<UINT32>(wcslen(totbuf)), font_small_, tr2, brush_text_);
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
 
     y += BAR_H + GAP;
 
@@ -648,14 +653,19 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
     draw_hbar(m.usage_pct, 100.f, br, (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_graph_fill);
 
-    // 総量テキストをバー右側に表示（棒グラフと縦位置を合わせるため上にシフト）
+    // 総量テキストをバー右側に表示。
+    // DirectWrite の PARAGRAPH_ALIGNMENT_FAR はラインボックス下端を矩形下端に揃える。
+    // Consolas のディセント（約 5px）の分だけ視覚的文字底辺はラインボックス下端より
+    // 上にずれるため、矩形下端を BAR_H + 5px に拡張してベースラインをバー下端に合わせる。
     wchar_t totbuf[16];
     swprintf_s(totbuf, L"%2.0fGB", m.total_gb);
     set_brush_color(brush_text_, cfg.col_text);
-    D2D1_RECT_F tr2 = D2D1::RectF(x + ww - TOTAL_W, y - 5.f, x + ww, y + BAR_H);
+    D2D1_RECT_F tr2 = D2D1::RectF(x + ww - TOTAL_W, y, x + ww, y + BAR_H + 3.f);
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
     render_target_->DrawText(totbuf, static_cast<UINT32>(wcslen(totbuf)), font_small_, tr2, brush_text_);
     font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
 
     y += BAR_H + GAP;
 
@@ -1012,7 +1022,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
                          std::pair<float, float> peak_frac = {0.f, 0.f}) {
-        static constexpr float CLAUDE_BAR_H = BAR_H * 1.2f;  // Claude 専用バー高さ（1.2 倍）
+        static constexpr float CLAUDE_BAR_H = BAR_H;  // VRAM 等と同じバー高さに揃える
 
         // ラベル（"5h"/"7d"）は常に通常色で左寄せ、パーセンテージは条件付き色・フォントで右寄せ
         font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -1136,7 +1146,9 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         // 段落整列の復元はリセット時刻描画後に行う（途中で戻すと警告状態で縦位置が変動する）
         font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         font_small_bold_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        y += SECTION_H + GAP;
+        // 5h と 7d の行送りは SECTION_H のみ。視覚的な隙間を詰めるため GAP を含めない。
+        // セクション末尾のギャップは draw_bar 呼び出し後に 1 度だけ加算する。
+        y += SECTION_H;
     };
 
     auto peak = cfg.show_peak_bar ? calc_peak_overlap(m.five_h_resets_ts)
@@ -1145,6 +1157,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
              calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct, peak);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
              calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7, cfg.warn_claude_7d_pct);
+    y += GAP;  // セクション末尾の通常ギャップ（後続セクションとの間隔を維持）
 
     return y;
 }
