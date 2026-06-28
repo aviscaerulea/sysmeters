@@ -47,7 +47,7 @@ static std::wstring fmt_comma(int v)
 // ウィンドウレイアウト定数（クライアント領域内）
 static constexpr float PAD        = 11.f;   // 内側パディング
 static constexpr float SECTION_H  = 24.f;   // セクションラベル高さ（18pt 対応）
-static constexpr float GRAPH_H    = 60.f;   // 面グラフ高さ（Disk/Net）
+static constexpr float GRAPH_H    = 54.f;   // 面グラフ高さ（Disk/Net）。60 の 90%
 static constexpr float GRAPH_H_LG = 86.f;  // CPU/GPU 面グラフ高さ
 static constexpr float BAR_H      = 16.f;   // 横バー高さ（20 * 0.8）
 static constexpr float CORE_BAR_H = 40.f;   // コア縦バー高さ
@@ -738,12 +738,14 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         else {
             wcscpy_s(gbuf, L"-");
         }
+        // 容量テキストと GB/h 行は補助情報のため、font_small_ よりひと回り小さい font_tiny_ で控えめに
         set_brush_color(brush_text_, cfg.col_text, 0.5f);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         float gt = y + LINE_H + 2.f + BAR_H;
-        D2D1_RECT_F gbr = D2D1::RectF(sx, gt, sx + sw, gt + INFO_LINE_H);
-        render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_small_, gbr, brush_text_);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        // 容量テキストはフォント縮小に合わせてベースラインを 2px 下げる（GB/h 行は gt 基準のまま据え置き）
+        D2D1_RECT_F gbr = D2D1::RectF(sx, gt + 2.f, sx + sw, gt + 2.f + INFO_LINE_H);
+        render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_tiny_, gbr, brush_text_);
+        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
         // GB/h 行（容量テキストの下、同一物理ドライブの後続は省略）
         bool show_smart = dm.smart_avail
@@ -753,11 +755,11 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
             swprintf_s(smuf, L"%.1f GB/h", dm.smart_write_gbh);
             uint32_t gbh_col = (dm.smart_write_gbh > cfg.warn_disk_gbh) ? COL_WARN_RED : cfg.col_text;
             set_brush_color(brush_text_, gbh_col, 0.45f);
-            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            float st = gt + INFO_LINE_H - 5.f;
+            font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            float st = gt + INFO_LINE_H - 6.f;
             D2D1_RECT_F smr = D2D1::RectF(sx, st, sx + sw, st + INFO_LINE_H);
-            render_target_->DrawText(smuf, static_cast<UINT32>(wcslen(smuf)), font_small_, smr, brush_text_);
-            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            render_target_->DrawText(smuf, static_cast<UINT32>(wcslen(smuf)), font_tiny_, smr, brush_text_);
+            font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         }
     };
 
@@ -990,10 +992,13 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     }
     wchar_t sess_buf[24];
     swprintf_s(sess_buf, L"Sessions:%3d", m.session_count);
-    set_brush_color(brush_text_, cfg.col_text);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    render_target_->DrawText(sess_buf, static_cast<UINT32>(wcslen(sess_buf)), font_small_, hsr, brush_text_);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    // CPU セクションの Proc/Thread/Handle 行と同じ補助情報トーン（16pt、アルファ 0.6）に揃え、視覚的な主張を抑える
+    // プラン名 etc とフォントサイズが違うため、ベースラインを揃えるために専用矩形を 4px 下げる
+    D2D1_RECT_F ssr = D2D1::RectF(hsr.left, hsr.top + 4.f, hsr.right, hsr.bottom + 4.f);
+    set_brush_color(brush_text_, cfg.col_text, 0.6f);
+    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+    render_target_->DrawText(sess_buf, static_cast<UINT32>(wcslen(sess_buf)), font_tiny_, ssr, brush_text_);
+    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
     y += LINE_H;
 
     // 5h / 7d バー：ラベル+パーセンテージ（左）、バー（中）、リセット時刻（右）の同一行レイアウト
