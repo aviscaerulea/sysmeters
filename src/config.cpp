@@ -166,6 +166,7 @@ AppConfig load_config(const std::string& path) {
         try { cfg.claude_nudge_cmd = toml::find_or<std::string>(data, "claude", "nudge_cmd", cfg.claude_nudge_cmd); }
         catch (...) {}
         cfg.show_peak_bar = get_bool("claude", "show_peak_bar", cfg.show_peak_bar);
+        cfg.claude_delta_window_min = get_int("claude", "delta_window_min", cfg.claude_delta_window_min);
 
         // メインアカウント設定（[claude] セクション）
         // メインは ~/.claude を固定使用するため config_dir は持たない。
@@ -227,6 +228,10 @@ AppConfig load_config(const std::string& path) {
 
     // Usage API ポーリング間隔のサニティチェック（30〜3600 秒）
     cfg.claude_usage_interval_sec = std::clamp(cfg.claude_usage_interval_sec, 30, 3600);
+
+    // 5h 増加分濃色オーバーレイのウィンドウ幅サニティチェック（0〜60 分）
+    // 上限 60 分は保持メモリの暴走防止と、5h ウィンドウ内で意味のある時間幅。0 は機能無効を意味する
+    cfg.claude_delta_window_min = std::clamp(cfg.claude_delta_window_min, 0, 60);
 
     // ガードトーン長のサニティチェック（0〜10 秒）
     cfg.guard_tone_ms = std::clamp(cfg.guard_tone_ms, 0, 10000);

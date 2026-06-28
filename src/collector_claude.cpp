@@ -741,18 +741,34 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
     }
 }
 
-void ClaudeCollector::apply_result(ClaudeMetrics& out) {
+void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min) {
     std::lock_guard<std::mutex> lock(result_mutex_);
     // セッション数・アカウントラベル・有効化フラグは window.cpp 側で管理しているため
-    // pending_（fetch 結果）で上書きされないよう退避する
+    // pending_（fetch 結果）で上書きされないよう退避する。
+    // 5h 履歴も pending_ には無いため退避してから戻す
     int sessions = out.session_count;
     wchar_t label_keep[24];
     wcsncpy_s(label_keep, out.account_label, _TRUNCATE);
     bool enabled_keep = out.account_enabled;
+    std::vector<ClaudeHistorySample> hist_keep = std::move(out.five_h_history);
     out = pending_;
     out.session_count = sessions;
     wcsncpy_s(out.account_label, label_keep, _TRUNCATE);
     out.account_enabled = enabled_keep;
+    out.five_h_history = std::move(hist_keep);
+
+    // 5h 履歴に現在値を追加し、保持期間外を破棄する
+    // データ未取得（avail=false）時は履歴の信頼性が無いため push しない。
+    // 保持期間は (delta_window_min + 1) × 60 秒（N 分前のサンプル参照に必要な分 + バッファ 1 分）
+    if (out.avail) {
+        time_t now = time(nullptr);
+        out.five_h_history.push_back({now, out.five_h_pct});
+        time_t cutoff = now - static_cast<time_t>((delta_window_min + 1) * 60);
+        auto it = std::find_if(out.five_h_history.begin(), out.five_h_history.end(),
+            [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
+        if (it != out.five_h_history.begin())
+            out.five_h_history.erase(out.five_h_history.begin(), it);
+    }
 }
 
 // 中断要求のみ。スレッドの完了は待たない

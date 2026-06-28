@@ -1014,18 +1014,35 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         return std::clamp(static_cast<float>((window_secs - remaining) / window_secs * 100.0), 0.f, 100.f);
     };
 
+    // 履歴から「N 分前の使用率」を求める
+    // 新しい順に走査し、ts <= now - N 分 の最初のサンプルを返す。
+    // N 分前のサンプルが無い場合、最古サンプルの経過時間が 60 秒以上なら最古サンプルを返す
+    // （起動直後でもおおむねペースが見える効果。1 分未満は誤差が大きいため抑制）
+    auto calc_delta_start_pct = [&](const std::vector<ClaudeHistorySample>& hist, int win_min) -> float {
+        if (win_min <= 0 || hist.empty()) return 0.f;
+        time_t now = time(nullptr);
+        time_t target = now - static_cast<time_t>(win_min * 60);
+        for (auto it = hist.rbegin(); it != hist.rend(); ++it) {
+            if (it->ts <= target) return it->pct;
+        }
+        if (now - hist.front().ts >= 60) return hist.front().pct;
+        return 0.f;
+    };
+
     // Claude レートリミット横バーを 1 本描画する
     //
-    // lbl:          ラベル文字列（"5h"/"7d"）
-    // pct:          現在使用率（0〜100%）
-    // reset:        リセット時刻文字列（avail=false のとき nullptr 可）
-    // avail:        データ取得済みなら true（false のときグレー表示）
-    // expected_pct: 均等消費ペースの理想位置（%）。0 のとき計算不可
-    // tick_count:   ペースマーカーの縦線本数（0 のとき縦線なし）
-    // warn_pct:     理想ペースからの超過率の警告閾値（%）
-    // peak_frac:    ピーク時間帯の開始・終了位置（バー幅に対する比率）。{0,0} のとき非表示
+    // lbl:             ラベル文字列（"5h"/"7d"）
+    // pct:             現在使用率（0〜100%）
+    // reset:           リセット時刻文字列（avail=false のとき nullptr 可）
+    // avail:           データ取得済みなら true（false のときグレー表示）
+    // expected_pct:    均等消費ペースの理想位置（%）。0 のとき計算不可
+    // tick_count:      ペースマーカーの縦線本数（0 のとき縦線なし）
+    // warn_pct:        理想ペースからの超過率の警告閾値（%）
+    // delta_start_pct: 直近ウィンドウ開始時点の使用率（%）。0 のとき増加分オーバーレイ非表示
+    // peak_frac:       ピーク時間帯の開始・終了位置（バー幅に対する比率）。{0,0} のとき非表示
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
+                         float delta_start_pct = 0.f,
                          std::pair<float, float> peak_frac = {0.f, 0.f}) {
         static constexpr float CLAUDE_BAR_H = BAR_H;  // VRAM 等と同じバー高さに揃える
 
@@ -1085,6 +1102,20 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             D2D1_RECT_F filled = D2D1::RectF(br.left, br.top, br.left + fill_w, br.bottom);
             set_brush_color(brush_fill_, cfg.col_claude_bar);
             render_target_->FillRectangle(filled, brush_fill_);
+        }
+
+        // 直近 N 分間の増加分を濃色（COL_WSL_MEM）で重ね塗りする
+        // ペース把握用の補助表示。減少時（リセット直後など）は描画しない
+        if (avail && delta_start_pct > 0.f && pct > delta_start_pct) {
+            float bw = br.right - br.left;
+            float xs = br.left + bw * (delta_start_pct / 100.f);
+            float xe = br.left + bw * (pct             / 100.f);
+            xe = min(xe, br.right);
+            if (xe > xs) {
+                D2D1_RECT_F dr = D2D1::RectF(xs, br.top, xe, br.bottom);
+                set_brush_color(brush_fill_, COL_WSL_MEM, 0.9f);
+                render_target_->FillRectangle(dr, brush_fill_);
+            }
         }
 
         // 等分グリッド線（消費ペースの目安：5h は 1h 間隔、7d は 1d 間隔）
@@ -1158,8 +1189,10 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
     auto peak = cfg.show_peak_bar ? calc_peak_overlap(m.five_h_resets_ts)
                                   : std::pair<float, float>{0.f, 0.f};
+    float five_h_delta_start = calc_delta_start_pct(m.five_h_history, cfg.claude_delta_window_min);
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
-             calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct, peak);
+             calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct,
+             five_h_delta_start, peak);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
              calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7, cfg.warn_claude_7d_pct);
     y += GAP;  // セクション末尾の通常ギャップ（後続セクションとの間隔を維持）
