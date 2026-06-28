@@ -19,33 +19,17 @@
 #include <chrono>
 #include <ctime>
 #include <cstring>
+#include <cwchar>
+#include <vector>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
-// キャッシュファイルのパス
-// 一時ディレクトリの取得に失敗した場合は空パスを返す（呼び出し側のファイル I/O は静かに失敗する）
-static fs::path cache_usage_path() {
-    wchar_t tmp[MAX_PATH];
-    DWORD len = GetTempPathW(MAX_PATH, tmp);
-    if (len == 0 || len > MAX_PATH) return {};
-    return fs::path(tmp) / L"claude-usage-cache.json";
-}
-
-static fs::path cache_plan_path() {
-    wchar_t tmp[MAX_PATH];
-    DWORD len = GetTempPathW(MAX_PATH, tmp);
-    if (len == 0 || len > MAX_PATH) return {};
-    return fs::path(tmp) / L"claude-plan-cache.json";
-}
-
 // credentials.json から OAuth トークンを取得する
-static std::string get_token() {
-    wchar_t home[MAX_PATH] = {};
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, home))) return {};
-    fs::path creds = fs::path(home) / L".claude" / L".credentials.json";
-
-    std::ifstream ifs(creds);
+// creds_path_ はインスタンス固有（アカウント別）。空のときはトークン取得を諦める
+std::string ClaudeCollector::get_token() {
+    if (creds_path_.empty()) return {};
+    std::ifstream ifs(creds_path_);
     if (!ifs.is_open()) return {};
     try {
         auto j = json::parse(ifs);
@@ -343,12 +327,79 @@ static void clear_negative_cache(const fs::path& path) {
     catch (...) {}
 }
 
+// 5h リセット後 nudge：claude.exe を環境変数で構成して起動する
+//
+// メイン（config_dir_ 空）は親プロセス環境を継承して起動する。
+// サブ（config_dir_ 非空）は親プロセス環境 + CLAUDE_CONFIG_DIR=<config_dir_> を加えた一時環境で
+// 起動する。Claude CLI には --config-dir コマンドオプションが存在せず、設定ディレクトリの上書きは
+// CLAUDE_CONFIG_DIR 環境変数経由でのみ可能なため。sysmeters 自身のプロセス親環境は変更せず、
+// CreateProcess の lpEnvironment で子プロセスにだけ設定する。
+void ClaudeCollector::run_nudge() {
+    log_info("claude nudge: 5h reset is past, running (account=%d): %s",
+             account_index_, nudge_cmd_.c_str());
+
+    // nudge_cmd_（UTF-8）を Wide へ変換する。CreateProcessW の第 2 引数は書き換え可能バッファ
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, nudge_cmd_.c_str(), -1, nullptr, 0);
+    if (wlen <= 0) {
+        log_error("claude nudge: MultiByteToWideChar failed (err=%lu)", GetLastError());
+        return;
+    }
+    std::vector<wchar_t> wcmd(static_cast<size_t>(wlen));
+    MultiByteToWideChar(CP_UTF8, 0, nudge_cmd_.c_str(), -1, wcmd.data(), wlen);
+
+    // サブの場合は親環境変数 + CLAUDE_CONFIG_DIR を含む環境ブロックを構築する
+    std::vector<wchar_t> env_block;
+    LPVOID lp_env = nullptr;
+    DWORD flags = CREATE_NO_WINDOW;
+    if (!config_dir_.empty()) {
+        LPWCH parent = GetEnvironmentStringsW();
+        if (!parent) {
+            log_error("claude nudge: GetEnvironmentStringsW failed (err=%lu)", GetLastError());
+            return;
+        }
+        const std::wstring key_eq = L"CLAUDE_CONFIG_DIR=";
+        for (const wchar_t* p = parent; *p; p += wcslen(p) + 1) {
+            size_t entry_len = wcslen(p);
+            // 既存の CLAUDE_CONFIG_DIR は除外し、自前で追加する
+            if (entry_len >= key_eq.size() &&
+                _wcsnicmp(p, key_eq.c_str(), key_eq.size()) == 0) {
+                continue;
+            }
+            env_block.insert(env_block.end(), p, p + entry_len);
+            env_block.push_back(L'\0');
+        }
+        FreeEnvironmentStringsW(parent);
+
+        env_block.insert(env_block.end(), key_eq.begin(), key_eq.end());
+        env_block.insert(env_block.end(), config_dir_.begin(), config_dir_.end());
+        env_block.push_back(L'\0');
+        env_block.push_back(L'\0');  // 環境ブロックは二重 NUL 終端
+        lp_env = env_block.data();
+        flags |= CREATE_UNICODE_ENVIRONMENT;
+    }
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi{};
+
+    if (CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE,
+                       flags, lp_env, nullptr, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    else {
+        log_error("claude nudge: CreateProcess failed (err=%lu)", GetLastError());
+    }
+}
+
 // バックグラウンドで Usage API + Account API を叩く
 void ClaudeCollector::do_fetch() {
     // 初回フェッチ時はネガティブキャッシュを削除して必ず API を叩く
     if (first_fetch_) {
-        clear_negative_cache(cache_usage_path());
-        clear_negative_cache(cache_plan_path());
+        clear_negative_cache(cache_usage_path_);
+        clear_negative_cache(cache_plan_path_);
         first_fetch_ = false;
     }
 
@@ -362,15 +413,15 @@ void ClaudeCollector::do_fetch() {
     localtime_s(&local_t, &now_t);
     if (local_t.tm_min == 0) {
         std::error_code ec;
-        fs::remove(cache_usage_path(), ec);
-        fs::remove(cache_plan_path(), ec);
+        fs::remove(cache_usage_path_, ec);
+        fs::remove(cache_plan_path_, ec);
     }
 
     std::string token = get_token();
 
     // --- Usage API ---
     int usage_status = 0;
-    json usage_j = fetch_or_cache(cache_usage_path(), usage_ttl_, L"/api/oauth/usage", token, &usage_status, &shutdown_);
+    json usage_j = fetch_or_cache(cache_usage_path_, usage_ttl_, L"/api/oauth/usage", token, &usage_status, &shutdown_);
     if (usage_j == nullptr && !token.empty()) {
         log_error("Claude Usage API failed");
         // 401 は認証切れ → 次回フェッチ時にネガティブキャッシュを削除して即再取得させる
@@ -380,7 +431,7 @@ void ClaudeCollector::do_fetch() {
         // 新規 API 取得 → タイムスタンプを付与してキャッシュ保存
         try {
             usage_j["_ts"] = now_ts();
-            std::ofstream ofs(cache_usage_path());
+            std::ofstream ofs(cache_usage_path_);
             ofs << usage_j.dump();
         }
         catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
@@ -399,21 +450,7 @@ void ClaudeCollector::do_fetch() {
             bool should_run = (last_nudge_resets_ts_ != -1);
             last_nudge_resets_ts_ = result.five_h_resets_ts;
             if (should_run) {
-                log_info("claude nudge: 5h reset is past, running: %s", nudge_cmd_.c_str());
-                STARTUPINFOA si{};
-                si.cb = sizeof(si);
-                si.dwFlags = STARTF_USESHOWWINDOW;
-                si.wShowWindow = SW_HIDE;
-                PROCESS_INFORMATION pi{};
-                std::string cmd = nudge_cmd_;
-                if (CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, FALSE,
-                                   CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-                    CloseHandle(pi.hThread);
-                    CloseHandle(pi.hProcess);
-                }
-                else {
-                    log_error("claude nudge: CreateProcess failed (err=%lu)", GetLastError());
-                }
+                run_nudge();
             }
         }
     }
@@ -422,7 +459,7 @@ void ClaudeCollector::do_fetch() {
     // shutdown 要求時は次のリクエストへ進まず早期終了する
     if (shutdown_.load()) { fetching_.store(false); return; }
 
-    json plan_j = fetch_or_cache(cache_plan_path(), 3600.0, L"/api/oauth/account", token, nullptr, &shutdown_);
+    json plan_j = fetch_or_cache(cache_plan_path_, 3600.0, L"/api/oauth/account", token, nullptr, &shutdown_);
     if (plan_j != nullptr && !plan_j.contains("_ts")) {
         // 新規 API 取得 → tier→label 変換してキャッシュ保存
         try {
@@ -443,7 +480,7 @@ void ClaudeCollector::do_fetch() {
                 else                                             label = "不明";
 
                 plan_j = json{{"label", label}, {"_ts", now_ts()}};
-                std::ofstream ofs(cache_plan_path());
+                std::ofstream ofs(cache_plan_path_);
                 ofs << plan_j.dump();
             }
         }
@@ -459,7 +496,8 @@ void ClaudeCollector::do_fetch() {
         std::lock_guard<std::mutex> lock(result_mutex_);
         pending_ = result;
     }
-    if (HWND wnd = notify_wnd_.load()) PostMessage(wnd, WM_CLAUDE_DONE, 0, 0);
+    // wParam にアカウント識別子を載せる（0=Main, 1=Sub）。受信側は wParam で apply_result の振り分けを行う
+    if (HWND wnd = notify_wnd_.load()) PostMessage(wnd, WM_CLAUDE_DONE, static_cast<WPARAM>(account_index_), 0);
     fetching_.store(false);
 }
 
@@ -468,39 +506,194 @@ DWORD WINAPI ClaudeCollector::fetch_thread(LPVOID param) {
     return 0;
 }
 
-void ClaudeCollector::init(HWND notify_wnd, int usage_interval_sec,
+void ClaudeCollector::init(HWND notify_wnd, int account_index,
+                           const std::wstring& config_dir, const std::string& cache_suffix,
+                           int usage_interval_sec,
                            bool nudge_enable, const std::string& nudge_cmd) {
     notify_wnd_.store(notify_wnd);
+    account_index_ = account_index;
     usage_ttl_ = static_cast<double>(usage_interval_sec);
     nudge_enable_ = nudge_enable;
     nudge_cmd_    = nudge_cmd;
+    config_dir_   = config_dir;
+
+    // インスタンス固有の credentials/キャッシュパスを構築する
+    // ホームディレクトリや TEMP の取得に失敗した場合は空 path のままにし、
+    // 後段の I/O は静かに失敗させる（既存挙動互換）
+    // config_dir が空のときはメイン（~/.claude）、非空のときはサブ（指定ディレクトリ直下）から credentials を読む
+    if (!config_dir.empty()) {
+        creds_path_ = fs::path(config_dir) / L".credentials.json";
+    }
+    else {
+        wchar_t home[MAX_PATH] = {};
+        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, home))) {
+            creds_path_ = fs::path(home) / L".claude" / L".credentials.json";
+        }
+    }
+    wchar_t tmp[MAX_PATH];
+    DWORD tlen = GetTempPathW(MAX_PATH, tmp);
+    if (tlen != 0 && tlen <= MAX_PATH) {
+        // メインは既存ファイル名と互換になるよう suffix 空を維持する
+        std::string usage_name = "claude-usage-cache" + cache_suffix + ".json";
+        std::string plan_name  = "claude-plan-cache"  + cache_suffix + ".json";
+        cache_usage_path_ = fs::path(tmp) / fs::path(usage_name);
+        cache_plan_path_  = fs::path(tmp) / fs::path(plan_name);
+    }
 
     // API 取得完了までの空白を埋めるため、TTL 無視で前回キャッシュを暫定値として読み込む
     ClaudeMetrics result;
-    apply_usage_json(read_cache_raw(cache_usage_path()), result);
-    apply_plan_json (read_cache_raw(cache_plan_path()),  result);
+    apply_usage_json(read_cache_raw(cache_usage_path_), result);
+    apply_plan_json (read_cache_raw(cache_plan_path_),  result);
     std::lock_guard<std::mutex> lock(result_mutex_);
     pending_ = result;
 }
 
-int ClaudeCollector::count_claude_sessions() {
-    int count = 0;
+// PEB の必要分のみ独自定義する
+// 64bit プロセスの PEB レイアウトは Windows 10 / 11 で安定しているが、Microsoft 文書上は不安定領域。
+// 失敗時はフォールバックで main 扱いとし、サブの誤分類は許容する設計
+using NtQueryInformationProcessFn = LONG (NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+struct ProcessBasicInformationLite {
+    LONG      ExitStatus;
+    PVOID     PebBaseAddress;
+    ULONG_PTR AffinityMask;
+    LONG      BasePriority;
+    ULONG_PTR UniqueProcessId;
+    ULONG_PTR InheritedFromUniqueProcessId;
+};
+// 64bit PEB の ProcessParameters は offset 0x20
+// RTL_USER_PROCESS_PARAMETERS の Environment は offset 0x80（環境変数ブロックへの PVOID）
+static constexpr SIZE_T PEB_OFFSET_PROCESS_PARAMS_X64       = 0x20;
+static constexpr SIZE_T UPP_OFFSET_ENVIRONMENT_X64          = 0x80;
+
+// ntdll!NtQueryInformationProcess を 1 度だけ取得する
+// magic static は C++11 でスレッドセーフな単一回初期化が言語規格上保証されているため、
+// 関数内 static 変数の遅延初期化に潜む二重チェックロック問題を回避できる
+static NtQueryInformationProcessFn get_nt_query_info() {
+    static const NtQueryInformationProcessFn fn = []() -> NtQueryInformationProcessFn {
+        HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        if (!ntdll) return nullptr;
+        return reinterpret_cast<NtQueryInformationProcessFn>(
+            GetProcAddress(ntdll, "NtQueryInformationProcess"));
+    }();
+    return fn;
+}
+
+// 指定 PID のプロセス環境変数から指定キーの値を返す
+//
+// CLAUDE_CONFIG_DIR のような特定キーの値を取り出すために PEB の Environment ブロックを読む。
+// 失敗時は空文字を返す（呼び出し側で main 扱いにフォールバックされる）。
+// 32bit プロセス（WoW64）は x64 PEB オフセットで読めないため空を返す。現行 claude.exe は
+// 64bit のため実害なし、将来 32bit ビルドが配布されてもサブの誤分類は許容する設計
+static std::wstring read_process_env_var(DWORD pid, const std::wstring& name) {
+    HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!proc) return {};
+
+    // WoW64（32bit プロセス）は x64 PEB レイアウトと不一致のため早期 return
+    BOOL is_wow64 = FALSE;
+    if (IsWow64Process(proc, &is_wow64) && is_wow64) {
+        CloseHandle(proc);
+        return {};
+    }
+
+    std::wstring result;
+    const NtQueryInformationProcessFn nt = get_nt_query_info();
+    if (nt) {
+        ProcessBasicInformationLite pbi{};
+        ULONG ret_len = 0;
+        // ProcessBasicInformation = 0
+        if (nt(proc, 0, &pbi, sizeof(pbi), &ret_len) == 0 && pbi.PebBaseAddress) {
+            PVOID upp = nullptr;
+            SIZE_T n = 0;
+            // PEB から ProcessParameters のアドレスを読む
+            if (ReadProcessMemory(proc,
+                    reinterpret_cast<BYTE*>(pbi.PebBaseAddress) + PEB_OFFSET_PROCESS_PARAMS_X64,
+                    &upp, sizeof(upp), &n) && n == sizeof(upp) && upp) {
+                // ProcessParameters から環境変数ブロックの先頭アドレスを読む
+                PVOID env_block = nullptr;
+                if (ReadProcessMemory(proc,
+                        reinterpret_cast<BYTE*>(upp) + UPP_OFFSET_ENVIRONMENT_X64,
+                        &env_block, sizeof(env_block), &n) && n == sizeof(env_block) && env_block) {
+                    // 環境変数ブロックを 64KB まで読み取る
+                    // 形式は "KEY=VAL\0KEY=VAL\0...\0\0"（UTF-16）。
+                    // EnvironmentSize のオフセットは更に不安定なため、固定上限で読んで終端 NUL を探す方式とする
+                    constexpr SIZE_T MAX_ENV_BYTES = 64 * 1024;
+                    std::vector<wchar_t> buf(MAX_ENV_BYTES / sizeof(wchar_t));
+                    SIZE_T read = 0;
+                    if (ReadProcessMemory(proc, env_block, buf.data(), MAX_ENV_BYTES, &read)
+                        && read >= sizeof(wchar_t)) {
+                        const SIZE_T chars = read / sizeof(wchar_t);
+                        const std::wstring prefix = name + L"=";
+                        const wchar_t* p = buf.data();
+                        const wchar_t* end = p + chars;
+                        while (p < end && *p) {
+                            // 各エントリは NUL 終端の wstring（読み取り範囲外にはみ出さないよう wcsnlen でクランプ）
+                            size_t entry_len = wcsnlen(p, static_cast<size_t>(end - p));
+                            if (entry_len >= prefix.size() &&
+                                _wcsnicmp(p, prefix.c_str(), prefix.size()) == 0) {
+                                result.assign(p + prefix.size(), p + entry_len);
+                                break;
+                            }
+                            if (entry_len == static_cast<size_t>(end - p)) break;  // 終端未検出で範囲尽きた
+                            p += entry_len + 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    CloseHandle(proc);
+    return result;
+}
+
+ClaudeSessionCount count_claude_sessions_split(const std::wstring& sub_config_dir) {
+    ClaudeSessionCount result{};
+
+    // サブ用パスを事前に正規化しておく
+    // 構成済みでも正規化に失敗した場合は sub_norm 空のままになる。検知できない誤分類を避けるため
+    // 区別してログに残す
+    std::wstring sub_norm;
+    if (!sub_config_dir.empty()) {
+        wchar_t norm[MAX_PATH];
+        DWORD len = GetFullPathNameW(sub_config_dir.c_str(), MAX_PATH, norm, nullptr);
+        if (len > 0 && len < MAX_PATH) {
+            sub_norm = norm;
+        }
+        else {
+            log_error("count_claude_sessions_split: GetFullPathNameW failed for sub_config_dir (len=%lu) — all sessions counted as main", len);
+        }
+    }
+
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return 0;
+    if (snap == INVALID_HANDLE_VALUE) return result;
 
     PROCESSENTRY32W pe{};
     pe.dwSize = sizeof(pe);
     if (Process32FirstW(snap, &pe)) {
         do {
-            if (_wcsicmp(pe.szExeFile, L"claude.exe") == 0) ++count;
+            if (_wcsicmp(pe.szExeFile, L"claude.exe") == 0) {
+                bool is_sub = false;
+                if (!sub_norm.empty()) {
+                    std::wstring env_val = read_process_env_var(pe.th32ProcessID, L"CLAUDE_CONFIG_DIR");
+                    if (!env_val.empty()) {
+                        wchar_t norm[MAX_PATH];
+                        DWORD len = GetFullPathNameW(env_val.c_str(), MAX_PATH, norm, nullptr);
+                        if (len > 0 && len < MAX_PATH && _wcsicmp(norm, sub_norm.c_str()) == 0) {
+                            is_sub = true;
+                        }
+                    }
+                }
+                if (is_sub) ++result.sub_count;
+                else        ++result.main_count;
+            }
         } while (Process32NextW(snap, &pe));
     }
     CloseHandle(snap);
-    return count;
+    return result;
 }
 
 void ClaudeCollector::update(ClaudeMetrics& out) {
-    out.session_count = count_claude_sessions();
+    // session_count は呼び出し側 (window.cpp) が count_claude_sessions_split で
+    // メイン/サブ一括計算したものを書き込むため、ここでは触らない
 
     if (!fetching_.load()) {
         if (fetch_thread_ && WaitForSingleObject(fetch_thread_, 0) == WAIT_OBJECT_0) {
@@ -517,23 +710,36 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
 
 void ClaudeCollector::apply_result(ClaudeMetrics& out) {
     std::lock_guard<std::mutex> lock(result_mutex_);
-    int sessions = out.session_count;  // セッション数は別途更新しているので保持
+    // セッション数・アカウントラベル・有効化フラグは window.cpp 側で管理しているため
+    // pending_（fetch 結果）で上書きされないよう退避する
+    int sessions = out.session_count;
+    wchar_t label_keep[24];
+    wcsncpy_s(label_keep, out.account_label, _TRUNCATE);
+    bool enabled_keep = out.account_enabled;
     out = pending_;
     out.session_count = sessions;
+    wcsncpy_s(out.account_label, label_keep, _TRUNCATE);
+    out.account_enabled = enabled_keep;
 }
 
-void ClaudeCollector::shutdown() {
+// 中断要求のみ。スレッドの完了は待たない
+// 複数コレクタ（main/sub）を並行停止するため、フラグ立てと join 待ちを分離してある。
+// 呼び出し側は両方の request_shutdown() を先に呼んでから wait_shutdown() を順に呼ぶことで、
+// 順次 shutdown() の 15 秒待ちが直列に積み上がるのを避ける
+void ClaudeCollector::request_shutdown() {
     notify_wnd_.store(nullptr);
 
     // fetch スレッドへ中断を要求する。
     // 同期呼び出し進行中のリクエストハンドルを別スレッドから閉じるのは WinHTTP の禁止事項のため、
     // フラグ確認とタイムアウトによる自発終了に任せる
     shutdown_.store(true);
+}
 
-    // スレッドの完了を待つ。
-    // 各 WinHTTP 呼び出しは 1500ms タイムアウトで有界、読み取りループは周回ごとに shutdown
-    // フラグを確認するため、残存時間は「ブロック中の 1 操作のタイムアウト＋α」に収まる。
-    // 15 秒はその十分な余裕。万一タイムアウトしてもハンドルへの介入はせずログのみとする
+// スレッドの完了を待つ
+// 各 WinHTTP 呼び出しは 1500ms タイムアウトで有界、読み取りループは周回ごとに shutdown
+// フラグを確認するため、残存時間は「ブロック中の 1 操作のタイムアウト＋α」に収まる。
+// 15 秒はその十分な余裕。万一タイムアウトしてもハンドルへの介入はせずログのみとする
+void ClaudeCollector::wait_shutdown() {
     if (fetch_thread_) {
         DWORD wr = WaitForSingleObject(fetch_thread_, 15000);
         if (wr != WAIT_OBJECT_0) {

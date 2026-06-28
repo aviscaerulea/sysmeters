@@ -58,6 +58,30 @@ int main() {
         log_error("%s", cfg.config_error.c_str());
     log_info("sysmeters %s started", APP_VERSION);
 
+    // 設定ファイルの試行パスと読み込み結果をログに残す。
+    // 個人設定（sysmeters.local.toml）が反映されない問い合わせ時に、
+    // どこを見に行ったかをログだけで切り分けられるようにする。
+    log_info("config base : %s (loaded=%s)",
+             cfg.base_path_used.c_str(),
+             cfg.base_path_loaded ? "true" : "false");
+    if (!cfg.local_path_used.empty())
+        log_info("config local: %s (loaded=%s)",
+                 cfg.local_path_used.c_str(),
+                 cfg.local_path_loaded ? "true" : "false");
+
+    // Claude アカウント設定の認識結果を起動時にダンプする。
+    // サブが無効化された場合、その理由は cfg.config_error として既に上で出力済み。
+    // config_dir は wide 文字列のため %ls で出力する（MSVC vsnprintf 拡張）
+    log_info("claude main: enable=%s name='%ls' nudge_enable=%s",
+             cfg.claude_main.enable ? "true" : "false",
+             cfg.claude_main.name.c_str(),
+             cfg.claude_main.nudge_enable ? "true" : "false");
+    log_info("claude sub : enable=%s name='%ls' nudge_enable=%s config_dir='%ls'",
+             cfg.claude_sub.enable ? "true" : "false",
+             cfg.claude_sub.name.c_str(),
+             cfg.claude_sub.nudge_enable ? "true" : "false",
+             cfg.claude_sub.config_dir.c_str());
+
     HINSTANCE hinst = GetModuleHandleW(nullptr);
     AppWindow window;
     if (!window.create(hinst, cfg)) {

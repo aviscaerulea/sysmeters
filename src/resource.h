@@ -22,7 +22,8 @@
 #define IDM_VIS_MEM      112
 #define IDM_VIS_DISK     113
 #define IDM_VIS_NET      114
-#define IDM_VIS_CLAUDE   115
+#define IDM_VIS_CLAUDE_MAIN 115
+#define IDM_VIS_CLAUDE_SUB  116
 // Claude API バックグラウンド完了通知
 #define WM_CLAUDE_DONE  (WM_USER + 2)
 // IP 取得バックグラウンド完了通知

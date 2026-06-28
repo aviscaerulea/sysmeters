@@ -2,7 +2,9 @@
 #include "config.hpp"
 #include <toml.hpp>
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
+#include <system_error>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -27,11 +29,16 @@ static void merge_overrides(toml::value& base, const toml::value& over) {
 AppConfig load_config(const std::string& path) {
     AppConfig cfg;
 
+    // 起動時トラブルシュート用に、試行した base パスを記録する。
+    // ファイルを開けなかった場合でも、どのパスを見に行ったかをログに残せるようにする。
+    cfg.base_path_used = path;
+
     // バイナリモードで開く
     // toml11 の istream 版がテキストモードの CRLF 変換でバッファ末尾に NUL を埋め込むバグへの回避策。
     // バイナリモードのまま toml11 に渡しても CRLF は許容される。
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) return cfg;  // ファイルなし → デフォルト値で返す
+    cfg.base_path_loaded = true;
 
     try {
         auto data = toml::parse(ifs, path);
@@ -46,8 +53,12 @@ AppConfig load_config(const std::string& path) {
                 local_path.compare(local_path.size() - ext.size(), ext.size(), ext) == 0)
                 local_path.insert(local_path.size() - ext.size(), ".local");
 
+            // 試行した local パスを起動時ログ用に保持。ファイル不在でも記録する
+            cfg.local_path_used = local_path;
+
             std::ifstream lifs(local_path, std::ios::binary);
             if (lifs.is_open()) {
+                cfg.local_path_loaded = true;
                 try {
                     auto local = toml::parse(lifs, local_path);
                     merge_overrides(data, local);
@@ -152,10 +163,44 @@ AppConfig load_config(const std::string& path) {
         cfg.log_dir = toml::find_or<std::string>(data, "log", "dir", cfg.log_dir);
 
         cfg.claude_usage_interval_sec = get_int("claude", "usage_interval_sec", cfg.claude_usage_interval_sec);
-        cfg.claude_nudge_enable = get_bool("claude", "nudge_enable", cfg.claude_nudge_enable);
         try { cfg.claude_nudge_cmd = toml::find_or<std::string>(data, "claude", "nudge_cmd", cfg.claude_nudge_cmd); }
         catch (...) {}
         cfg.show_peak_bar = get_bool("claude", "show_peak_bar", cfg.show_peak_bar);
+
+        // メインアカウント設定（[claude] セクション）
+        // メインは ~/.claude を固定使用するため config_dir は持たない。
+        // enable はロード時に true 強制（[claude] セクションで明示しなくても動く既存互換）。
+        // デフォルト name は "Claude"。旧バージョン（単一アカウント時代）のヘッダ表示と互換を取る
+        cfg.claude_main.name         = get_wstr("claude", "name",         L"Claude");
+        cfg.claude_main.config_dir.clear();
+        cfg.claude_main.nudge_enable = get_bool("claude", "nudge_enable", false);
+        cfg.claude_main.enable       = true;
+
+        // サブアカウント設定（[claude_sub] セクション）
+        // enable は TOML 明示キー。デフォルト OFF とし、ユーザの明示有効化を要求する
+        cfg.claude_sub.enable       = get_bool("claude_sub", "enable",       false);
+        cfg.claude_sub.name         = get_wstr("claude_sub", "name",         L"Sub");
+        cfg.claude_sub.config_dir   = get_wstr("claude_sub", "config_dir",   L"");
+        cfg.claude_sub.nudge_enable = get_bool("claude_sub", "nudge_enable", false);
+
+        // サブの config_dir 検証
+        // enable=true でも config_dir 空 or 不在ディレクトリなら enable=false に強制し、エラーを蓄積する。
+        // log_init より前のため log_error は使えず config_error に格納する
+        if (cfg.claude_sub.enable) {
+            if (cfg.claude_sub.config_dir.empty()) {
+                cfg.claude_sub.enable = false;
+                if (cfg.config_error.empty())
+                    cfg.config_error = "[claude_sub] enable=true だが config_dir が空のため無効化";
+            }
+            else {
+                std::error_code ec;
+                if (!std::filesystem::is_directory(std::filesystem::path(cfg.claude_sub.config_dir), ec)) {
+                    cfg.claude_sub.enable = false;
+                    if (cfg.config_error.empty())
+                        cfg.config_error = "[claude_sub] config_dir のディレクトリが見つからないため無効化";
+                }
+            }
+        }
 
         cfg.notify_peak_limit_enable = get_bool ("notify", "peak_limit_enable", cfg.notify_peak_limit_enable);
         cfg.notify_peak_limit_sound  = get_bool ("notify", "peak_limit_sound",  cfg.notify_peak_limit_sound);

@@ -45,12 +45,31 @@ TEST_CASE("Renderer::compute_preferred_height: GPU OFF は GPU + VRAM を一括 
 TEST_CASE("Renderer::compute_preferred_height: 全セクション OFF でも OS 行分は残る") {
     Renderer r;
     AllMetrics m;
-    Visibility vis_none{false, false, false, false, false, false};
+    Visibility vis_none{false, false, false, false, false, false, false};
     int h_none = r.compute_preferred_height(m, vis_none);
     CHECK(h_none > 0);
     Visibility vis_all;
     int h_full = r.compute_preferred_height(m, vis_all);
     CHECK(h_none < h_full);
+}
+
+TEST_CASE("Renderer::compute_preferred_height: Claude Sub 表示時は Main 単独表示より高い") {
+    Renderer r;
+    AllMetrics m;
+    m.claude_main.account_enabled = true;
+    m.claude_sub.account_enabled  = true;
+
+    Visibility vis_main_only;
+    vis_main_only.claude_main = true;
+    vis_main_only.claude_sub  = false;
+
+    Visibility vis_both;
+    vis_both.claude_main = true;
+    vis_both.claude_sub  = true;
+
+    int h_main = r.compute_preferred_height(m, vis_main_only);
+    int h_both = r.compute_preferred_height(m, vis_both);
+    CHECK(h_both > h_main);
 }
 
 TEST_CASE("Renderer::compute_preferred_height: GPU avail 時のほうが高い") {

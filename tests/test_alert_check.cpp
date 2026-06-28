@@ -84,16 +84,56 @@ TEST_CASE("AlertManager::check: GPU 不可なら GPU 系項目は発火しない
     CHECK((r & bit(AlertManager::TEMP_GPU)) == 0);
 }
 
-TEST_CASE("AlertManager::check: Claude expected_pct=0 のとき判定をスキップ") {
+TEST_CASE("AlertManager::check: Claude Main expected_pct=0 のとき判定をスキップ") {
     AlertManager mgr;
     AppConfig cfg;
     AllMetrics m;
     fill_cpu_history(m, 0.f);
-    m.claude.avail              = true;
-    m.claude.five_h_pct          = 99.f;
-    m.claude.five_h_expected_pct = 0.f;  // タイミング不明（リセット時刻未取得）
+    m.claude_main.account_enabled    = true;
+    m.claude_main.avail              = true;
+    m.claude_main.five_h_pct         = 99.f;
+    m.claude_main.five_h_expected_pct = 0.f;  // タイミング不明（リセット時刻未取得）
     uint32_t r = mgr.check(m, cfg, true);
-    CHECK((r & bit(AlertManager::CLAUDE_5H)) == 0);
+    CHECK((r & bit(AlertManager::CLAUDE_MAIN_5H)) == 0);
+}
+
+TEST_CASE("AlertManager::check: Claude Sub の発火は Main と独立") {
+    // Sub だけ閾値超過、Main は閾値未満。Sub のビットだけ立ち Main は立たないことを確認する。
+    AlertManager mgr;
+    AppConfig cfg;          // warn_claude_5h_pct = 20（既定）
+    AllMetrics m;
+    fill_cpu_history(m, 0.f);
+
+    m.claude_main.account_enabled    = true;
+    m.claude_main.avail              = true;
+    m.claude_main.five_h_pct         = 30.f;
+    m.claude_main.five_h_expected_pct = 25.f;  // 差 5 → 閾値未満
+
+    m.claude_sub.account_enabled    = true;
+    m.claude_sub.avail              = true;
+    m.claude_sub.five_h_pct         = 90.f;
+    m.claude_sub.five_h_expected_pct = 25.f;   // 差 65 → 閾値超過
+
+    uint32_t r = mgr.check(m, cfg, true);
+    CHECK((r & bit(AlertManager::CLAUDE_MAIN_5H)) == 0);
+    CHECK((r & bit(AlertManager::CLAUDE_SUB_5H))  != 0);
+}
+
+TEST_CASE("AlertManager::check: Claude Sub 無効時はサブ系項目を発火しない") {
+    AlertManager mgr;
+    AppConfig cfg;
+    AllMetrics m;
+    fill_cpu_history(m, 0.f);
+
+    m.claude_sub.account_enabled    = false;   // TOML サブ機能 OFF を再現
+    m.claude_sub.avail              = true;
+    m.claude_sub.five_h_pct         = 99.f;
+    m.claude_sub.five_h_expected_pct = 1.f;
+
+    uint32_t r = mgr.check(m, cfg, true);
+    CHECK((r & bit(AlertManager::CLAUDE_SUB_5H))  == 0);
+    CHECK((r & bit(AlertManager::CLAUDE_SUB_7D))  == 0);
+    CHECK((r & bit(AlertManager::CLAUDE_SUB_OVER)) == 0);
 }
 
 TEST_CASE("AlertManager::check: mute=true でも内部の発火状態は更新される") {
