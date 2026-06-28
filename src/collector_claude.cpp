@@ -471,10 +471,10 @@ void ClaudeCollector::do_fetch() {
             else {
                 // memberships を全走査して最も高位の Claude Code 対応プランを選ぶ。
                 // 背景：Team 契約者は memberships[0] が個人 Organization（tier=default_claude_ai）で、
-                //       Team 組織は memberships[1] 以降に入る（実調査の結果。例：[1] name="Carecom" tier="default_raven"
+                //       Team 組織は memberships[1] 以降に入る（実調査の結果。例： [1] name="Carecom" tier="default_raven"
                 //       capabilities=["chat","raven"]）。Anthropic Console API 用組織が紛れる場合もあり、
                 //       capabilities が "chat" を含まない組織は Claude Code では使えないため評価対象から外す。
-                // 優先順位：Max20 > Max5 > Max > Team > Pro > Free（Anthropic の usage 枠の値付けに準拠）
+                // 優先順位：Max20 > Max5 > Max > Team > Pro > Free。（Anthropic の usage 枠の値付けに準拠）
                 auto eval_org = [](const json& org) -> std::pair<int, std::string> {
                     if (!org.is_object()) return {-1, ""};
                     bool has_chat = false, has_raven = false, has_claude_max = false;
@@ -499,10 +499,14 @@ void ClaudeCollector::do_fetch() {
                     if (has_raven || tier == "default_raven") return {2, "Team"};
                     if (tier.find("pro") != std::string::npos) return {1, "Pro"};
                     if (tier == "default_claude_ai")          return {0, "Free"};
-                    return {0, tier.empty() ? std::string("?") : tier};
+                    // 既知 tier 判定をすべて通過した想定外の値を吸収する。将来追加プラン、Enterprise 等の
+                    // 特殊枠、API レスポンス形式の変化が来た時の保険。生 tier 名を露出させても利用者に意味が
+                    // 伝わらないため "unknown" に統一する。rank=0 は Free と同列だが、走査側は `>` 比較で
+                    // 上書きするため、既知プラン（Free 含む）が同時に存在すればそちらが優先される。
+                    return {0, "unknown"};
                 };
                 int best_rank = -1;
-                std::string label = "不明";
+                std::string label = "unknown";
                 for (const auto& m : ms) {
                     auto [rank, l] = eval_org(m.value("organization", json::object()));
                     if (rank > best_rank) { best_rank = rank; label = l; }
