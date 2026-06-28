@@ -31,7 +31,9 @@ public:
     void update(ClaudeMetrics& out);
 
     // 取得結果を out へ反映する（WM_CLAUDE_DONE 受信後、メインスレッドから呼ぶ）
-    void apply_result(ClaudeMetrics& out);
+    // delta_window_min は 5h 履歴の保持期間決定に使用する。（0 で履歴記録自体は行うが描画側で無効化される）
+    // 履歴は out.five_h_history に push し、(delta_window_min + 1) × 60 秒より古いサンプルを破棄する
+    void apply_result(ClaudeMetrics& out, int delta_window_min);
 
     // 2 段階終了：複数コレクタを並行停止できるよう、フラグ立てと join 待ちを分離
     // 両方のコレクタに request_shutdown() を先に呼んでから wait_shutdown() を順に呼ぶことで、
