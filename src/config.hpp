@@ -3,6 +3,20 @@
 #include <cstdint>
 #include <string>
 
+// Claude アカウント単位の設定
+//
+// メイン/サブの 2 アカウントを区別して保持する。
+// - メイン：固定で `%USERPROFILE%\.claude` を使うため config_dir は空
+// - サブ：TOML `[claude_sub] config_dir` でディレクトリを指定する
+// `enable` は TOML 上の明示的 ON/OFF キー。サブはデフォルト OFF とし、ユーザの明示有効化を要求する。
+// ロード時に config_dir 検証に失敗すると enable=false に強制される
+struct ClaudeAccountConfig {
+    std::wstring name         = L"Main";   // ヘッダ表示ラベル（[claude] name / [claude_sub] name）
+    std::wstring config_dir;               // .claude ディレクトリの絶対パス（空=メイン: ~/.claude）
+    bool         nudge_enable = false;     // このアカウントで nudge を発火させるか
+    bool         enable       = false;     // アカウント機能の有効化（メインはロード時に true 強制）
+};
+
 // アプリケーション設定（TOML から読み込む）
 struct AppConfig {
     // ウィンドウ
@@ -52,17 +66,24 @@ struct AppConfig {
     float reset_claude_5h_pct =  0.f;  // Claude 5h の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット
     float reset_claude_7d_pct =  0.f;  // Claude 7d の警告音リセット閾値（%超過）。0 = 理想ペース以下に戻ったら即リセット
 
-    // Claude Code 表示設定
+    // Claude Code 表示設定（両アカウント共通）
     int  claude_usage_interval_sec = 120;  // Usage API のポーリング間隔（秒）
-    // 5h リセット日時が過去なら claude.exe を起動して使用状況の更新を促す
-    bool        claude_nudge_enable = false;
-    // nudge 実行時のコマンドライン。最小コストで API 使用状況を更新させるため、
-    // 安全モード・最軽量モデル・最低推論努力で即終了するプロンプトをデフォルトとする。
+    // nudge 実行時のコマンドライン。
+    // 最小コストで API 使用状況を更新させるため、安全モード、最軽量モデル、最低推論努力で
+    // 即終了するプロンプトをデフォルトとする。
+    // サブ向け実行時は CLAUDE_CONFIG_DIR 環境変数に claude_sub.config_dir を一時設定して起動する。
+    // （Claude CLI に --config-dir コマンドオプションは存在せず、設定ディレクトリの上書きは
+    // 環境変数経由のみ）
     std::string claude_nudge_cmd    = "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\"";
 
     // 5h バー上に PT 平日 5:00〜10:59 を暗赤色で重ねるピーク時間帯背景表示。
     // 2026-05 に Anthropic がピーク時間帯レート制限を撤廃したためデフォルト OFF。
     bool show_peak_bar = false;
+
+    // メイン/サブそれぞれのアカウント設定
+    // メインはロード時に enable=true 強制、サブはデフォルト OFF
+    ClaudeAccountConfig claude_main;
+    ClaudeAccountConfig claude_sub;
 
     // Claude Code 制限強化時間 Toast 通知（ローカル平日 21:00 固定）
     // 2026-05 にピーク時間帯レート制限が撤廃されたためデフォルト OFF。
@@ -88,6 +109,16 @@ struct AppConfig {
     // load_config は log_init より前に呼ばれるためログ出力できない。
     // log_init の直後にこのフィールドを確認してログ出力する。
     std::string config_error;
+
+    // 設定ファイルの試行パスと読み込み結果（UTF-8 のフルパス）
+    // 起動時のトラブルシュート用。load_config は log_init より前に呼ばれるため、
+    // ここに記録しておき、log_init 後に main 側で log_info 出力する。
+    // base_path_used は load_config 引数のフルパス、loaded は ifstream::is_open() 成功フラグ。
+    // local_path_used は base のファイル名拡張子直前に ".local" を挿入したパス。
+    std::string base_path_used;
+    bool        base_path_loaded  = false;
+    std::string local_path_used;
+    bool        local_path_loaded = false;
 };
 
 // TOML ファイルからの設定読み込み

@@ -28,8 +28,9 @@ public:
     void run();
     void destroy();
 
-    // WM_CLAUDE_DONE 受信時に呼ぶ
-    void on_claude_done();
+    // WM_CLAUDE_DONE 受信時に呼ぶ。
+    // account_index は wParam に載せたアカウント識別子（0=Main, 1=Sub）
+    void on_claude_done(int account_index);
 
 private:
     // レジストリ未設定時のデフォルト値
@@ -71,7 +72,10 @@ private:
     MemCollector*    col_mem_  = nullptr;
     DiskCollector*   col_disk_   = nullptr;
     NetCollector*    col_net_    = nullptr;
-    ClaudeCollector* col_claude_ = nullptr;
+    // Claude コレクタはアカウント別に独立インスタンスを持つ。
+    // サブは [claude_sub] enable=true かつ config_dir 検証が成功したときのみ生成される
+    ClaudeCollector* col_claude_main_ = nullptr;
+    ClaudeCollector* col_claude_sub_  = nullptr;
     IpCollector*     col_ip_     = nullptr;
     AlertManager*    alert_       = nullptr;
 

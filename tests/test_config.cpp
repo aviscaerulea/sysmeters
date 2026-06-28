@@ -115,3 +115,54 @@ hidden_range_pct  = 80
     CHECK(cfg.priority_visible_range_pct == 49);
     CHECK(cfg.priority_hidden_range_pct  == 49);
 }
+
+TEST_CASE("load_config: [claude_sub] 未指定時はメインのみ有効、サブは無効") {
+    auto path = write_temp_toml("");
+    AppConfig cfg = load_config(path);
+    CHECK(cfg.claude_main.enable == true);
+    CHECK(cfg.claude_sub.enable  == false);
+}
+
+TEST_CASE("load_config: [claude_sub] enable=false 明示時もサブ無効") {
+    auto path = write_temp_toml(R"(
+[claude_sub]
+enable     = false
+config_dir = "C:\\Windows"
+)");
+    AppConfig cfg = load_config(path);
+    CHECK(cfg.claude_sub.enable == false);
+}
+
+TEST_CASE("load_config: [claude_sub] enable=true でも config_dir 空ならサブ無効") {
+    auto path = write_temp_toml(R"(
+[claude_sub]
+enable = true
+)");
+    AppConfig cfg = load_config(path);
+    CHECK(cfg.claude_sub.enable == false);
+}
+
+TEST_CASE("load_config: [claude_sub] enable=true でも不在パスならサブ無効") {
+    auto path = write_temp_toml(R"(
+[claude_sub]
+enable     = true
+config_dir = "Z:\\__no_such_directory_for_sysmeters_tests__"
+)");
+    AppConfig cfg = load_config(path);
+    CHECK(cfg.claude_sub.enable == false);
+}
+
+TEST_CASE("load_config: [claude_sub] enable=true かつ実在ディレクトリならサブ有効") {
+    // OS の temp ディレクトリは必ず実在する
+    auto temp = std::filesystem::temp_directory_path().string();
+    // TOML 文字列リテラル用にバックスラッシュをエスケープする
+    std::string escaped;
+    for (char c : temp) {
+        if (c == '\\') escaped += "\\\\";
+        else           escaped += c;
+    }
+    auto toml = std::string("[claude_sub]\nenable = true\nconfig_dir = \"") + escaped + "\"\n";
+    auto path = write_temp_toml(toml);
+    AppConfig cfg = load_config(path);
+    CHECK(cfg.claude_sub.enable == true);
+}

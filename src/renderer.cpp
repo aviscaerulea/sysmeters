@@ -940,7 +940,12 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     static constexpr float CLAUDE_LBL_W = 90.f;  // "Claude" の描画幅
     set_brush_color(brush_text_, cfg.col_text);
     D2D1_RECT_F hlr = D2D1::RectF(x, y, x + CLAUDE_LBL_W, y + LINE_H);
-    render_target_->DrawText(L"Claude", 6, font_normal_, hlr, brush_text_);
+    // ヘッダ表示名は TOML `name` から来る account_label。長すぎる名前で枠を越えないよう 6 wchar で切り詰める
+    wchar_t hdr_buf[8] = {};
+    _snwprintf_s(hdr_buf, _TRUNCATE, L"%.6s",
+                 m.account_label[0] != L'\0' ? m.account_label : L"Claude");
+    render_target_->DrawText(hdr_buf, static_cast<UINT32>(wcsnlen_s(hdr_buf, _countof(hdr_buf))),
+                             font_normal_, hlr, brush_text_);
 
     D2D1_RECT_F hsr = D2D1::RectF(x + CLAUDE_LBL_W, y + 4.f, x + ww, y + LINE_H);
 
@@ -1161,7 +1166,15 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
     if (vis.mem)    { y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP; }
     if (vis.disk)   { y = draw_disk(m.disk_c, m.disk_d, cfg, y); y += SECTION_GAP; }
     if (vis.net)    { y = draw_net(m.net, cfg, y);        y += SECTION_GAP; }
-    if (vis.claude) { y = draw_claude(m.claude, cfg, y); }
+    // Claude メイン/サブの 2 アカウント分。サブはアカウント有効化時のみ描画する。
+    // サブ未構成時は Visibility がオンでも account_enabled で抑止して領域を消費しない
+    if (vis.claude_main && m.claude_main.account_enabled) {
+        y = draw_claude(m.claude_main, cfg, y);
+        if (vis.claude_sub && m.claude_sub.account_enabled) y += SECTION_GAP;
+    }
+    if (vis.claude_sub && m.claude_sub.account_enabled) {
+        y = draw_claude(m.claude_sub, cfg, y);
+    }
 
     preferred_h_ = static_cast<int>(y + PAD);
 
@@ -1180,6 +1193,13 @@ int Renderer::compute_preferred_height(const AllMetrics& m, const Visibility& vi
     if (vis.mem)    { y += section_h_mem();                    y += SECTION_GAP; }
     if (vis.disk)   { y += section_h_disk();                   y += SECTION_GAP; }
     if (vis.net)    { y += section_h_net();                    y += SECTION_GAP; }
-    if (vis.claude) { y += section_h_claude(); }
+    // Claude メイン/サブ：paint() の加算式に厳密一致させる
+    if (vis.claude_main && m.claude_main.account_enabled) {
+        y += section_h_claude();
+        if (vis.claude_sub && m.claude_sub.account_enabled) y += SECTION_GAP;
+    }
+    if (vis.claude_sub && m.claude_sub.account_enabled) {
+        y += section_h_claude();
+    }
     return static_cast<int>(y + PAD);
 }

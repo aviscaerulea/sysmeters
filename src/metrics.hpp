@@ -87,6 +87,7 @@ struct NetMetrics {
 };
 
 // Claude Code：レートリミット + セッション数
+// アカウント別（メイン/サブ）にインスタンスを持つ。account_label は描画ヘッダの表示名
 struct ClaudeMetrics {
     float five_h_pct    = 0.f;
     float seven_d_pct   = 0.f;
@@ -102,6 +103,8 @@ struct ClaudeMetrics {
     bool  fetch_error   = false;      // Usage API 取得失敗フラグ（ERR 表示用）
     float extra_used_dollars = 0.f;   // 超過使用額（ドル換算：used_credits / 100）
     bool  extra_enabled      = false; // 超過料金が有効か（is_enabled）
+    wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
+    bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
 };
 
 // 全メトリクスを束ねる集約構造体
@@ -114,5 +117,6 @@ struct AllMetrics {
     DiskMetrics      disk_c;
     DiskMetrics      disk_d;
     NetMetrics       net;
-    ClaudeMetrics claude;
+    ClaudeMetrics claude_main;
+    ClaudeMetrics claude_sub;
 };

@@ -13,12 +13,13 @@
 // gpu フラグは GPU + VRAM 両方を、net フラグは NIC グラフ + IP 表示を一括制御する。
 // OS 行は常時表示でフラグの対象外。
 struct Visibility {
-    bool cpu    = true;
-    bool gpu    = true;
-    bool mem    = true;
-    bool disk   = true;
-    bool net    = true;
-    bool claude = true;
+    bool cpu         = true;
+    bool gpu         = true;
+    bool mem         = true;
+    bool disk        = true;
+    bool net         = true;
+    bool claude_main = true;
+    bool claude_sub  = true;
 };
 
 // Direct2D による描画エンジン

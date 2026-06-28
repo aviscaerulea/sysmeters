@@ -239,14 +239,20 @@ peak_limit_title = "Claude Code"
 peak_limit_body = "平日 21:00-03:00 ピーク制限時間です"
 
 # ==================================================
-# Claude Code 表示設定
+# Claude Code 表示設定（メインアカウント）
 # ==================================================
 [claude]
 # Usage API ポーリング間隔（秒）
 # Anthropic Usage API の取得間隔。短くすると使用率の反映が速くなるが、
 # 極端に短い値は API レート制限（HTTP 429）を招く可能性がある。
+# [claude_sub] と共通の値が両アカウントに適用される。
 # 有効範囲: 30〜3600、デフォルト: 120
 # usage_interval_sec = 120
+
+# 表示ラベル
+# ウィンドウのメインアカウント側ヘッダに表示される名称。6 文字超は描画時に切り詰める。
+# デフォルト: "Claude"（旧バージョンとの互換）
+# name = "Claude"
 
 # 5h リセット後の使用状況更新促進
 # 5h ウィンドウのリセット日時が過去になったとき、外部プロセスとして claude.exe を実行し
@@ -255,7 +261,10 @@ peak_limit_body = "平日 21:00-03:00 ピーク制限時間です"
 # nudge_enable = false
 
 # 更新促進用の claude.exe コマンドライン
-# nudge_enable = true のとき実行されるコマンドライン。
+# nudge_enable = true のとき実行されるコマンドライン。両アカウント共通の文字列を指定する。
+# サブアカウントで実行される際は、CLAUDE_CONFIG_DIR 環境変数に claude_sub.config_dir が
+# 一時設定された状態で起動される。Claude CLI に --config-dir コマンドオプションは存在せず、
+# 設定ディレクトリの上書きは環境変数経由のみ。
 # デフォルト: "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\""
 # nudge_cmd = "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\""
 
@@ -263,8 +272,37 @@ peak_limit_body = "平日 21:00-03:00 ピーク制限時間です"
 # 5h バー上に PT 平日 5:00-10:59 の区間を暗赤色で重ねる表示。
 # 2026-05 に Anthropic が当該レート制限を撤廃したためデフォルト OFF。
 # 将来制限が再導入された場合は true に変更する。
+# 両アカウント共通の設定。
 # デフォルト: false
 show_peak_bar = false
+
+# ==================================================
+# Claude Code サブアカウント設定
+# ==================================================
+# サブアカウントは別の .claude/ 設定ディレクトリを使う Claude Code の追加プロファイル向け。
+# 動作条件は次の 2 つ。enable = true、かつ config_dir が実在するディレクトリ。
+# 警告音、Toast 通知はメインと独立に発火する。（閾値は [threshold] 内 claude_* の共通設定）
+# セクションヘッダは常にアンコメント。中のキーを個別に設定する。
+[claude_sub]
+# サブ機能の有効/無効（必須）
+# 既定 false。明示的に true にしない限りサブアカウントは動作しない。
+# config_dir が空または不在パスの場合は自動で false に戻る。
+# enable = false
+
+# サブアカウントの .claude/ ディレクトリ絶対パス（enable=true 時に必須）
+# Anthropic の OAuth 認証情報 .credentials.json を含むディレクトリを指定する。
+# サブ用 claude.exe 起動時は CLAUDE_CONFIG_DIR 環境変数にこのパスが一時設定される。
+# config_dir = "C:\\Users\\xxx\\.claude-sub"
+
+# 表示ラベル
+# ウィンドウのサブアカウント側ヘッダに表示される名称。6 文字超は描画時に切り詰める。
+# デフォルト: "Sub"
+# name = "Sub"
+
+# サブ側の nudge 有効化
+# 動作仕様はメインの nudge_enable と同じ。nudge_cmd は [claude] と共通。
+# デフォルト: false
+# nudge_enable = false
 
 # ==================================================
 # 更新チェック設定

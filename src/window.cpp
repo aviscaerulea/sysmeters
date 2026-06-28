@@ -91,7 +91,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_mem_  = new MemCollector();
     col_disk_ = new DiskCollector();
     col_net_  = new NetCollector();
-    col_claude_ = new ClaudeCollector();
+    col_claude_main_ = new ClaudeCollector();
+    if (cfg_->claude_sub.enable) col_claude_sub_ = new ClaudeCollector();
     col_ip_     = new IpCollector();
 
     metrics_->disk_c.drive = 'C';
@@ -149,8 +150,25 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_mem_->init();
     col_disk_->init('C', 'D');
     col_net_->init();
-    col_claude_->init(hwnd_, cfg_->claude_usage_interval_sec,
-                      cfg_->claude_nudge_enable, cfg_->claude_nudge_cmd);
+    // Claude メイン：account_index=0、config_dir 空（~/.claude 既定）
+    col_claude_main_->init(hwnd_, 0, L"", "",
+                           cfg_->claude_usage_interval_sec,
+                           cfg_->claude_main.nudge_enable, cfg_->claude_nudge_cmd);
+    // メインの account_label を反映（[claude] name または "Main"）
+    wcsncpy_s(metrics_->claude_main.account_label, cfg_->claude_main.name.c_str(), _TRUNCATE);
+    metrics_->claude_main.account_enabled = true;
+
+    // Claude サブ：enable=true 時のみ。
+    // nudge_cmd は両アカウント共通で渡し、サブの config_dir はコレクタ側で
+    // CLAUDE_CONFIG_DIR 環境変数として子プロセスにのみ設定する。
+    // （Claude CLI に --config-dir オプションは存在せず、設定ディレクトリの上書きは環境変数経由のみ）
+    if (col_claude_sub_) {
+        col_claude_sub_->init(hwnd_, 1, cfg_->claude_sub.config_dir, "-sub",
+                              cfg_->claude_usage_interval_sec,
+                              cfg_->claude_sub.nudge_enable, cfg_->claude_nudge_cmd);
+        wcsncpy_s(metrics_->claude_sub.account_label, cfg_->claude_sub.name.c_str(), _TRUNCATE);
+        metrics_->claude_sub.account_enabled = true;
+    }
     col_ip_->init(hwnd_);
 
     // 警告音マネージャ初期化
@@ -207,7 +225,15 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_disk_->update_space(metrics_->disk_c, metrics_->disk_d);
     col_disk_->update_smart(metrics_->disk_c, metrics_->disk_d);
     col_net_->update(metrics_->net);
-    col_claude_->update(metrics_->claude);
+    // セッション数を 1 回でメイン/サブに分けて取得し、両 metrics に書く
+    {
+        const std::wstring& sub_dir = col_claude_sub_ ? cfg_->claude_sub.config_dir : std::wstring();
+        ClaudeSessionCount sc = count_claude_sessions_split(sub_dir);
+        metrics_->claude_main.session_count = sc.main_count;
+        metrics_->claude_sub.session_count  = sc.sub_count;
+    }
+    col_claude_main_->update(metrics_->claude_main);
+    if (col_claude_sub_) col_claude_sub_->update(metrics_->claude_sub);
     col_ip_->update();
     update_window_size();
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -303,9 +329,19 @@ void AppWindow::apply_window_height(int target_client_h) {
     }
 }
 
-void AppWindow::on_claude_done() {
-    if (!col_claude_) return;  // WM_DESTROY 後に遅延到着した場合の二重防御
-    col_claude_->apply_result(metrics_->claude);
+void AppWindow::on_claude_done(int account_index) {
+    // WM_DESTROY 後に遅延到着した場合の二重防御
+    if (account_index == 0) {
+        if (!col_claude_main_) return;
+        col_claude_main_->apply_result(metrics_->claude_main);
+    }
+    else if (account_index == 1) {
+        if (!col_claude_sub_) return;
+        col_claude_sub_->apply_result(metrics_->claude_sub);
+    }
+    else {
+        return;
+    }
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -509,7 +545,17 @@ void AppWindow::show_context_menu() {
     AppendMenuW(view_menu, MF_STRING | (vis_.mem    ? MF_CHECKED : 0), IDM_VIS_MEM,    L"Memory");
     AppendMenuW(view_menu, MF_STRING | (vis_.disk   ? MF_CHECKED : 0), IDM_VIS_DISK,   L"Disk");
     AppendMenuW(view_menu, MF_STRING | (vis_.net    ? MF_CHECKED : 0), IDM_VIS_NET,    L"Network");
-    AppendMenuW(view_menu, MF_STRING | (vis_.claude ? MF_CHECKED : 0), IDM_VIS_CLAUDE, L"Claude");
+    // Claude メイン/サブの表示トグル。サブはアカウント未構成時 MF_GRAYED で設定誘導する
+    {
+        wchar_t main_lbl[64], sub_lbl[64];
+        _snwprintf_s(main_lbl, _TRUNCATE, L"Claude (%s)", cfg_->claude_main.name.c_str());
+        _snwprintf_s(sub_lbl,  _TRUNCATE, L"Claude (%s)", cfg_->claude_sub.name.c_str());
+        AppendMenuW(view_menu, MF_STRING | (vis_.claude_main ? MF_CHECKED : 0),
+                    IDM_VIS_CLAUDE_MAIN, main_lbl);
+        UINT sub_flags = MF_STRING | (vis_.claude_sub ? MF_CHECKED : 0);
+        if (!cfg_->claude_sub.enable) sub_flags |= MF_GRAYED;
+        AppendMenuW(view_menu, sub_flags, IDM_VIS_CLAUDE_SUB, sub_lbl);
+    }
     AppendMenuW(menu, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(view_menu), L"表示項目");
 
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -565,7 +611,10 @@ static constexpr LPCWSTR REG_VIS_GPU     = L"Visible_GPU";
 static constexpr LPCWSTR REG_VIS_MEM     = L"Visible_Memory";
 static constexpr LPCWSTR REG_VIS_DISK    = L"Visible_Disk";
 static constexpr LPCWSTR REG_VIS_NET     = L"Visible_Network";
-static constexpr LPCWSTR REG_VIS_CLAUDE  = L"Visible_Claude";
+// 旧仕様（1 アカウント時代）の値名。マイグレーションのみで参照する
+static constexpr LPCWSTR REG_VIS_CLAUDE_LEGACY = L"Visible_Claude";
+static constexpr LPCWSTR REG_VIS_CLAUDE_MAIN   = L"Visible_Claude_Main";
+static constexpr LPCWSTR REG_VIS_CLAUDE_SUB    = L"Visible_Claude_Sub";
 // 更新通知済みバージョンの値名（REG_SZ）。同一版の Toast 通知を 1 回に抑えるために保持する
 static constexpr LPCWSTR REG_NOTIFIED_VERSION = L"NotifiedUpdateVersion";
 
@@ -680,7 +729,28 @@ void AppWindow::load_visibility() {
     vis_.mem    = load_reg_bool(REG_VIS_MEM,    true);
     vis_.disk   = load_reg_bool(REG_VIS_DISK,   true);
     vis_.net    = load_reg_bool(REG_VIS_NET,    true);
-    vis_.claude = load_reg_bool(REG_VIS_CLAUDE, true);
+
+    // 旧 "Visible_Claude" 値（v1.x の単一アカウント時代）が残っていれば、
+    // その値を新 Visible_Claude_Main に引き継いでから削除する。1 回限りのマイグレーション
+    // Main への書き込みが失敗した状態で Legacy を削除すると設定が消失するため、
+    // Set が成功したときに限り Legacy を削除する
+    {
+        HKEY key;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ | KEY_WRITE, &key) == ERROR_SUCCESS) {
+            DWORD dv = 0, sz = sizeof(dv), tp = 0;
+            if (RegQueryValueExW(key, REG_VIS_CLAUDE_LEGACY, nullptr, &tp,
+                                 reinterpret_cast<BYTE*>(&dv), &sz) == ERROR_SUCCESS) {
+                LONG set_ret = RegSetValueExW(key, REG_VIS_CLAUDE_MAIN, 0, REG_DWORD,
+                                              reinterpret_cast<const BYTE*>(&dv), sizeof(dv));
+                if (set_ret == ERROR_SUCCESS) {
+                    RegDeleteValueW(key, REG_VIS_CLAUDE_LEGACY);
+                }
+            }
+            RegCloseKey(key);
+        }
+    }
+    vis_.claude_main = load_reg_bool(REG_VIS_CLAUDE_MAIN, true);
+    vis_.claude_sub  = load_reg_bool(REG_VIS_CLAUDE_SUB,  true);
 }
 
 void AppWindow::save_visibility() {
@@ -689,7 +759,8 @@ void AppWindow::save_visibility() {
     save_reg_bool(REG_VIS_MEM,    vis_.mem);
     save_reg_bool(REG_VIS_DISK,   vis_.disk);
     save_reg_bool(REG_VIS_NET,    vis_.net);
-    save_reg_bool(REG_VIS_CLAUDE, vis_.claude);
+    save_reg_bool(REG_VIS_CLAUDE_MAIN, vis_.claude_main);
+    save_reg_bool(REG_VIS_CLAUDE_SUB,  vis_.claude_sub);
 }
 
 // Windows スタートアップ用レジストリ（HKCU\Software\Microsoft\Windows\CurrentVersion\Run キー配下の sysmeters 値）
@@ -847,7 +918,13 @@ void AppWindow::destroy() {
     destroy_obj(col_gpu_);
     destroy_obj(col_disk_);
     destroy_obj(col_net_);
-    destroy_obj(col_claude_);
+    // Claude コレクタは 2 本を並行停止する。
+    // 順次 shutdown() を呼ぶと wait の 15 秒 * 2 が直列化するため、
+    // 先に両方の request_shutdown を立ててから個別 destroy_obj に進む
+    if (col_claude_main_) col_claude_main_->request_shutdown();
+    if (col_claude_sub_)  col_claude_sub_->request_shutdown();
+    destroy_obj(col_claude_main_);
+    destroy_obj(col_claude_sub_);
     destroy_obj(col_ip_);
     destroy_obj(col_mem_);
     destroy_obj(renderer_);
@@ -888,7 +965,14 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         else if (wp == TIMER_CLAUDE) {
             // Claude + OS 更新（60 秒）：5h/7d レートリミット + アップタイム
-            col_claude_->update(metrics_->claude);
+            {
+                const std::wstring& sub_dir = col_claude_sub_ ? cfg_->claude_sub.config_dir : std::wstring();
+                ClaudeSessionCount sc = count_claude_sessions_split(sub_dir);
+                metrics_->claude_main.session_count = sc.main_count;
+                metrics_->claude_sub.session_count  = sc.sub_count;
+            }
+            col_claude_main_->update(metrics_->claude_main);
+            if (col_claude_sub_) col_claude_sub_->update(metrics_->claude_sub);
             metrics_->os.uptime_ms = GetTickCount64();
         }
         else if (wp == TIMER_DISK_SPACE) {
@@ -972,14 +1056,16 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_VIS_MEM:
         case IDM_VIS_DISK:
         case IDM_VIS_NET:
-        case IDM_VIS_CLAUDE: {
+        case IDM_VIS_CLAUDE_MAIN:
+        case IDM_VIS_CLAUDE_SUB: {
             switch (LOWORD(wp)) {
-            case IDM_VIS_CPU:    vis_.cpu    = !vis_.cpu;    break;
-            case IDM_VIS_GPU:    vis_.gpu    = !vis_.gpu;    break;
-            case IDM_VIS_MEM:    vis_.mem    = !vis_.mem;    break;
-            case IDM_VIS_DISK:   vis_.disk   = !vis_.disk;   break;
-            case IDM_VIS_NET:    vis_.net    = !vis_.net;    break;
-            case IDM_VIS_CLAUDE: vis_.claude = !vis_.claude; break;
+            case IDM_VIS_CPU:         vis_.cpu         = !vis_.cpu;         break;
+            case IDM_VIS_GPU:         vis_.gpu         = !vis_.gpu;         break;
+            case IDM_VIS_MEM:         vis_.mem         = !vis_.mem;         break;
+            case IDM_VIS_DISK:        vis_.disk        = !vis_.disk;        break;
+            case IDM_VIS_NET:         vis_.net         = !vis_.net;         break;
+            case IDM_VIS_CLAUDE_MAIN: vis_.claude_main = !vis_.claude_main; break;
+            case IDM_VIS_CLAUDE_SUB:  vis_.claude_sub  = !vis_.claude_sub;  break;
             }
             save_visibility();
 
@@ -1005,7 +1091,8 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_CLAUDE_DONE:
-        on_claude_done();
+        // wParam にアカウント識別子（0=Main, 1=Sub）が載っている
+        on_claude_done(static_cast<int>(wp));
         return 0;
 
     case WM_IP_DONE:

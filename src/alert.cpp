@@ -360,9 +360,12 @@ const wchar_t* AlertManager::label(Id id) {
     case TEMP_NVME_D: return L"NVMe D: 温度";
     case DISK_GBH:   return L"ディスク書き込み量";
     case UPTIME:     return L"OS 稼働時間";
-    case CLAUDE_5H:  return L"Claude 5h レートリミット";
-    case CLAUDE_7D:  return L"Claude 7d レートリミット";
-    case CLAUDE_OVER: return L"Claude 超過料金";
+    case CLAUDE_MAIN_5H:   return L"Claude Main 5h レートリミット";
+    case CLAUDE_MAIN_7D:   return L"Claude Main 7d レートリミット";
+    case CLAUDE_MAIN_OVER: return L"Claude Main 超過料金";
+    case CLAUDE_SUB_5H:    return L"Claude Sub 5h レートリミット";
+    case CLAUDE_SUB_7D:    return L"Claude Sub 7d レートリミット";
+    case CLAUDE_SUB_OVER:  return L"Claude Sub 超過料金";
     default:         return L"不明";
     }
 }
@@ -414,17 +417,29 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
         float uptime_days = static_cast<float>(m.os.uptime_ms) / (1000.f * 86400.f);
         check_once(UPTIME, uptime_days, static_cast<float>(cfg.warn_uptime_days));
     }
-    if (m.claude.avail) {
+    // Claude Main：閾値は両アカウント共通（cfg.warn_claude_*）
+    if (m.claude_main.account_enabled && m.claude_main.avail) {
         // expected_pct が 0 のとき（タイミング不明）は超過率を計算できないため判定しない
-        if (m.claude.five_h_expected_pct > 0.f)
-            check_item(CLAUDE_5H, m.claude.five_h_pct - m.claude.five_h_expected_pct,
+        if (m.claude_main.five_h_expected_pct > 0.f)
+            check_item(CLAUDE_MAIN_5H, m.claude_main.five_h_pct - m.claude_main.five_h_expected_pct,
                        cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
-        if (m.claude.seven_d_expected_pct > 0.f)
-            check_item(CLAUDE_7D, m.claude.seven_d_pct - m.claude.seven_d_expected_pct,
+        if (m.claude_main.seven_d_expected_pct > 0.f)
+            check_item(CLAUDE_MAIN_7D, m.claude_main.seven_d_pct - m.claude_main.seven_d_expected_pct,
                        cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
-        // extra_enabled が無効になっても fired_[CLAUDE_OVER] は保持される（check_once はリセットなし）
-        if (m.claude.extra_enabled)
-            check_once(CLAUDE_OVER, m.claude.extra_used_dollars, cfg.warn_claude_over);
+        // extra_enabled が無効になっても fired_[CLAUDE_MAIN_OVER] は保持される（check_once はリセットなし）
+        if (m.claude_main.extra_enabled)
+            check_once(CLAUDE_MAIN_OVER, m.claude_main.extra_used_dollars, cfg.warn_claude_over);
+    }
+    // Claude Sub：account_enabled で TOML サブ機能 ON 時のみ判定
+    if (m.claude_sub.account_enabled && m.claude_sub.avail) {
+        if (m.claude_sub.five_h_expected_pct > 0.f)
+            check_item(CLAUDE_SUB_5H, m.claude_sub.five_h_pct - m.claude_sub.five_h_expected_pct,
+                       cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
+        if (m.claude_sub.seven_d_expected_pct > 0.f)
+            check_item(CLAUDE_SUB_7D, m.claude_sub.seven_d_pct - m.claude_sub.seven_d_expected_pct,
+                       cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
+        if (m.claude_sub.extra_enabled)
+            check_once(CLAUDE_SUB_OVER, m.claude_sub.extra_used_dollars, cfg.warn_claude_over);
     }
 
     if (fired_mask && !mute && cfg.alert_sound && wav_avail_) play();
