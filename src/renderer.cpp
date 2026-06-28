@@ -371,10 +371,25 @@ float Renderer::draw_os(const OsMetrics& m, const AppConfig& cfg, float y) {
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
     // OS ラベル（左端、アップタイム幅を除いた範囲、alpha 0.6）
+    // "Windows 11 Pro (24H2 26100)" 形式の "(" 以降は font_tiny_ サイズ（16pt）で控えめに描く
+    // ベースラインは IDWriteTextLayout が同一行内で自動整合させるため Y オフセット調整は不要
     if (m.os_label[0]) {
         set_brush_color(brush_text_, cfg.col_text, 0.6f);
-        render_target_->DrawText(m.os_label, static_cast<UINT32>(wcslen(m.os_label)), font_small_,
-            D2D1::RectF(x, y, x + ww - UPTIME_W, y + SECTION_H), brush_text_);
+        UINT32 len = static_cast<UINT32>(wcslen(m.os_label));
+        IDWriteTextLayout* layout = nullptr;
+        if (SUCCEEDED(dwrite_factory_->CreateTextLayout(
+                m.os_label, len, font_small_,
+                x + ww - UPTIME_W - x, SECTION_H, &layout))) {
+            const wchar_t* paren = wcschr(m.os_label, L'(');
+            if (paren) {
+                DWRITE_TEXT_RANGE r;
+                r.startPosition = static_cast<UINT32>(paren - m.os_label);
+                r.length        = len - r.startPosition;
+                layout->SetFontSize(16.f, r);
+            }
+            render_target_->DrawTextLayout(D2D1::Point2F(x, y), layout, brush_text_);
+            layout->Release();
+        }
     }
 
     // アップタイム（右寄せ、alpha 0.6）
@@ -679,20 +694,30 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
     float sw = (ww - DISK_GAP) / 3.f;  // 右：Space 列幅（1/3）
     float gw = ww - DISK_GAP - sw;     // 左：I/O グラフ幅（2/3）
 
-    set_brush_color(brush_text_, cfg.col_text);
-    render_target_->DrawText(L"Disk", 4, font_normal_,
-        D2D1::RectF(x, y, x + ww, y + LINE_H), brush_text_);
-    y += LINE_H;
-
     // ドライブ 1 行分（I/O 面グラフ＋Space 横バー＋S.M.A.R.T. を横並びで描画）
+    // 「Disk」セクション見出し行は廃止し、各ドライブの IO 行先頭に "Disk[X]" として埋め込むことで縦スペースを 1 行節約
     // prev: 前のドライブ（C: は nullptr）。同一物理ドライブなら SMART 行を省略する
     auto draw_drive = [&](const DiskMetrics& dm, const DiskMetrics* prev) {
         // --- 左 2/3：I/O ---
-        wchar_t buf[64];
-        swprintf_s(buf, L"%c: R %.1f  W %.1f MB/s", dm.drive, dm.read_mbps, dm.write_mbps);
+        // プレフィックス "Disk[X]" は他セクション見出し（CPU/RAM/GPU 等）と同じ font_normal_（22pt）で描画
+        // IO 数値部 "R 0.0  W 0.0 MB/s" は font_small_（18pt）で描画し、プレフィックス幅 DISK_PREFIX_W 分右にオフセット
+        // プレフィックス "Disk:X" は他セクション見出し（CPU/RAM/GPU 等）と同じ font_normal_（22pt）で描画
+        // Network セクションの D の書き出し位置（NET_LBL_W = 105.f）と揃える
+        static constexpr float DISK_PREFIX_W = 105.f;  // "Disk:X" 描画幅 + 右余白（IO 数値部の開始位置）
+        wchar_t pbuf[16];
+        swprintf_s(pbuf, L"Disk:%c", dm.drive);
         set_brush_color(brush_text_, cfg.col_text);
-        D2D1_RECT_F tr = D2D1::RectF(x, y, x + gw, y + LINE_H);
-        render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_small_, tr, brush_text_);
+        D2D1_RECT_F pr = D2D1::RectF(x, y, x + DISK_PREFIX_W, y + LINE_H);
+        render_target_->DrawText(pbuf, static_cast<UINT32>(wcslen(pbuf)), font_normal_, pr, brush_text_);
+
+        // Used:・パーセンテージ用の Y オフセット（font_normal_ プレフィックスとベースラインを揃える）
+        static constexpr float DISK_TEXT_DROP    = 3.f;
+        // R/W 数値部用の Y オフセット（視覚調整で Used: 群より 1px 下げる）
+        static constexpr float DISK_IO_TEXT_DROP = DISK_TEXT_DROP + 1.f;
+        wchar_t buf[64];
+        swprintf_s(buf, L"R %.1f  W %.1f MB/s", dm.read_mbps, dm.write_mbps);
+        D2D1_RECT_F tr = D2D1::RectF(x + DISK_PREFIX_W, y + DISK_IO_TEXT_DROP, x + gw, y + LINE_H + DISK_IO_TEXT_DROP);
+        render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_tiny_, tr, brush_text_);
 
         float max_val = max(10.f, max(buf_max(dm.read_history), buf_max(dm.write_history)));
         D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + gw, y + LINE_H + GRAPH_H);
@@ -716,10 +741,11 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
 
         // テキスト行（"Used:" は font_tiny_・補助情報トーン・右寄せ、パーセンテージは font_small_・条件付き色・右寄せ）
         // "Used:" は Sessions: 行とフォントサイズ・色を揃え、"100.0%" 分のスペースを空けて右に詰める
-        // font_small_ (18pt) と font_tiny_ (16pt) のベースライン差を相殺するためラベル矩形を 2px 下げる
+        // IO 行と同様に、font_normal_ プレフィックス（Disk[X]）とベースラインを揃えるため DISK_TEXT_DROP 分下げる
+        // さらに font_small_ (18pt) と font_tiny_ (16pt) のベースライン差を相殺するためラベル矩形を 2px 追加で下げる
         static constexpr float PCT_RESERVE_W = 62.f;  // "100.0%" が font_small_ で占める想定幅
-        D2D1_RECT_F str = D2D1::RectF(sx, y, sx + sw, y + LINE_H);
-        D2D1_RECT_F lbr = D2D1::RectF(sx, y + 2.f, sx + sw - PCT_RESERVE_W, y + LINE_H + 2.f);
+        D2D1_RECT_F str = D2D1::RectF(sx, y + DISK_TEXT_DROP, sx + sw, y + LINE_H + DISK_TEXT_DROP);
+        D2D1_RECT_F lbr = D2D1::RectF(sx, y + DISK_TEXT_DROP + 2.f, sx + sw - PCT_RESERVE_W, y + LINE_H + DISK_TEXT_DROP + 2.f);
         set_brush_color(brush_text_, cfg.col_text, 0.6f);
         font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         render_target_->DrawText(L"Used:", 5, font_tiny_, lbr, brush_text_);
@@ -782,19 +808,13 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
-    // "Network" ラベルと グローバル IP を同一行に並べる
-    static constexpr float NET_LBL_W = 140.f;  // Consolas 22pt "Network" ≈ 110px + IP との余白
+    // "Network" タイトル + DL/UL + グローバル IP を同一行に並べる
+    // 旧 ▼/▲ 専用行は廃止し、Disk セクションと同じくタイトル行に数値を埋め込む
+    static constexpr float NET_LBL_W     = 105.f;  // "Network" 描画幅 + 右余白（D の開始位置）
+    static constexpr float NET_TEXT_DROP = 3.f;    // font_normal_ プレフィックスとベースラインを合わせるため小フォントを下げる
     set_brush_color(brush_text_, cfg.col_text);
     render_target_->DrawText(L"Network", 7, font_normal_,
         D2D1::RectF(x, y, x + NET_LBL_W, y + LINE_H), brush_text_);
-
-    // IP アドレスは行末右寄せで描画する
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    const wchar_t* ip_txt = m.ip_avail ? m.global_ip : L"NO INTERNET\U0001F4F5";
-    render_target_->DrawText(ip_txt, static_cast<UINT32>(wcslen(ip_txt)), font_small_,
-        D2D1::RectF(x + NET_LBL_W, y + 4.f, x + ww, y + LINE_H), brush_text_);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-    y += LINE_H;
 
     // 3 桁左スペースパディングで表示のガタつきを防ぐ
     auto fmt_kbps = [](float kbps, wchar_t* buf, int len) {
@@ -802,26 +822,31 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
         else                swprintf_s(buf, len, L"%3.0f KB/s", kbps);
     };
 
-    wchar_t buf[32];
-    fmt_kbps(m.recv_kbps, buf, 32);
-    wchar_t labelbuf[48];
-    swprintf_s(labelbuf, L"▼ %s", buf);
-    set_brush_color(brush_text_, cfg.col_text);
-    D2D1_RECT_F tr = D2D1::RectF(x, y, x + 120.f, y + LINE_H);
-    render_target_->DrawText(labelbuf, static_cast<UINT32>(wcslen(labelbuf)), font_small_, tr, brush_text_);
+    // D / U を Network ラベルの右側に font_tiny_ で並べる（Disk セクションの "R %s W %s" と同じ並べ方）
+    // D と U の間は値の右パディング込みで 1 スペースのみ。スペースを増やすと UL 開始位置が右に寄りすぎる
+    wchar_t dlbuf[16], ulbuf[16], labelbuf[48];
+    fmt_kbps(m.recv_kbps, dlbuf, 16);
+    fmt_kbps(m.send_kbps, ulbuf, 16);
+    swprintf_s(labelbuf, L"D %s U %s", dlbuf, ulbuf);
+    D2D1_RECT_F dur = D2D1::RectF(x + NET_LBL_W, y + NET_TEXT_DROP, x + ww, y + LINE_H + NET_TEXT_DROP);
+    render_target_->DrawText(labelbuf, static_cast<UINT32>(wcslen(labelbuf)), font_tiny_, dur, brush_text_);
 
+    // グローバル IP は行末右寄せ、フォントとトーンは Handle: 等の補助情報と同じ font_tiny_ + アルファ 0.6
+    set_brush_color(brush_text_, cfg.col_text, 0.6f);
+    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+    const wchar_t* ip_txt = m.ip_avail ? m.global_ip : L"NO INTERNET\U0001F4F5";
+    render_target_->DrawText(ip_txt, static_cast<UINT32>(wcslen(ip_txt)), font_tiny_,
+        D2D1::RectF(x + NET_LBL_W, y + NET_TEXT_DROP, x + ww, y + LINE_H + NET_TEXT_DROP), brush_text_);
+    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    y += LINE_H;
+
+    // グラフ
     float max_val = max(500.f, max(buf_max(m.send_history), buf_max(m.recv_history)));
-
-    D2D1_RECT_F gr = D2D1::RectF(x, y + LINE_H, x + ww, y + LINE_H + GRAPH_H);
+    D2D1_RECT_F gr = D2D1::RectF(x, y, x + ww, y + GRAPH_H);
     draw_area_graph(m.recv_history, max_val, gr, cfg.col_net_recv);
     draw_area_graph(m.send_history, max_val, gr, cfg.col_net_send, false);
 
-    fmt_kbps(m.send_kbps, buf, 32);
-    swprintf_s(labelbuf, L"▲ %s", buf);
-    D2D1_RECT_F sr = D2D1::RectF(x + 130.f, y, x + ww, y + LINE_H);
-    render_target_->DrawText(labelbuf, static_cast<UINT32>(wcslen(labelbuf)), font_small_, sr, brush_text_);
-
-    y += LINE_H + GRAPH_H + GAP;
+    y += GRAPH_H + GAP;
     return y;
 }
 
