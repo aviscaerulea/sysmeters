@@ -170,7 +170,6 @@ AppConfig load_config(const std::string& path) {
         // メインアカウント設定（[claude] セクション）
         // メインは ~/.claude を固定使用するため config_dir は持たない。
         // enable はロード時に true 強制（[claude] セクションで明示しなくても動く既存互換）。
-        // デフォルト name は "Claude"。旧バージョン（単一アカウント時代）のヘッダ表示と互換を取る
         cfg.claude_main.name         = get_wstr("claude", "name",         L"Claude");
         cfg.claude_main.config_dir.clear();
         cfg.claude_main.nudge_enable = get_bool("claude", "nudge_enable", false);
@@ -179,7 +178,7 @@ AppConfig load_config(const std::string& path) {
         // サブアカウント設定（[claude_sub] セクション）
         // enable は TOML 明示キー。デフォルト OFF とし、ユーザの明示有効化を要求する
         cfg.claude_sub.enable       = get_bool("claude_sub", "enable",       false);
-        cfg.claude_sub.name         = get_wstr("claude_sub", "name",         L"Sub");
+        cfg.claude_sub.name         = get_wstr("claude_sub", "name",         L"Claude");
         cfg.claude_sub.config_dir   = get_wstr("claude_sub", "config_dir",   L"");
         cfg.claude_sub.nudge_enable = get_bool("claude_sub", "nudge_enable", false);
 
