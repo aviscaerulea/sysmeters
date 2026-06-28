@@ -714,10 +714,16 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         float sx = x + gw + DISK_GAP;
         uint32_t sp_col = (dm.used_pct > cfg.warn_disk_space_pct) ? COL_WARN_RED : cfg.col_text;
 
-        // テキスト行（"Used" 左寄せ・通常色、パーセンテージ右寄せ・条件付き色）
+        // テキスト行（"Used:" は font_tiny_・補助情報トーン・右寄せ、パーセンテージは font_small_・条件付き色・右寄せ）
+        // "Used:" は Sessions: 行とフォントサイズ・色を揃え、"100.0%" 分のスペースを空けて右に詰める
+        // font_small_ (18pt) と font_tiny_ (16pt) のベースライン差を相殺するためラベル矩形を 2px 下げる
+        static constexpr float PCT_RESERVE_W = 62.f;  // "100.0%" が font_small_ で占める想定幅
         D2D1_RECT_F str = D2D1::RectF(sx, y, sx + sw, y + LINE_H);
-        set_brush_color(brush_text_, cfg.col_text);
-        render_target_->DrawText(L"Used", 4, font_small_, str, brush_text_);
+        D2D1_RECT_F lbr = D2D1::RectF(sx, y + 2.f, sx + sw - PCT_RESERVE_W, y + LINE_H + 2.f);
+        set_brush_color(brush_text_, cfg.col_text, 0.6f);
+        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        render_target_->DrawText(L"Used:", 5, font_tiny_, lbr, brush_text_);
+        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         wchar_t sbuf[16];
         swprintf_s(sbuf, L"%5.1f%%", dm.used_pct);
         set_brush_color(brush_text_, sp_col);
