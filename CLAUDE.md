@@ -69,6 +69,7 @@ WM_TIMER (1s) → Collectors → Metrics → Renderer → Direct2D → Window
 ## 実装上の注意点
 
 - `docs/screenshot.png` を差し替える際は、グローバル IP アドレスがマスクされていることを必ず確認する。過去に自宅 IP が Git 履歴に残るインシデントがあった
+- ソース修正後にリビルドした場合、AI は稼働中の `out/sysmeters.exe` を `taskkill //IM sysmeters.exe //F` 等で停止し、新しいバイナリで再起動する。ユーザに確認を取る必要はない。修正の効果を画面上で即座に確認できる状態を保つため
 
 ## 参考
 
