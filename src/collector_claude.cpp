@@ -469,15 +469,44 @@ void ClaudeCollector::do_fetch() {
                 plan_j = nullptr;
             }
             else {
-                const auto& tier_j = ms[0]["organization"]["rate_limit_tier"];
-                std::string tier = tier_j.is_string() ? tier_j.get<std::string>() : "";
-                std::string label;
-                if (tier.find("20x") != std::string::npos)      label = "Max20";
-                else if (tier.find("5x") != std::string::npos)  label = "Max5";
-                else if (tier.find("max") != std::string::npos) label = "Max";
-                else if (tier.find("pro") != std::string::npos) label = "Pro";
-                else if (!tier.empty())                          label = tier;
-                else                                             label = "不明";
+                // memberships を全走査して最も高位の Claude Code 対応プランを選ぶ。
+                // 背景：Team 契約者は memberships[0] が個人 Organization（tier=default_claude_ai）で、
+                //       Team 組織は memberships[1] 以降に入る（実調査の結果。例：[1] name="Carecom" tier="default_raven"
+                //       capabilities=["chat","raven"]）。Anthropic Console API 用組織が紛れる場合もあり、
+                //       capabilities が "chat" を含まない組織は Claude Code では使えないため評価対象から外す。
+                // 優先順位：Max20 > Max5 > Max > Team > Pro > Free（Anthropic の usage 枠の値付けに準拠）
+                auto eval_org = [](const json& org) -> std::pair<int, std::string> {
+                    if (!org.is_object()) return {-1, ""};
+                    bool has_chat = false, has_raven = false, has_claude_max = false;
+                    if (org.contains("capabilities") && org["capabilities"].is_array()) {
+                        for (const auto& c : org["capabilities"]) {
+                            if (!c.is_string()) continue;
+                            const std::string s = c.get<std::string>();
+                            if (s == "chat")        has_chat = true;
+                            else if (s == "raven")  has_raven = true;
+                            else if (s == "claude_max") has_claude_max = true;
+                        }
+                    }
+                    if (!has_chat) return {-1, ""};
+                    std::string tier;
+                    if (org.contains("rate_limit_tier") && org["rate_limit_tier"].is_string())
+                        tier = org["rate_limit_tier"].get<std::string>();
+                    if (has_claude_max || tier.find("max") != std::string::npos) {
+                        if (tier.find("20x") != std::string::npos) return {5, "Max20"};
+                        if (tier.find("5x")  != std::string::npos) return {4, "Max5"};
+                        return {3, "Max"};
+                    }
+                    if (has_raven || tier == "default_raven") return {2, "Team"};
+                    if (tier.find("pro") != std::string::npos) return {1, "Pro"};
+                    if (tier == "default_claude_ai")          return {0, "Free"};
+                    return {0, tier.empty() ? std::string("?") : tier};
+                };
+                int best_rank = -1;
+                std::string label = "不明";
+                for (const auto& m : ms) {
+                    auto [rank, l] = eval_org(m.value("organization", json::object()));
+                    if (rank > best_rank) { best_rank = rank; label = l; }
+                }
 
                 plan_j = json{{"label", label}, {"_ts", now_ts()}};
                 std::ofstream ofs(cache_plan_path_);
