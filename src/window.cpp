@@ -115,7 +115,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     RECT adj = {0, 0, cfg_->win_width, 880};
     AdjustWindowRectEx(&adj, WND_STYLE, FALSE, WND_EX_STYLE);
 
-    // ウィンドウ作成（標準タイトルバー＋閉じるボタン、常前面、タスクバー非表示）
+    // ウィンドウ作成（標準タイトルバー＋閉じるボタン、タスクバー非表示）
+    // 最前面は生成時スタイルでは指定せず、create() 末尾の load_topmost() がレジストリ設定から適用する
     hwnd_ = CreateWindowExW(
         WND_EX_STYLE,
         L"SystemMetersWnd", L"sysmeters",
@@ -154,7 +155,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_claude_main_->init(hwnd_, 0, L"", "",
                            cfg_->claude_usage_interval_sec,
                            cfg_->claude_main.nudge_enable, cfg_->claude_nudge_cmd);
-    // メインの account_label を反映（[claude] name または "Main"）
+    // メインの account_label を反映（[claude] name、キー省略時は "Claude"、TOML 不在時は構造体デフォルト "Main"）
     wcsncpy_s(metrics_->claude_main.account_label, cfg_->claude_main.name.c_str(), _TRUNCATE);
     metrics_->claude_main.account_enabled = true;
 
@@ -235,14 +236,19 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_claude_main_->update(metrics_->claude_main);
     if (col_claude_sub_) col_claude_sub_->update(metrics_->claude_sub);
     col_ip_->update();
-    update_window_size();
-    InvalidateRect(hwnd_, nullptr, FALSE);
 
     topmost_        = load_topmost();
     apply_topmost();
     toast_alert_    = load_toast_alert();
     fullscreen_mute_ = load_fullscreen_mute();
     load_visibility();
+
+    // load_visibility() で vis_ を確定させてから縦幅を計算し直す。
+    // preferred_height() の初期値 880 は「全セクション表示」相当のため、非表示設定で再起動すると
+    // 初回 WM_TIMER までの約 0.9 秒間、下部空白付きの誤サイズウィンドウが表示される。
+    // トグル経路（IDM_VIS_*）と同じく compute_preferred_height + apply_window_height で先行リサイズする
+    apply_window_height(renderer_->compute_preferred_height(*metrics_, vis_));
+    InvalidateRect(hwnd_, nullptr, FALSE);
 
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     UpdateWindow(hwnd_);
@@ -784,7 +790,7 @@ bool AppWindow::is_startup_registered() {
 void AppWindow::set_startup(bool enable) {
     if (enable) {
         wchar_t exe[MAX_PATH] = {};
-        // 戻り値 == MAX_PATH は切り詰められた可能性あり（Windows 10 未満では NUL 終端保証なし）
+        // 戻り値 == MAX_PATH は切り詰められた可能性あり（切り詰め時に NUL 終端されないのは XP のみ、Vista 以降は終端される）
         DWORD len = GetModuleFileNameW(hinst_, exe, MAX_PATH);
         if (len == 0 || len >= MAX_PATH) return;
         wchar_t command[MAX_PATH + 4];
@@ -1112,7 +1118,8 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
-    // WS_POPUP ウィンドウで DefWindowProc が SC_CLOSE を無視する場合の保険
+    // SC_CLOSE の明示処理。旧 WS_POPUP 設計時代の保険の名残で、標準タイトルバーの現構成では
+    // DefWindowProc も WM_CLOSE 経由で終了するため冗長だが無害
     case WM_SYSCOMMAND:
         if ((wp & 0xFFF0) == SC_CLOSE) { DestroyWindow(hwnd); return 0; }
         break;

@@ -678,6 +678,18 @@ static std::wstring read_process_env_var(DWORD pid, const std::wstring& name) {
     return result;
 }
 
+// パス末尾のセパレータを 1 文字除去する
+// GetFullPathNameW は入力の末尾セパレータ有無をそのまま結果に伝搬させるため、
+// TOML の config_dir と各プロセスの CLAUDE_CONFIG_DIR で末尾 "\" の有無が食い違うと
+// _wcsicmp が一致しなくなり、サブアカウント判定が失敗する。ドライブルート
+// （"X:\" や UNC "\\server\"）はセパレータ除去でパス意味論が変わるため、長さ 3 以下は温存する
+static void strip_trailing_sep(wchar_t* path) {
+    size_t len = wcslen(path);
+    if (len > 3 && (path[len - 1] == L'\\' || path[len - 1] == L'/')) {
+        path[len - 1] = L'\0';
+    }
+}
+
 ClaudeSessionCount count_claude_sessions_split(const std::wstring& sub_config_dir) {
     ClaudeSessionCount result{};
 
@@ -689,6 +701,7 @@ ClaudeSessionCount count_claude_sessions_split(const std::wstring& sub_config_di
         wchar_t norm[MAX_PATH];
         DWORD len = GetFullPathNameW(sub_config_dir.c_str(), MAX_PATH, norm, nullptr);
         if (len > 0 && len < MAX_PATH) {
+            strip_trailing_sep(norm);
             sub_norm = norm;
         }
         else {
@@ -710,8 +723,11 @@ ClaudeSessionCount count_claude_sessions_split(const std::wstring& sub_config_di
                     if (!env_val.empty()) {
                         wchar_t norm[MAX_PATH];
                         DWORD len = GetFullPathNameW(env_val.c_str(), MAX_PATH, norm, nullptr);
-                        if (len > 0 && len < MAX_PATH && _wcsicmp(norm, sub_norm.c_str()) == 0) {
-                            is_sub = true;
+                        if (len > 0 && len < MAX_PATH) {
+                            strip_trailing_sep(norm);
+                            if (_wcsicmp(norm, sub_norm.c_str()) == 0) {
+                                is_sub = true;
+                            }
                         }
                     }
                 }

@@ -30,18 +30,18 @@ struct MemCollector::Impl {
 void MemCollector::init() {
     if (impl_) return;
     auto* p = new Impl{};
-    if (PdhOpenQuery(nullptr, 0, &p->query) != ERROR_SUCCESS) {
-        delete p;
-        return;
-    }
-    for (auto path : VMMEM_COUNTERS) {
-        if (PdhAddEnglishCounterW(p->query, path, 0, &p->counters[p->vmmem_count]) == ERROR_SUCCESS)
-            ++p->vmmem_count;
-    }
-    // WSL 非使用環境ではカウンタ登録ゼロになる。その場合も hf_query は初期化するため早期リターンしない
-    if (p->vmmem_count == 0) {
-        PdhCloseQuery(p->query);
-        p->query = nullptr;
+    // WSL vmmem カウンタ用のクエリ。失敗しても hf_query は独立で初期化するため早期リターンしない。
+    // クエリが nullptr のまま残る場合は update() 側のガードで PDH 呼び出しをスキップする
+    if (PdhOpenQuery(nullptr, 0, &p->query) == ERROR_SUCCESS) {
+        for (auto path : VMMEM_COUNTERS) {
+            if (PdhAddEnglishCounterW(p->query, path, 0, &p->counters[p->vmmem_count]) == ERROR_SUCCESS)
+                ++p->vmmem_count;
+        }
+        // WSL 非使用環境ではカウンタ登録ゼロになる。その場合はクエリを閉じて nullptr に戻す
+        if (p->vmmem_count == 0) {
+            PdhCloseQuery(p->query);
+            p->query = nullptr;
+        }
     }
 
     // ハードフォールトカウンタ（WSL の有無にかかわらず常に取得する）

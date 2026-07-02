@@ -250,7 +250,9 @@ AppConfig load_config(const std::string& path) {
     cfg.warn_claude_7d_pct = std::clamp(cfg.warn_claude_7d_pct, 0.f, 100.f);
     cfg.warn_claude_over   = std::max(0.f, cfg.warn_claude_over);
     cfg.warn_disk_gbh      = std::max(0.f, cfg.warn_disk_gbh);
-    cfg.warn_temp_caution  = std::clamp(cfg.warn_temp_caution,  0.f, 200.f);
+    // caution < critical の不変式を保つため、caution の上限を critical より 10 低い 190 とする。
+    // 200 のまま許容すると critical 補正時に「min(caution+10, 200) == caution」となり caution == critical で退化する
+    cfg.warn_temp_caution  = std::clamp(cfg.warn_temp_caution,  0.f, 190.f);
     cfg.warn_temp_critical = std::clamp(cfg.warn_temp_critical, 0.f, 200.f);
     // caution >= critical になると温度注意が表示されなくなるため、差を確保する
     if (cfg.warn_temp_caution >= cfg.warn_temp_critical)
