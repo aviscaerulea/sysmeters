@@ -45,7 +45,8 @@ public:
     // true の場合は呼び出し元が InvalidateRect を行う。
     bool update_core_animation(const CpuMetrics& m);
 
-    // デバイスロスト時（WM_SIZE 等）にリソースを再作成する
+    // WM_SIZE 時にレンダーターゲットのサイズを変更する。
+    // デバイスロスト時のリソース再作成は paint() 側（EndDraw の D2DERR_RECREATE_TARGET 検知）が担う。
     void resize(UINT w, UINT h);
 
     void shutdown();

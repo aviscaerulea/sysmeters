@@ -44,7 +44,7 @@ struct MemMetrics {
     float used_gb   = 0.f;
     float total_gb  = 0.f;
     float wsl_gb    = 0.f;  // vmmemWSL プロセスの Working Set 合計（WSL 非使用時は 0）
-    RingBuffer<float, 60> hard_fault_history;  // ハードフォールト履歴（Pages Input/sec）
+    RingBuffer<float, 60> hard_fault_history;  // ハードフォールト履歴（\Memory\Page Reads/sec）
 };
 
 // VRAM：面グラフ + 使用量表示
@@ -63,7 +63,7 @@ struct DiskMetrics {
     float read_mbps  = 0.f;
     float write_mbps = 0.f;
     char  drive      = 'C';
-    // ディスク空き容量（10 分間隔で更新）
+    // ディスク空き容量（5 秒間隔で更新）
     float used_pct   = 0.f;  // 使用率（0〜100%）
     float used_gb    = 0.f;  // 使用量（GB）
     float total_gb   = 0.f;  // 総容量（GB）

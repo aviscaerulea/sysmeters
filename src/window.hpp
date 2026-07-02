@@ -20,7 +20,7 @@ class AlertManager;
 
 // アプリケーションウィンドウの管理
 //
-// カスタムタイトルバー + ボーダーを持つオーバーレイウィンドウ。
+// 標準タイトルバー＋閉じるボタンを持つオーバーレイウィンドウ。
 // タスクトレイアイコンを表示し、右クリックメニューで操作する。
 class AppWindow {
 public:
@@ -110,8 +110,8 @@ private:
     void save_fullscreen_mute();  // レジストリにフルスクリーン抑制設定を書く
     // フルスクリーンアプリが実行中か判定する（SHQueryUserNotificationState 使用）
     bool is_fullscreen_app_running();
-    void load_visibility();     // レジストリからセクション表示フラグ 6 個を一括読み込み（未設定時は true）
-    void save_visibility();     // レジストリにセクション表示フラグ 6 個を一括保存
+    void load_visibility();     // レジストリからセクション表示フラグ全項目を一括読み込み（未設定時は true）
+    void save_visibility();     // レジストリにセクション表示フラグ全項目を一括保存
     bool is_startup_registered(); // Windows スタートアップ（HKCU\...\Run）の登録有無を返す
     void set_startup(bool enable);// Windows スタートアップに現在の実行ファイルを登録 / 解除する
 

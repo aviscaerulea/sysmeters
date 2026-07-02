@@ -8,7 +8,7 @@ public:
     // 指定ドライブの PDH カウンタを初期化する（例：'C', 'D'）
     bool init(char drive_c, char drive_d);
     void update(DiskMetrics& c, DiskMetrics& d);
-    // ディスク空き容量を更新する（GetDiskFreeSpaceExW、10 分間隔を想定）
+    // ディスク空き容量を更新する（GetDiskFreeSpaceExW、5 秒間隔を想定）
     void update_space(DiskMetrics& c, DiskMetrics& d);
     // NVMe S.M.A.R.T. 情報を更新する（1 時間間隔を想定）
     // 同一物理ドライブなら 1 回クエリして両方に設定する

@@ -27,7 +27,8 @@ public:
               int usage_interval_sec = 120,
               bool nudge_enable = false, const std::string& nudge_cmd = {});
 
-    // 1 秒ごとに呼び出す（セッション数取得 + 非同期 API トリガー）
+    // 60 秒周期のタイマーから呼び出す（非同期 API フェッチのトリガー）。
+    // セッション数の取得は行わず、呼び出し側が一括カウントして out に書き込む。
     void update(ClaudeMetrics& out);
 
     // 取得結果を out へ反映する（WM_CLAUDE_DONE 受信後、メインスレッドから呼ぶ）
