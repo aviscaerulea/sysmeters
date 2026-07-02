@@ -10,7 +10,7 @@ public:
     void init();
     void update(MemMetrics& out);
 
-    // ハードフォールトカウンタを更新する（TIMER_FAST から 1 秒ごとに呼び出す）
+    // ハードフォールトカウンタを更新する（TIMER_CPU から 0.9 秒ごとに呼び出す）
     void update_hard_faults(MemMetrics& out);
 
     void shutdown();

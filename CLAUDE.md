@@ -33,8 +33,8 @@ task release
 
 ```
 src/
-├── main.cpp                WinMain、メッセージループ、1秒タイマー
-├── window.hpp/.cpp         ウィンドウ管理（カスタムタイトルバー、ドラッグ、タスクトレイ）
+├── main.cpp                エントリポイント（main）、多重起動排他、COM 初期化
+├── window.hpp/.cpp         ウィンドウ管理（標準タイトルバー、タスクトレイ、メッセージループ、各種タイマー）
 ├── renderer.hpp/.cpp       Direct2D 描画（面グラフ、縦バー、横バー、テキスト）
 ├── config.hpp/.cpp         TOML 設定読み書き（sysmeters.toml）
 ├── metrics.hpp             全メトリクス構造体定義
@@ -74,7 +74,6 @@ WM_TIMER (1s) → Collectors → Metrics → Renderer → Direct2D → Window
 ## 参考
 
 @README.md
-@spec.md
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph

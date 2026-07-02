@@ -13,7 +13,7 @@ public:
     // 成功しない項目は avail フラグを false のままにする。
     bool init();
 
-    // メトリクスを更新する（WM_TIMER から 1 秒ごとに呼び出す）
+    // メトリクスを更新する（TIMER_CPU から 0.9 秒ごとに呼び出す）
     void update(CpuMetrics& out);
 
     void shutdown();
