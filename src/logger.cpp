@@ -93,7 +93,7 @@ static void purge_old_logs() {
 static void log_write(const char* level, const char* fmt, va_list args) {
     // メッセージ最大 1023 文字（終端 1 バイト含む）
     static constexpr int MSG_BUF  = 1024;
-    // タイムスタンプ（23） + ラベル（7） + スペース・改行（4）= 34 バイトのオーバーヘッド
+    // タイムスタンプ（19） + ラベル（7） + スペース・改行（4）= 30 バイトのオーバーヘッド
     static constexpr int LINE_BUF = MSG_BUF + 64;
 
     char msg[MSG_BUF];
@@ -129,11 +129,12 @@ void log_init(const std::string& dir) {
     if (MultiByteToWideChar(CP_UTF8, 0, dir.c_str(), -1, wdir, MAX_PATH) == 0)
         wcscpy_s(wdir, L"logs");
 
-    // 絶対パス判定（ドライブレター "X:" か UNC "\\\\" で始まる）
-    // 注意：シングルバックスラッシュ始まり（例：\Windows\Temp）はドライブ相対パスだが
-    // 使用シナリオにないため相対パスとして exe ディレクトリ基準で展開する。
-    bool is_absolute = (wcslen(wdir) >= 2 && wdir[1] == L':') ||
-                       (wdir[0] == L'\\' && wdir[1] == L'\\');
+    // 絶対パス判定（ドライブレター "X:\" または "X:/" か UNC "\\\\" で始まる）
+    // 注意：シングルバックスラッシュ始まり（例：\Windows\Temp）や区切り無しドライブ相対パス（例：C:logs）は
+    // Windows のカレントディレクトリ依存で挙動が予測しにくいため、相対パスとして exe ディレクトリ基準で展開する。
+    size_t wlen = wcslen(wdir);
+    bool is_absolute = (wlen >= 3 && wdir[1] == L':' && (wdir[2] == L'\\' || wdir[2] == L'/')) ||
+                       (wlen >= 2 && wdir[0] == L'\\' && wdir[1] == L'\\');
 
     if (is_absolute) {
         wcscpy_s(g_log_dir, wdir);

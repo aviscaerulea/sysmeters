@@ -32,12 +32,14 @@ static std::string get_config_path() {
 int main() {
     // 多重起動排他（Named Mutex）
     // 排他の根拠はミューテックスの所有権獲得とする。既存インスタンスに WM_CLOSE を送り、
-    // 旧プロセスの解放を最大 3 秒待つ。獲得できなければ多重起動と判断して自分が終了する
+    // 旧プロセスの解放を最大 20 秒待つ。獲得できなければ多重起動と判断して自分が終了する。
+    // 待ち時間は旧プロセスの終了処理（更新確認スレッド join、Claude API フェッチ完了待ち、
+    // Direct2D リソース解放、ログシャットダウン等）が最悪ケースでも収まる幅を確保する
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"sysmeters-mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND prev = FindWindowW(L"SystemMetersWnd", nullptr);
         if (prev) PostMessage(prev, WM_CLOSE, 0, 0);
-        DWORD wait = WaitForSingleObject(mutex, 3000);
+        DWORD wait = WaitForSingleObject(mutex, 20000);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
             CloseHandle(mutex);
             return 0;

@@ -72,7 +72,7 @@ inline float section_h_gpu(bool avail)  { return avail ? (SECTION_H + GRAPH_H_LG
 inline float section_h_mem()            { return LINE_H + 2.f + BAR_H + GAP; }
 inline float section_h_vram(bool avail) { return avail ? (LINE_H + 2.f + BAR_H + GAP)
                                                        : (LINE_H + GAP); }
-inline float section_h_disk()           { return LINE_H + (LINE_H + GRAPH_H + GAP) * 2.f; }
+inline float section_h_disk()           { return (LINE_H + GRAPH_H + GAP) * 2.f; }
 inline float section_h_net()            { return LINE_H + LINE_H + GRAPH_H + GAP; }
 inline float section_h_claude()         { return LINE_H + SECTION_H * 2.f + GAP; }
 }
@@ -219,7 +219,7 @@ void Renderer::draw_section_label_with_model(float x, float y, float ww,
     }
 }
 
-// グラフ領域にグリッド線を描画する（10 秒間隔の縦線 6 本 + 25% 間隔の横線 4 本）
+// グラフ領域にグリッド線を描画する（10 秒間隔の縦線 5 本 + 25% 間隔の横線 3 本）
 void Renderer::draw_grid(D2D1_RECT_F rect) {
     float w = rect.right - rect.left;
     float h = rect.bottom - rect.top;
@@ -619,8 +619,8 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
 
     // 総量テキストをバー右側に表示。
     // DirectWrite の PARAGRAPH_ALIGNMENT_FAR はラインボックス下端を矩形下端に揃える。
-    // Consolas のディセント（約 5px）の分だけ視覚的文字底辺はラインボックス下端より
-    // 上にずれるため、矩形下端を BAR_H + 5px に拡張してベースラインをバー下端に合わせる。
+    // Consolas のディセントの分だけ視覚的文字底辺はラインボックス下端より
+    // 上にずれるため、矩形下端を BAR_H + 3px（視覚調整値）に拡張してベースラインをバー下端に合わせる。
     wchar_t totbuf[16];
     swprintf_s(totbuf, L"%2.0fGB", m.total_gb);
     set_brush_color(brush_text_, cfg.col_text);
@@ -670,8 +670,8 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
 
     // 総量テキストをバー右側に表示。
     // DirectWrite の PARAGRAPH_ALIGNMENT_FAR はラインボックス下端を矩形下端に揃える。
-    // Consolas のディセント（約 5px）の分だけ視覚的文字底辺はラインボックス下端より
-    // 上にずれるため、矩形下端を BAR_H + 5px に拡張してベースラインをバー下端に合わせる。
+    // Consolas のディセントの分だけ視覚的文字底辺はラインボックス下端より
+    // 上にずれるため、矩形下端を BAR_H + 3px（視覚調整値）に拡張してベースラインをバー下端に合わせる。
     wchar_t totbuf[16];
     swprintf_s(totbuf, L"%2.0fGB", m.total_gb);
     set_brush_color(brush_text_, cfg.col_text);
@@ -695,13 +695,12 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
     float gw = ww - DISK_GAP - sw;     // 左：I/O グラフ幅（2/3）
 
     // ドライブ 1 行分（I/O 面グラフ＋Space 横バー＋S.M.A.R.T. を横並びで描画）
-    // 「Disk」セクション見出し行は廃止し、各ドライブの IO 行先頭に "Disk[X]" として埋め込むことで縦スペースを 1 行節約
+    // 「Disk」セクション見出し行は廃止し、各ドライブの IO 行先頭に "Disk:X" として埋め込むことで縦スペースを 1 行節約
     // prev: 前のドライブ（C: は nullptr）。同一物理ドライブなら SMART 行を省略する
     auto draw_drive = [&](const DiskMetrics& dm, const DiskMetrics* prev) {
         // --- 左 2/3：I/O ---
-        // プレフィックス "Disk[X]" は他セクション見出し（CPU/RAM/GPU 等）と同じ font_normal_（22pt）で描画
-        // IO 数値部 "R 0.0  W 0.0 MB/s" は font_small_（18pt）で描画し、プレフィックス幅 DISK_PREFIX_W 分右にオフセット
         // プレフィックス "Disk:X" は他セクション見出し（CPU/RAM/GPU 等）と同じ font_normal_（22pt）で描画
+        // IO 数値部 "R 0.0  W 0.0 MB/s" は font_tiny_ で描画し、プレフィックス幅 DISK_PREFIX_W 分右にオフセット
         // Network セクションの D の書き出し位置（NET_LBL_W = 105.f）と揃える
         static constexpr float DISK_PREFIX_W = 105.f;  // "Disk:X" 描画幅 + 右余白（IO 数値部の開始位置）
         wchar_t pbuf[16];
@@ -903,6 +902,8 @@ static time_t systemtime_to_timet(const SYSTEMTIME& st)
 // ピーク区間がない場合は {0, 0} を返す。
 // resets_ts は 5h ごとにしか変わらないため結果をキャッシュする。
 // 取得未完了（resets_ts<=0）も同値で再呼び出しされ続けるためキャッシュ対象とする。
+// キャッシュは 1 エントリのみのため、メイン/サブ 2 アカウントが異なる resets_ts で
+// 交互に呼ぶ構成では毎回ミスして再計算する（出力は正しく、影響は計算コストのみ）。
 static std::pair<float, float> calc_peak_overlap(time_t resets_ts)
 {
     static time_t s_cached_ts = (std::numeric_limits<time_t>::min)();
@@ -1085,8 +1086,12 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
         // パーセンテージ：理想ペース超過が閾値以上→太字赤、ペースマーカー超→黄、それ以外→通常色
         if (avail) {
+            // API 異常値対策：pct を [0, 999999] にクランプしてから書式化する。
+            // pct は API JSON の utilization をクランプなしで格納した値であり、
+            // 巨大値が来ると swprintf_s（_TRUNCATE 無指定）が invalid parameter handler を
+            // 起動してプロセス即終了に至る。表示上は 999999% 以上を「999999%」で頭打ちにする
             wchar_t pct_buf[16];
-            swprintf_s(pct_buf, L"%3.0f%%", pct);
+            swprintf_s(pct_buf, L"%3.0f%%", std::clamp(pct, 0.f, 999999.f));
             uint32_t pct_col;
             IDWriteTextFormat* pct_font;
             if (expected_pct > 0.f && (pct - expected_pct) >= warn_pct) {
