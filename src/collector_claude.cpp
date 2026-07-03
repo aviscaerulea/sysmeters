@@ -233,7 +233,10 @@ static json read_cache_raw(const fs::path& path) {
 // Usage API レスポンス JSON を ClaudeMetrics に反映する
 //
 // do_fetch（API/キャッシュ経由）と init（前回キャッシュ復元）で共有する。
-// usage_j が null の場合は何もしない。成功時のみ result.avail を true にする。
+// usage_j が null の場合は何もしない。成功時のみ result.avail を true にし、
+// キャッシュ JSON に付与された "_ts"（do_fetch がキャッシュ保存時に付与、新規取得・
+// キャッシュヒット・起動時復元のいずれでも保持）をローカル時刻 "HH:MM" に整形して
+// result.fetched_at へ格納する。（画面表示用の取得時刻鮮度インジケータ）
 static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
     if (usage_j == nullptr) return;
     try {
@@ -254,6 +257,13 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         result.five_h_resets_ts  = parse_iso8601_utc(fh_resets_at);
         result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
         result.avail = true;
+
+        time_t fetched_ts = static_cast<time_t>(usage_j.value("_ts", 0.0));
+        if (fetched_ts > 0) {
+            struct tm lt{};
+            localtime_s(&lt, &fetched_ts);
+            swprintf_s(result.fetched_at, L"%d:%02d", lt.tm_hour, lt.tm_min);
+        }
 
         // 超過料金情報（extra_usage）
         if (usage_j.contains("extra_usage") && usage_j.at("extra_usage").is_object()) {
