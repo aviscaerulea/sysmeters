@@ -1022,9 +1022,13 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         set_brush_color(brush_text_, over_col);
         render_target_->DrawText(over_buf, static_cast<UINT32>(wcslen(over_buf)), font_small_, hsr, brush_text_);
     }
-    wchar_t sess_buf[24];
-    swprintf_s(sess_buf, L"Sessions:%3d", m.session_count);
+    wchar_t sess_buf[32];
+    if (m.fetched_at[0] != L'\0')
+        swprintf_s(sess_buf, L"%s  Sessions:%3d", m.fetched_at, m.session_count);
+    else
+        swprintf_s(sess_buf, L"Sessions:%3d", m.session_count);
     // CPU セクションの Proc/Thread/Handle 行と同じ補助情報トーン（16pt、アルファ 0.6）に揃え、視覚的な主張を抑える
+    // 先頭の HH:MM は Usage API の直近取得時刻。（鮮度インジケータ）未取得時は空文字で Sessions のみ表示
     // プラン名 etc とフォントサイズが違うため、ベースラインを揃えるために専用矩形を 4px 下げる
     D2D1_RECT_F ssr = D2D1::RectF(hsr.left, hsr.top + 4.f, hsr.right, hsr.bottom + 4.f);
     set_brush_color(brush_text_, cfg.col_text, 0.6f);

@@ -113,6 +113,7 @@ struct ClaudeMetrics {
     bool  extra_enabled      = false; // 超過料金が有効か（is_enabled）
     wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
+    wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、未取得時は空文字）
     // 5h 使用率の時系列（直近 N+1 分を保持）
     // apply_result 呼び出し時に push し、保持期間外を先頭から破棄する。
     // 描画側で「現在値」と「N 分前の値」の差分を濃色オーバーレイとして表示する
