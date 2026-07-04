@@ -68,6 +68,10 @@ private:
     IDWriteTextFormat*     font_tiny_       = nullptr;  // 極小テキスト（16pt）
     IDWriteTextFormat*     font_large_      = nullptr;  // グラフ内オーバーレイ（22pt bold）
     IDWriteTextFormat*     font_xlarge_     = nullptr;  // CPU/GPU 使用率オーバーレイ（40pt bold）
+    // 7d バーの警告解除までの残り時間表示専用（13.5pt、プロポーショナルフォント）。
+    // 他フォントは等幅の Consolas だが、バー塗り部分の狭い横幅に収めるため字幅の詰まる
+    // プロポーショナルフォント（Segoe UI）を使う
+    IDWriteTextFormat*     font_pace_remain_ = nullptr;
 
     // ブラシキャッシュ（色別に使い回す）
     ID2D1SolidColorBrush*  brush_text_  = nullptr;
