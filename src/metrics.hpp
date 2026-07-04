@@ -114,6 +114,12 @@ struct ClaudeMetrics {
     wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
     wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、未取得時は空文字）
+    time_t fetched_ts = 0;            // Usage API 実フェッチ時刻（UTC time_t、fetched_at の元値。未取得時 0）
+    // 現在ウィンドウ内で観測した使用量増加 TOP3 の平均レート（%/秒、0 = 推定不可）
+    // 使い切り不能検知（underuse 警告）の「追い上げ可能ペース」として描画側で外挿に使う。
+    // バケット（5h：30 分 / 7d：6 時間）完了ごとに collector が更新する
+    float five_h_top3_rate  = 0.f;
+    float seven_d_top3_rate = 0.f;
     // 5h 使用率の時系列（直近 N+1 分を保持）
     // apply_result 呼び出し時に push し、保持期間外を先頭から破棄する。
     // 描画側で「現在値」と「N 分前の値」の差分を濃色オーバーレイとして表示する
