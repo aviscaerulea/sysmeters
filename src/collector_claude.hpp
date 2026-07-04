@@ -77,17 +77,28 @@ private:
     // 現在ウィンドウをバケット（一定時間の区切り）に分け、バケット完了ごとの増加レート
     // （Δpct ÷ 実経過秒）の上位 3 件を保持する。TOP3 の平均が「実証済みの追い上げ可能ペース」
     // となり、描画側が残り時間への外挿に使う。
-    // resets_ts の変化（ウィンドウ切替）で全状態をクリアする。起動直後・切替直後は
+    // ウィンドウ切替（resets_ts の大幅な変化）で全状態をクリアする。起動直後・切替直後は
     // 最初のバケット完了まで平均 0（推定不可）を返し、警告を出さない安全側に倒す。
+    // 一時的な異常応答への耐性として、同一ウィンドウ内での使用率逆行を検知したら
+    // TOP3 を全クリアする。（詳細は update の実装コメントを参照）
     // apply_result（メインスレッド）からのみ触るため排他は不要
     struct PaceTracker {
-        time_t window_ts = -1;   // 追跡中ウィンドウの resets_ts（変化検知用）
+        time_t window_ts = -1;   // 追跡中ウィンドウの resets_ts（切替検知用）
         time_t bucket_ts  = 0;   // 現在バケット開始サンプルの時刻
         float  bucket_pct = 0.f; // 現在バケット開始サンプルの使用率（%）
+        float  last_pct   = 0.f; // 直前サンプルの使用率（%、逆行 = 異常応答の検知用）
+        // 逆行直後は基準点（bucket_pct）が異常低値の可能性があり、そこからの増加レートは
+        // 正常値への復帰ジャンプを含んで過大になり得る。true の間は次のバケット完了時に
+        // レートを記録せず基準を取り直す。
+        bool   baseline_suspect = false;
         float  top[3]     = {};  // 観測増加レート上位 3 件（%/秒、0 = 空きスロット）
 
         // 新サンプルを反映し、TOP3 平均レート（%/秒、0 = 推定不可）を返す
         float update(time_t ts, float pct, time_t resets_ts, time_t bucket_secs);
+
+        // 追跡状態を現サンプル起点で初期化する（ウィンドウ切替・使用率逆行時の共通処理）
+        // suspect_baseline は現サンプルが異常低値である可能性を示し、初回バケットのレート採否を制御する
+        void restart(time_t ts, float pct, time_t resets_ts, bool suspect_baseline);
     };
     PaceTracker pace_5h_;
     PaceTracker pace_7d_;
