@@ -235,8 +235,9 @@ static json read_cache_raw(const fs::path& path) {
 // do_fetch（API/キャッシュ経由）と init（前回キャッシュ復元）で共有する。
 // usage_j が null の場合は何もしない。成功時のみ result.avail を true にし、
 // キャッシュ JSON に付与された "_ts"（do_fetch がキャッシュ保存時に付与、新規取得・
-// キャッシュヒット・起動時復元のいずれでも保持）をローカル時刻 "HH:MM" に整形して
-// result.fetched_at へ格納する。（画面表示用の取得時刻鮮度インジケータ）
+// キャッシュヒット・起動時復元のいずれでも保持）を result.fetched_ts に生値のまま格納し、
+// あわせてローカル時刻 "HH:MM" に整形して result.fetched_at へ格納する。
+// （fetched_at は画面表示用の取得時刻鮮度インジケータ、fetched_ts はペース追跡のサンプル時刻）
 static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
     if (usage_j == nullptr) return;
     try {
@@ -259,6 +260,7 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         result.avail = true;
 
         time_t fetched_ts = static_cast<time_t>(usage_j.value("_ts", 0.0));
+        result.fetched_ts = fetched_ts;
         if (fetched_ts > 0) {
             struct tm lt{};
             localtime_s(&lt, &fetched_ts);
@@ -767,6 +769,57 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
     }
 }
 
+// 使い切り不能検知のバケット長
+// TOP3 の増加レートを「持続できた実績ペース」として測るための区切り幅。
+// 短すぎると瞬間バーストのレートを残り数時間〜数日へ外挿することになり、
+// 見積りが楽観的すぎて警告がほぼ発火しなくなる。（特に 7d は 5h 制限が持続ペースの上限になる）
+// 5h ウィンドウは 30 分（10 区切り）、7d は 6 時間（28 区切り）を持続実績の単位とする
+static constexpr time_t PACE_BUCKET_5H_SECS = 30 * 60;
+static constexpr time_t PACE_BUCKET_7D_SECS = 6 * 3600;
+
+// 使い切り不能検知：新サンプルを反映し TOP3 平均レートを返す
+//
+// resets_ts が無効（<= 0）の間は状態を初期化して 0 を返す。
+// ウィンドウ切替（resets_ts 変化）で TOP3 とバケットをクリアし、現サンプルから新バケットを開始する。
+// バケット完了（開始から bucket_secs 以上経過）時に増加レートを実経過秒で正規化して算出し、
+// 正値のみ TOP3 へ取り込む。スリープ等の長い空白は実経過での正規化によりレートが小さく出る。（安全側）
+// 戻り値は TOP3 に入っている正値レートの平均（%/秒、0 件なら 0 = 推定不可）
+float ClaudeCollector::PaceTracker::update(time_t ts, float pct, time_t resets_ts, time_t bucket_secs) {
+    if (resets_ts <= 0) {
+        window_ts = -1;
+        return 0.f;
+    }
+    if (resets_ts != window_ts) {
+        // ウィンドウ切替：実績をクリアして現サンプルから新バケットを開始
+        window_ts  = resets_ts;
+        bucket_ts  = ts;
+        bucket_pct = pct;
+        for (float& r : top) r = 0.f;
+        return 0.f;
+    }
+    if (ts - bucket_ts >= bucket_secs) {
+        // バケット完了：増加レートを算出し、最小スロットより大きければ置き換えて TOP3 を維持する
+        float rate = (pct - bucket_pct) / static_cast<float>(ts - bucket_ts);
+        if (rate > 0.f) {
+            float* min_slot = &top[0];
+            for (float& r : top)
+                if (r < *min_slot) min_slot = &r;
+            if (rate > *min_slot) *min_slot = rate;
+        }
+        bucket_ts  = ts;
+        bucket_pct = pct;
+    }
+    float sum = 0.f;
+    int   n   = 0;
+    for (float r : top) {
+        if (r > 0.f) {
+            sum += r;
+            ++n;
+        }
+    }
+    return n > 0 ? sum / static_cast<float>(n) : 0.f;
+}
+
 void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min) {
     std::lock_guard<std::mutex> lock(result_mutex_);
     // セッション数・アカウントラベル・有効化フラグは window.cpp 側で管理しているため
@@ -794,6 +847,16 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min) {
             [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
         if (it != out.five_h_history.begin())
             out.five_h_history.erase(out.five_h_history.begin(), it);
+
+        // 使い切り不能検知のペース追跡を更新する
+        // サンプル時刻はキャッシュ JSON の実フェッチ時刻を優先する。apply_result 呼び出し時刻を
+        // 使うと、起動時のキャッシュ復元直後のフェッチで経過時間が過小になりレートが過大評価される。
+        // 同一フェッチ時刻の再配信（キャッシュヒット）は同一バケット内に留まり増分 0 なので無害
+        time_t sample_ts = out.fetched_ts > 0 ? out.fetched_ts : now;
+        out.five_h_top3_rate  = pace_5h_.update(sample_ts, out.five_h_pct,
+                                                out.five_h_resets_ts, PACE_BUCKET_5H_SECS);
+        out.seven_d_top3_rate = pace_7d_.update(sample_ts, out.seven_d_pct,
+                                                out.seven_d_resets_ts, PACE_BUCKET_7D_SECS);
     }
 }
 

@@ -167,6 +167,10 @@ AppConfig load_config(const std::string& path) {
         catch (...) {}
         cfg.show_peak_bar = get_bool("claude", "show_peak_bar", cfg.show_peak_bar);
         cfg.claude_delta_window_min = get_int("claude", "delta_window_min", cfg.claude_delta_window_min);
+        cfg.claude_underuse_enable        = get_bool ("claude", "underuse_enable",        cfg.claude_underuse_enable);
+        cfg.claude_underuse_warn_pct      = get_float("claude", "underuse_warn_pct",      cfg.claude_underuse_warn_pct);
+        cfg.claude_underuse_ignore_5h_min = get_int  ("claude", "underuse_ignore_5h_min", cfg.claude_underuse_ignore_5h_min);
+        cfg.claude_underuse_ignore_7d_min = get_int  ("claude", "underuse_ignore_7d_min", cfg.claude_underuse_ignore_7d_min);
 
         // メインアカウント設定（[claude] セクション）
         // メインは ~/.claude を固定使用するため config_dir は持たない。
@@ -232,6 +236,12 @@ AppConfig load_config(const std::string& path) {
     // 5h 増加分濃色オーバーレイのウィンドウ幅サニティチェック（0〜60 分）
     // 上限 60 分は保持メモリの暴走防止と、5h ウィンドウ内で意味のある時間幅。0 は機能無効を意味する
     cfg.claude_delta_window_min = std::clamp(cfg.claude_delta_window_min, 0, 60);
+
+    // 使い切り不能検知のサニティチェック
+    // 目標到達率は 0〜100%、除外しきい値は各ウィンドウ長（5h=300 分、7d=10080 分）を上限とする
+    cfg.claude_underuse_warn_pct      = std::clamp(cfg.claude_underuse_warn_pct,      0.f, 100.f);
+    cfg.claude_underuse_ignore_5h_min = std::clamp(cfg.claude_underuse_ignore_5h_min, 0, 300);
+    cfg.claude_underuse_ignore_7d_min = std::clamp(cfg.claude_underuse_ignore_7d_min, 0, 10080);
 
     // ガードトーン長のサニティチェック（0〜10 秒）
     cfg.guard_tone_ms = std::clamp(cfg.guard_tone_ms, 0, 10000);
