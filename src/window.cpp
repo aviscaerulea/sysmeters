@@ -95,8 +95,11 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     if (cfg_->claude_sub.enable) col_claude_sub_ = new ClaudeCollector();
     col_ip_     = new IpCollector();
 
-    metrics_->disk_c.drive = 'C';
-    metrics_->disk_d.drive = 'D';
+    // 固定ドライブの列挙（起動時 1 回のみ、ホットプラグ非対応）。
+    // 以後 metrics_->disks の resize は禁止（RingBuffer 履歴保護）
+    std::vector<char> disk_drives = DiskCollector::enumerate_fixed_drives(kMaxDiskDrives);
+    metrics_->disks.resize(disk_drives.size());
+    for (size_t i = 0; i < disk_drives.size(); ++i) metrics_->disks[i].drive = disk_drives[i];
 
     // ウィンドウクラス登録
     WNDCLASSEXW wc{};
@@ -149,7 +152,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_cpu_->init();
     col_gpu_->init();
     col_mem_->init();
-    col_disk_->init('C', 'D');
+    col_disk_->init(disk_drives);
     col_net_->init();
     // Claude メイン：account_index=0、config_dir 空（~/.claude 既定）
     col_claude_main_->init(hwnd_, 0, L"", "",
@@ -174,7 +177,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
 
     // 警告音マネージャ初期化
     alert_ = new AlertManager();
-    alert_->init(*cfg_);
+    alert_->init(*cfg_, disk_drives);
 
     // Explorer 再起動によるタスクバー再生成通知を登録
     WM_TASKBAR_CREATED_ = RegisterWindowMessageW(L"TaskbarCreated");
@@ -222,9 +225,9 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_gpu_->update_gpu(metrics_->gpu);
     col_gpu_->update_vram(metrics_->vram);
     col_mem_->update(metrics_->mem);
-    col_disk_->update(metrics_->disk_c, metrics_->disk_d);
-    col_disk_->update_space(metrics_->disk_c, metrics_->disk_d);
-    col_disk_->update_smart(metrics_->disk_c, metrics_->disk_d);
+    col_disk_->update(metrics_->disks);
+    col_disk_->update_space(metrics_->disks);
+    col_disk_->update_smart(metrics_->disks);
     col_net_->update(metrics_->net);
     // セッション数を 1 回でメイン/サブに分けて取得し、両 metrics に書く
     {
@@ -389,7 +392,7 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
     int n = 0;
     for (int i = 0; i < AlertManager::COUNT_; i++) {
         if (!(fired_mask & (1u << i))) continue;
-        labels[n++] = AlertManager::label(static_cast<AlertManager::Id>(i));
+        labels[n++] = alert_->label(static_cast<AlertManager::Id>(i));
     }
     if (n == 0) return;
 
@@ -550,6 +553,15 @@ void AppWindow::show_context_menu() {
     AppendMenuW(view_menu, MF_STRING | (vis_.gpu    ? MF_CHECKED : 0), IDM_VIS_GPU,    L"GPU / VRAM");
     AppendMenuW(view_menu, MF_STRING | (vis_.mem    ? MF_CHECKED : 0), IDM_VIS_MEM,    L"Memory");
     AppendMenuW(view_menu, MF_STRING | (vis_.disk   ? MF_CHECKED : 0), IDM_VIS_DISK,   L"Disk");
+    // ドライブ別トグル（Disk 直後にフラット配置）。Disk 全体 OFF 時はグレーアウトする。
+    // 表示のみを制御し、収集と警告（空き容量・NVMe 温度）は全検出ドライブで継続する
+    for (const auto& dm : metrics_->disks) {
+        wchar_t lbl[16];
+        swprintf_s(lbl, L"    Disk %c:", static_cast<wchar_t>(dm.drive));
+        UINT flags = MF_STRING | (vis_.disk_drive[dm.drive - 'A'] ? MF_CHECKED : 0);
+        if (!vis_.disk) flags |= MF_GRAYED;
+        AppendMenuW(view_menu, flags, IDM_VIS_DISK_DRIVE_BASE + (dm.drive - 'A'), lbl);
+    }
     AppendMenuW(view_menu, MF_STRING | (vis_.net    ? MF_CHECKED : 0), IDM_VIS_NET,    L"Network");
     // Claude メイン/サブの表示トグル。サブはアカウント未構成時 MF_GRAYED で設定誘導する
     {
@@ -757,6 +769,14 @@ void AppWindow::load_visibility() {
     }
     vis_.claude_main = load_reg_bool(REG_VIS_CLAUDE_MAIN, true);
     vis_.claude_sub  = load_reg_bool(REG_VIS_CLAUDE_SUB,  true);
+
+    // ドライブ別フラグ（検出レターのみ読み込み。値名：Visible_Disk_C 〜 Visible_Disk_Z、未設定は true）。
+    // 構成変更で検出されなくなったレターの残存値は読まれないだけで無害なため掃除しない
+    for (const auto& dm : metrics_->disks) {
+        wchar_t name[20];
+        swprintf_s(name, L"Visible_Disk_%c", static_cast<wchar_t>(dm.drive));
+        vis_.disk_drive[dm.drive - 'A'] = load_reg_bool(name, true);
+    }
 }
 
 void AppWindow::save_visibility() {
@@ -767,6 +787,25 @@ void AppWindow::save_visibility() {
     save_reg_bool(REG_VIS_NET,    vis_.net);
     save_reg_bool(REG_VIS_CLAUDE_MAIN, vis_.claude_main);
     save_reg_bool(REG_VIS_CLAUDE_SUB,  vis_.claude_sub);
+
+    // ドライブ別フラグ（検出レターのみ書き込み。値名：Visible_Disk_C 〜 Visible_Disk_Z）
+    for (const auto& dm : metrics_->disks) {
+        wchar_t name[20];
+        swprintf_s(name, L"Visible_Disk_%c", static_cast<wchar_t>(dm.drive));
+        save_reg_bool(name, vis_.disk_drive[dm.drive - 'A']);
+    }
+}
+
+// 表示トグル共通の後処理：永続化 → 高さ事前計算 → 先行リサイズ → 同期再描画
+// （二段表示防止のため SetWindowPos を paint() より先行させる。IDM_VIS_* とドライブ別トグルが共用）
+void AppWindow::on_visibility_toggled() {
+    save_visibility();
+
+    int new_pref_h = renderer_->compute_preferred_height(*metrics_, vis_);
+    last_pref_h_ = 0;  // apply_window_height のキャッシュを無効化
+    apply_window_height(new_pref_h);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    UpdateWindow(hwnd_);
 }
 
 // Windows スタートアップ用レジストリ（HKCU\Software\Microsoft\Windows\CurrentVersion\Run キー配下の sysmeters 値）
@@ -961,7 +1000,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         else if (wp == TIMER_FAST) {
             // 高速更新（1.0 秒）：Disk/Net
-            col_disk_->update(metrics_->disk_c, metrics_->disk_d);
+            col_disk_->update(metrics_->disks);
             col_net_->update(metrics_->net);
         }
         else if (wp == TIMER_SLOW) {
@@ -983,11 +1022,11 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         else if (wp == TIMER_DISK_SPACE) {
             // Disk 空き容量更新（5 秒）
-            col_disk_->update_space(metrics_->disk_c, metrics_->disk_d);
+            col_disk_->update_space(metrics_->disks);
         }
         else if (wp == TIMER_SMART) {
             // NVMe S.M.A.R.T. + OS バージョン更新（1 時間）
-            col_disk_->update_smart(metrics_->disk_c, metrics_->disk_d);
+            col_disk_->update_smart(metrics_->disks);
             update_os_label();
         }
         else if (wp == TIMER_IP) {
@@ -1038,8 +1077,16 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
-    case WM_COMMAND:
-        switch (LOWORD(wp)) {
+    case WM_COMMAND: {
+        const UINT cmd_id = LOWORD(wp);
+        // ドライブ別表示トグル（動的レンジ、resource.h の IDM_VIS_DISK_DRIVE_BASE 参照）
+        if (cmd_id >= IDM_VIS_DISK_DRIVE_BASE && cmd_id < IDM_VIS_DISK_DRIVE_BASE + 26) {
+            const int idx = cmd_id - IDM_VIS_DISK_DRIVE_BASE;
+            vis_.disk_drive[idx] = !vis_.disk_drive[idx];
+            on_visibility_toggled();
+            return 0;
+        }
+        switch (cmd_id) {
         case IDM_TOPMOST:
             topmost_ = !topmost_;
             apply_topmost();
@@ -1064,7 +1111,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_VIS_NET:
         case IDM_VIS_CLAUDE_MAIN:
         case IDM_VIS_CLAUDE_SUB: {
-            switch (LOWORD(wp)) {
+            switch (cmd_id) {
             case IDM_VIS_CPU:         vis_.cpu         = !vis_.cpu;         break;
             case IDM_VIS_GPU:         vis_.gpu         = !vis_.gpu;         break;
             case IDM_VIS_MEM:         vis_.mem         = !vis_.mem;         break;
@@ -1073,15 +1120,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             case IDM_VIS_CLAUDE_MAIN: vis_.claude_main = !vis_.claude_main; break;
             case IDM_VIS_CLAUDE_SUB:  vis_.claude_sub  = !vis_.claude_sub;  break;
             }
-            save_visibility();
-
-            // 先にリサイズして最初のフレームで「新サイズ + 新コンテンツ」を成立させ、
-            // 縦幅が遅れて追従する二段表示を防ぐ。
-            int new_pref_h = renderer_->compute_preferred_height(*metrics_, vis_);
-            last_pref_h_ = 0;  // apply_window_height のキャッシュを無効化
-            apply_window_height(new_pref_h);
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            UpdateWindow(hwnd_);
+            on_visibility_toggled();
             break;
         }
         case IDM_GITHUB: {
@@ -1095,6 +1134,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_EXIT:        DestroyWindow(hwnd); break;
         }
         return 0;
+    }
 
     case WM_CLAUDE_DONE:
         // wParam にアカウント識別子（0=Main, 1=Sub）が載っている

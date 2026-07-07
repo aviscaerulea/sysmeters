@@ -42,7 +42,7 @@ src/
 ├── collector_cpu.hpp/.cpp  CPU 使用率（PDH）+ 温度（WMI）
 ├── collector_gpu.hpp/.cpp  GPU 使用率/温度/VRAM（NVML 動的ロード）
 ├── collector_mem.hpp/.cpp  RAM 使用量（GlobalMemoryStatusEx）
-├── collector_disk.hpp/.cpp Disk I/O（PDH、C:/D: パーティション別）
+├── collector_disk.hpp/.cpp Disk I/O（PDH、起動時に検出した固定ドライブ別、最大 8 台）
 ├── collector_net.hpp/.cpp  Network I/O（PDH、全 NIC 合算）
 └── collector_claude.hpp/.cpp Claude API 呼び出し（WinHTTP 非同期）+ セッション数
 ```

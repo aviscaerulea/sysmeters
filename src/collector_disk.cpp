@@ -1,11 +1,15 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
+// std::min を使うため、windows.h の min/max マクロを無効化する。
+// collector_disk.hpp が metrics.hpp 経由で windows.h を include するより前に定義する必要がある。
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include "collector_disk.hpp"
 #include "logger.hpp"
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winioctl.h>   // IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, IOCTL_STORAGE_QUERY_PROPERTY
 #include <pdh.h>
 #pragma comment(lib, "pdh.lib")
+#include <algorithm>  // std::min
 #include <array>
 #include <cstring>  // memcpy
 
@@ -62,6 +66,13 @@ static_assert(sizeof(NvmeHealthLog) == 512, "NvmeHealthLog size");
 static constexpr DWORD kProtoDescSize = 48;
 
 // ドライブレターから物理ドライブ番号を取得する
+//
+// 戻り値 -1 は「物理ディスク実体が存在しない」ことを意味し、Google ドライブ等
+// DRIVE_FIXED を名乗る仮想ファイルシステムの判別にも使う（enumerate_fixed_drives 参照）。
+// 実機検証で判明した事実：Google ドライブの仮想ドライブは NumberOfDiskExtents こそ 1 を
+// 返すが、Extents[0].ExtentLength が 0（開始オフセットも 0）のダミー値であり、
+// 実パーティション（長さが実容量分ある）と明確に区別できる。DiskNumber だけでは
+// 裏側の物理ディスク（他の実ドライブと同一）が返ってしまうため判別に使えない。
 static int get_phys_drive(char drv) {
     wchar_t path[16];
     swprintf_s(path, L"\\\\.\\%c:", static_cast<wchar_t>(drv));
@@ -74,50 +85,66 @@ static int get_phys_drive(char drv) {
     int result = -1;
     if (DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
                         nullptr, 0, &buf, sizeof(buf), &bytes, nullptr) &&
-        buf.vde.NumberOfDiskExtents > 0) {
+        buf.vde.NumberOfDiskExtents > 0 &&
+        buf.vde.Extents[0].ExtentLength.QuadPart > 0) {
         result = static_cast<int>(buf.vde.Extents[0].DiskNumber);
     }
     CloseHandle(h);
     return result;
 }
 
+std::vector<char> DiskCollector::enumerate_fixed_drives(int max_drives) {
+    std::vector<char> out;
+    DWORD mask = GetLogicalDrives();
+    for (char c = 'C'; c <= 'Z'; ++c) {
+        if (!(mask & (1u << (c - 'A')))) continue;
+
+        wchar_t root[4] = {static_cast<wchar_t>(c), L':', L'\\', L'\0'};
+        if (GetDriveTypeW(root) != DRIVE_FIXED) continue;
+        if (get_phys_drive(c) < 0) continue;  // 物理実体なし＝仮想 FS として除外
+
+        if (static_cast<int>(out.size()) >= max_drives) {
+            log_info("Disk: drive %c: exceeds monitor limit (%d), excluded", c, max_drives);
+            continue;
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
 struct DiskCollector::Impl {
     PDH_HQUERY query = nullptr;
-    // [0]=C:Read, [1]=C:Write, [2]=D:Read, [3]=D:Write
-    std::array<PDH_HCOUNTER, 4> counters = {};
-    char drives[2] = {'C', 'D'};
-    int  phys_drives[2] = {-1, -1};  // 各ドライブの物理ドライブ番号（init 時に解決）
+    // ドライブごとに [0]=Read, [1]=Write の 2 カウンタを持つ
+    std::vector<std::array<PDH_HCOUNTER, 2>> counters;
+    std::vector<char> drives;
+    std::vector<int>  phys_drives;  // 各ドライブの物理ドライブ番号（init 時に解決）
 };
 
-bool DiskCollector::init(char drive_c, char drive_d) {
+bool DiskCollector::init(const std::vector<char>& drives) {
     impl_ = new Impl();
-    impl_->drives[0] = drive_c;
-    impl_->drives[1] = drive_d;
+    impl_->drives = drives;
+    impl_->counters.resize(drives.size());
+    impl_->phys_drives.resize(drives.size());
 
     if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) {
         log_error("Disk PDH init failed");
         return false;
     }
 
-    const wchar_t* templates[4] = {
-        L"\\LogicalDisk(%c:)\\Disk Read Bytes/sec",
-        L"\\LogicalDisk(%c:)\\Disk Write Bytes/sec",
-        L"\\LogicalDisk(%c:)\\Disk Read Bytes/sec",
-        L"\\LogicalDisk(%c:)\\Disk Write Bytes/sec",
-    };
-    char drv_for[4] = {drive_c, drive_c, drive_d, drive_d};
-
-    for (int i = 0; i < 4; ++i) {
+    for (size_t i = 0; i < drives.size(); ++i) {
         wchar_t buf[128];
-        swprintf_s(buf, templates[i], static_cast<wchar_t>(drv_for[i]));
-        PdhAddEnglishCounterW(impl_->query, buf, 0, &impl_->counters[i]);
+        swprintf_s(buf, L"\\LogicalDisk(%c:)\\Disk Read Bytes/sec", static_cast<wchar_t>(drives[i]));
+        PdhAddEnglishCounterW(impl_->query, buf, 0, &impl_->counters[i][0]);
+        swprintf_s(buf, L"\\LogicalDisk(%c:)\\Disk Write Bytes/sec", static_cast<wchar_t>(drives[i]));
+        PdhAddEnglishCounterW(impl_->query, buf, 0, &impl_->counters[i][1]);
     }
 
-    PdhCollectQueryData(impl_->query);  // 初回サンプリング
-    impl_->phys_drives[0] = get_phys_drive(drive_c);
-    impl_->phys_drives[1] = get_phys_drive(drive_d);
-    log_info("Disk collector initialized (C: phys=%d, D: phys=%d)",
-             impl_->phys_drives[0], impl_->phys_drives[1]);
+    PdhCollectQueryData(impl_->query);  // 初回サンプリング（レート系カウンタは 2 サンプル必要）
+
+    for (size_t i = 0; i < drives.size(); ++i)
+        impl_->phys_drives[i] = get_phys_drive(drives[i]);
+
+    log_info("Disk collector initialized (%zu drives)", drives.size());
     return true;
 }
 
@@ -125,7 +152,7 @@ static float bytes_to_mb(double bytes) {
     return static_cast<float>(bytes / (1024.0 * 1024.0));
 }
 
-void DiskCollector::update(DiskMetrics& c, DiskMetrics& d) {
+void DiskCollector::update(std::vector<DiskMetrics>& disks) {
     if (!impl_) return;
 
     PdhCollectQueryData(impl_->query);
@@ -138,18 +165,17 @@ void DiskCollector::update(DiskMetrics& c, DiskMetrics& d) {
         return 0.f;
     };
 
-    c.read_mbps  = get(impl_->counters[0]);
-    c.write_mbps = get(impl_->counters[1]);
-    c.read_history.push(c.read_mbps);
-    c.write_history.push(c.write_mbps);
-
-    d.read_mbps  = get(impl_->counters[2]);
-    d.write_mbps = get(impl_->counters[3]);
-    d.read_history.push(d.read_mbps);
-    d.write_history.push(d.write_mbps);
+    // disks は init に渡したドライブ列と同数・同順が契約だが、不整合時も暴走しないよう防御的に切り詰める
+    const size_t n = std::min(impl_->drives.size(), disks.size());
+    for (size_t i = 0; i < n; ++i) {
+        disks[i].read_mbps  = get(impl_->counters[i][0]);
+        disks[i].write_mbps = get(impl_->counters[i][1]);
+        disks[i].read_history.push(disks[i].read_mbps);
+        disks[i].write_history.push(disks[i].write_mbps);
+    }
 }
 
-void DiskCollector::update_space(DiskMetrics& c, DiskMetrics& d) {
+void DiskCollector::update_space(std::vector<DiskMetrics>& disks) {
     if (!impl_) return;
 
     // GetDiskFreeSpaceExW: 第3引数=総容量、第4引数=ドライブ全体の空き容量
@@ -167,8 +193,9 @@ void DiskCollector::update_space(DiskMetrics& c, DiskMetrics& d) {
         dm.used_gb   = static_cast<float>(used);
         dm.used_pct  = (total > 0.0) ? static_cast<float>((used / total) * 100.0) : 0.f;
     };
-    fetch(impl_->drives[0], c);
-    fetch(impl_->drives[1], d);
+
+    const size_t n = std::min(impl_->drives.size(), disks.size());
+    for (size_t i = 0; i < n; ++i) fetch(impl_->drives[i], disks[i]);
 }
 
 // NVMe S.M.A.R.T. データ取得
@@ -228,23 +255,33 @@ static void query_nvme_smart(int phys_drive, DiskMetrics& dm) {
     dm.smart_avail = true;
 }
 
-void DiskCollector::update_smart(DiskMetrics& c, DiskMetrics& d) {
+void DiskCollector::update_smart(std::vector<DiskMetrics>& disks) {
     if (!impl_) return;
 
-    c.phys_drive = impl_->phys_drives[0];
-    d.phys_drive = impl_->phys_drives[1];
+    const size_t n = std::min(impl_->drives.size(), disks.size());
+    for (size_t i = 0; i < n; ++i) {
+        disks[i].phys_drive = impl_->phys_drives[i];
 
-    query_nvme_smart(impl_->phys_drives[0], c);
+        // 先行ドライブに同一物理ドライブがあればクエリを省略しコピーする（物理 1 台につき 1 回のみ）。
+        // phys_drive < 0（解決失敗）同士は「別ドライブ」として扱う（誤って同一視しない）。
+        int src = -1;
+        for (size_t j = 0; j < i; ++j) {
+            if (impl_->phys_drives[j] >= 0 && impl_->phys_drives[j] == impl_->phys_drives[i]) {
+                src = static_cast<int>(j);
+                break;
+            }
+        }
 
-    // 同一物理ドライブのコピーブロック。DiskMetrics に S.M.A.R.T. フィールドを追加した際は必ずここも更新すること
-    if (impl_->phys_drives[1] == impl_->phys_drives[0]) {
-        d.smart_write_gbh    = c.smart_write_gbh;
-        d.smart_temp_celsius = c.smart_temp_celsius;
-        d.smart_avail        = c.smart_avail;
-        d.smart_temp_avail   = c.smart_temp_avail;
-    }
-    else {
-        query_nvme_smart(impl_->phys_drives[1], d);
+        if (src >= 0) {
+            // 同一物理ドライブのコピーブロック。DiskMetrics に S.M.A.R.T. フィールドを追加した際は必ずここも更新すること
+            disks[i].smart_write_gbh    = disks[src].smart_write_gbh;
+            disks[i].smart_temp_celsius = disks[src].smart_temp_celsius;
+            disks[i].smart_avail        = disks[src].smart_avail;
+            disks[i].smart_temp_avail   = disks[src].smart_temp_avail;
+        }
+        else {
+            query_nvme_smart(impl_->phys_drives[i], disks[i]);
+        }
     }
 }
 

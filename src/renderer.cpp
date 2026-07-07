@@ -73,9 +73,20 @@ inline float section_h_gpu(bool avail)  { return avail ? (SECTION_H + GRAPH_H_LG
 inline float section_h_mem()            { return (LINE_H - 1.f) + BAR_H + GAP; }
 inline float section_h_vram(bool avail) { return avail ? ((LINE_H - 1.f) + BAR_H + GAP)
                                                        : (LINE_H + GAP); }
-inline float section_h_disk()           { return (LINE_H + GRAPH_H + GAP) * 2.f; }
+inline float section_h_disk(int n)      { return (LINE_H + GRAPH_H + GAP) * static_cast<float>(n); }
 inline float section_h_net()            { return LINE_H + LINE_H + GRAPH_H + GAP; }
 inline float section_h_claude()         { return (LINE_H - 3.f) + SECTION_H * 2.f + GAP; }
+}
+
+// 可視ドライブ数を数える（paint() と compute_preferred_height() の高さ契約の単一ソース）
+// vis.disk が false の場合はドライブ別フラグに関わらず 0 を返し、両系統のセクション
+// スキップ条件（「可視台数 > 0」）を一致させる
+static int visible_disk_count(const std::vector<DiskMetrics>& disks, const Visibility& vis) {
+    if (!vis.disk) return 0;
+    int n = 0;
+    for (const auto& dm : disks)
+        if (vis.disk_drive[dm.drive - 'A']) ++n;
+    return n;
 }
 
 // リングバッファの最大値を返す
@@ -707,7 +718,7 @@ float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
     return y;
 }
 
-float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
+float Renderer::draw_disk(const std::vector<DiskMetrics>& disks, const Visibility& vis,
                            const AppConfig& cfg, float y) {
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
@@ -716,8 +727,8 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
 
     // ドライブ 1 行分（I/O 面グラフ＋Space 横バー＋S.M.A.R.T. を横並びで描画）
     // 「Disk」セクション見出し行は廃止し、各ドライブの IO 行先頭に "Disk:X" として埋め込むことで縦スペースを 1 行節約
-    // prev: 前のドライブ（C: は nullptr）。同一物理ドライブなら SMART 行を省略する
-    auto draw_drive = [&](const DiskMetrics& dm, const DiskMetrics* prev) {
+    // show_smart: このドライブの GB/h 行を描画するか（呼び出し側が同一物理ドライブの重複を判定して渡す）
+    auto draw_drive = [&](const DiskMetrics& dm, bool show_smart) {
         // --- 左 2/3：I/O ---
         // プレフィックス "Disk:X" は他セクション見出し（CPU/RAM/GPU 等）と同じ font_normal_（22pt）で描画
         // IO 数値部 "R 0.0  W 0.0 MB/s" は font_tiny_ で描画し、プレフィックス幅 DISK_PREFIX_W 分右にオフセット
@@ -799,8 +810,6 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
         // GB/h 行（容量テキストの下、同一物理ドライブの後続は省略）
-        bool show_smart = dm.smart_avail
-                       && (!prev || prev->phys_drive != dm.phys_drive);
         if (show_smart) {
             wchar_t smuf[32];
             swprintf_s(smuf, L"%.1f GB/h", dm.smart_write_gbh);
@@ -814,11 +823,17 @@ float Renderer::draw_disk(const DiskMetrics& c, const DiskMetrics& d,
         }
     };
 
-    draw_drive(c, nullptr);
-    y += LINE_H + GRAPH_H + GAP;
-
-    draw_drive(d, &c);
-    y += LINE_H + GRAPH_H + GAP;
+    // GB/h を描画済みの物理ドライブ番号。同一物理ドライブを共有する後続の可視ドライブは
+    // GB/h を省略する（「描画済み基準」。先行ドライブが非表示なら後続の可視ドライブ側に出る）
+    std::vector<int> gbh_drawn;
+    for (const auto& dm : disks) {
+        if (!vis.disk_drive[dm.drive - 'A']) continue;
+        const bool show_smart = dm.smart_avail
+            && std::find(gbh_drawn.begin(), gbh_drawn.end(), dm.phys_drive) == gbh_drawn.end();
+        draw_drive(dm, show_smart);
+        if (show_smart) gbh_drawn.push_back(dm.phys_drive);
+        y += LINE_H + GRAPH_H + GAP;
+    }
 
     return y;
 }
@@ -1356,7 +1371,7 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
     if (vis.gpu)    { y = draw_gpu(m.gpu, cfg, y);        y += SECTION_GAP;
                       y = draw_vram(m.vram, cfg, y);      y += SECTION_GAP; }
     if (vis.mem)    { y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP; }
-    if (vis.disk)   { y = draw_disk(m.disk_c, m.disk_d, cfg, y); y += SECTION_GAP; }
+    if (visible_disk_count(m.disks, vis) > 0) { y = draw_disk(m.disks, vis, cfg, y); y += SECTION_GAP; }
     if (vis.net)    { y = draw_net(m.net, cfg, y);        y += SECTION_GAP; }
     // Claude メイン/サブの 2 アカウント分。サブはアカウント有効化時のみ描画する。
     // サブ未構成時は Visibility がオンでも account_enabled で抑止して領域を消費しない
@@ -1383,7 +1398,7 @@ int Renderer::compute_preferred_height(const AllMetrics& m, const Visibility& vi
     if (vis.gpu)    { y += section_h_gpu(m.gpu.avail);         y += SECTION_GAP;
                       y += section_h_vram(m.vram.avail);       y += SECTION_GAP; }
     if (vis.mem)    { y += section_h_mem();                    y += SECTION_GAP; }
-    if (vis.disk)   { y += section_h_disk();                   y += SECTION_GAP; }
+    if (int n = visible_disk_count(m.disks, vis); n > 0) { y += section_h_disk(n); y += SECTION_GAP; }
     if (vis.net)    { y += section_h_net();                    y += SECTION_GAP; }
     // Claude メイン/サブ：paint() の加算式に厳密一致させる
     if (vis.claude_main && m.claude_main.account_enabled) {

@@ -5,6 +5,7 @@
 #include "ring_buffer.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <array>
 #include <d2d1.h>
 #include <dwrite.h>
 
@@ -20,6 +21,11 @@ struct Visibility {
     bool net         = true;
     bool claude_main = true;
     bool claude_sub  = true;
+    // ドライブ別表示フラグ（レター添字 'A'〜'Z'、デフォルト表示）
+    // disk が false の場合はセクション全体が非表示になり、本フラグより優先される。
+    // 検出されなかったレターの要素は参照されないため無害
+    std::array<bool, 26> disk_drive;
+    Visibility() { disk_drive.fill(true); }
 };
 
 // Direct2D による描画エンジン
@@ -115,7 +121,7 @@ private:
     float draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y);
     float draw_mem(const MemMetrics& m,  const AppConfig& cfg, float y);
     float draw_vram(const VramMetrics& m, const AppConfig& cfg, float y);
-    float draw_disk(const DiskMetrics& c, const DiskMetrics& d,
+    float draw_disk(const std::vector<DiskMetrics>& disks, const Visibility& vis,
                     const AppConfig& cfg, float y);
     float draw_net(const NetMetrics& m,  const AppConfig& cfg, float y);
     float draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float y);
