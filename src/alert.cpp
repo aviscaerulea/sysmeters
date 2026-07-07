@@ -292,7 +292,7 @@ DWORD WINAPI AlertManager::sound_thread_func(LPVOID param) {
     return 0;
 }
 
-void AlertManager::init(const AppConfig& cfg) {
+void AlertManager::init(const AppConfig& cfg, const std::vector<char>& drives) {
     guard_tone_ms_ = cfg.guard_tone_ms;
     wchar_t exe[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -306,6 +306,13 @@ void AlertManager::init(const AppConfig& cfg) {
     wav_avail_ = (GetFileAttributesW(wav_path_) != INVALID_FILE_ATTRIBUTES);
     if (!wav_avail_)
         log_info("alert: alert.wav not found, sound alerts disabled");
+
+    // ディスク系ラベルをドライブレター入りで事前構築する（kMaxDiskDrives 台を超える分は無視）
+    disk_count_ = static_cast<int>(std::min(drives.size(), static_cast<size_t>(kMaxDiskDrives)));
+    for (int i = 0; i < disk_count_; ++i) {
+        swprintf_s(disk_label_[i], L"ディスク %c: 使用率", static_cast<wchar_t>(drives[i]));
+        swprintf_s(nvme_label_[i], L"NVMe %c: 温度",       static_cast<wchar_t>(drives[i]));
+    }
 }
 
 void AlertManager::shutdown() {
@@ -346,18 +353,21 @@ void AlertManager::play() {
 }
 
 // 監視項目 ID に対応する表示ラベルを返す
-const wchar_t* AlertManager::label(Id id) {
+// ディスク系（DISK_0.. / TEMP_NVME_0..）はドライブレターを含むため init() で構築済みの
+// disk_label_/nvme_label_ を参照する。検出台数を超える添字（未使用の予約枠）は L"不明" を返す
+const wchar_t* AlertManager::label(Id id) const {
+    if (id >= DISK_0 && id <= DISK_7)
+        return (id - DISK_0 < disk_count_) ? disk_label_[id - DISK_0] : L"不明";
+    if (id >= TEMP_NVME_0 && id <= TEMP_NVME_7)
+        return (id - TEMP_NVME_0 < disk_count_) ? nvme_label_[id - TEMP_NVME_0] : L"不明";
+
     switch (id) {
     case CPU:        return L"CPU 使用率";
     case GPU:        return L"GPU 使用率";
     case RAM:        return L"RAM 使用率";
     case VRAM:       return L"VRAM 使用率";
-    case DISK_C:     return L"ディスク C: 使用率";
-    case DISK_D:     return L"ディスク D: 使用率";
     case TEMP_CPU:   return L"CPU 温度";
     case TEMP_GPU:   return L"GPU 温度";
-    case TEMP_NVME_C: return L"NVMe C: 温度";
-    case TEMP_NVME_D: return L"NVMe D: 温度";
     case DISK_GBH:   return L"ディスク書き込み量";
     case UPTIME:     return L"OS 稼働時間";
     case CLAUDE_MAIN_5H:   return L"Claude Main 5h レートリミット";
@@ -399,20 +409,32 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
     check_item(RAM,    m.mem.usage_pct,  cfg.warn_mem_pct, cfg.reset_mem_pct);
     if (m.vram.avail)
         check_item(VRAM, m.vram.usage_pct, cfg.warn_mem_pct, cfg.reset_mem_pct);
-    check_item(DISK_C, m.disk_c.used_pct, cfg.warn_disk_space_pct, cfg.reset_disk_space_pct);
-    check_item(DISK_D, m.disk_d.used_pct, cfg.warn_disk_space_pct, cfg.reset_disk_space_pct);
+    // ディスク系：検出ドライブ全台を添字対応の ID で判定する（表示 OFF でも警告は継続する）
+    // m.disks は列挙上限 kMaxDiskDrives 以下が契約だが、ID 範囲逸脱を防ぐため防御的に切り詰める
+    {
+        const int n = std::min(static_cast<int>(m.disks.size()), kMaxDiskDrives);
+        float gbh_max = 0.f;
+        bool  any_smart = false;
+        for (int i = 0; i < n; ++i) {
+            const DiskMetrics& dm = m.disks[i];
+            check_item(static_cast<Id>(DISK_0 + i), dm.used_pct,
+                       cfg.warn_disk_space_pct, cfg.reset_disk_space_pct);
+            if (dm.smart_avail && dm.smart_temp_avail)
+                check_item(static_cast<Id>(TEMP_NVME_0 + i), dm.smart_temp_celsius,
+                           cfg.warn_temp_critical, cfg.reset_temp);
+            if (dm.smart_avail) {
+                any_smart = true;
+                gbh_max = std::max(gbh_max, dm.smart_write_gbh);
+            }
+        }
+        // DISK_GBH は全ドライブの最大値による単一 ID（従来の max(C, D) の自然拡張）
+        if (any_smart)
+            check_item(DISK_GBH, gbh_max, cfg.warn_disk_gbh, cfg.reset_disk_gbh);
+    }
     if (m.cpu.temp_avail)
         check_item(TEMP_CPU, m.cpu.temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
     if (m.gpu.avail)
         check_item(TEMP_GPU, m.gpu.temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
-    if (m.disk_c.smart_avail && m.disk_c.smart_temp_avail)
-        check_item(TEMP_NVME_C, m.disk_c.smart_temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
-    if (m.disk_d.smart_avail && m.disk_d.smart_temp_avail)
-        check_item(TEMP_NVME_D, m.disk_d.smart_temp_celsius, cfg.warn_temp_critical, cfg.reset_temp);
-    if (m.disk_c.smart_avail || m.disk_d.smart_avail) {
-        float gbh = std::max(m.disk_c.smart_write_gbh, m.disk_d.smart_write_gbh);
-        check_item(DISK_GBH, gbh, cfg.warn_disk_gbh, cfg.reset_disk_gbh);
-    }
     {
         float uptime_days = static_cast<float>(m.os.uptime_ms) / (1000.f * 86400.f);
         check_once(UPTIME, uptime_days, static_cast<float>(cfg.warn_uptime_days));

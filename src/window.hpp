@@ -112,6 +112,9 @@ private:
     bool is_fullscreen_app_running();
     void load_visibility();     // レジストリからセクション表示フラグ全項目を一括読み込み（未設定時は true）
     void save_visibility();     // レジストリにセクション表示フラグ全項目を一括保存
+    // 表示トグル共通の後処理：永続化 → 高さ事前計算 → 先行リサイズ → 同期再描画
+    // （二段表示防止のため SetWindowPos を paint() より先行させる。IDM_VIS_* とドライブ別トグルが共用）
+    void on_visibility_toggled();
     bool is_startup_registered(); // Windows スタートアップ（HKCU\...\Run）の登録有無を返す
     void set_startup(bool enable);// Windows スタートアップに現在の実行ファイルを登録 / 解除する
 

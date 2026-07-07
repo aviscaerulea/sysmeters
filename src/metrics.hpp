@@ -56,6 +56,11 @@ struct VramMetrics {
     bool  avail     = false;
 };
 
+// 監視対象の固定ドライブ数上限
+// AlertManager の警告 ID 予約数（DISK_0..7 / TEMP_NVME_0..7）と一致させる必要がある
+// （警告ビットマスク uint32_t の 32 個制約に、他の監視項目分を差し引いた残りから逆算した値）
+inline constexpr int kMaxDiskDrives = 8;
+
 // Disk：I/O（Read/Write 面グラフ）+ 空き容量（横バー）+ S.M.A.R.T.
 struct DiskMetrics {
     RingBuffer<float, 60> read_history;  // Read MB/s
@@ -133,8 +138,10 @@ struct AllMetrics {
     GpuMetrics  gpu;
     MemMetrics  mem;
     VramMetrics vram;
-    DiskMetrics      disk_c;
-    DiskMetrics      disk_d;
+    // 起動時に検出した固定ドライブ（レター昇順、最大 kMaxDiskDrives 台）
+    // DiskCollector::init() 呼び出し前に要素数を確定させ、以後 resize しないこと
+    // （RingBuffer の履歴データがコピー・移動で破壊されるため）
+    std::vector<DiskMetrics> disks;
     NetMetrics       net;
     ClaudeMetrics claude_main;
     ClaudeMetrics claude_sub;
