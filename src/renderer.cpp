@@ -144,10 +144,6 @@ bool Renderer::init(HWND hwnd, const AppConfig& cfg) {
         18.f, L"ja-JP", &font_small_))) return false;
 
     if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        18.f, L"ja-JP", &font_small_bold_))) return false;
-
-    if (FAILED(dwrite_factory_->CreateTextFormat(L"Consolas", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         16.f, L"ja-JP", &font_tiny_))) return false;
 
@@ -208,7 +204,6 @@ void Renderer::shutdown() {
     release_device_resources();
     safe_release(&font_normal_);
     safe_release(&font_small_);
-    safe_release(&font_small_bold_);
     safe_release(&font_tiny_);
     safe_release(&font_large_);
     safe_release(&font_xlarge_);
@@ -1034,14 +1029,14 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     set_brush_color(brush_text_, cfg.col_text);
     render_target_->DrawText(plan_name, static_cast<UINT32>(wcslen(plan_name)), font_small_, hsr, brush_text_);
 
-    // Usage API 取得失敗インジケータ（プラン名の右に赤太字で "ERR"）
+    // Usage API 取得失敗インジケータ（プラン名の右に赤で "ERR"）
     int text_cursor = static_cast<int>(wcslen(plan_name));
     if (m.fetch_error) {
         wchar_t err_buf[24] = {};
         wmemset(err_buf, L' ', text_cursor);
         swprintf_s(err_buf + text_cursor, static_cast<int>(_countof(err_buf)) - text_cursor, L" ERR");
         set_brush_color(brush_text_, COL_WARN_RED);
-        render_target_->DrawText(err_buf, static_cast<UINT32>(wcslen(err_buf)), font_small_bold_, hsr, brush_text_);
+        render_target_->DrawText(err_buf, static_cast<UINT32>(wcslen(err_buf)), font_small_, hsr, brush_text_);
         text_cursor = static_cast<int>(wcslen(err_buf));
     }
 
@@ -1144,8 +1139,10 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         set_brush_color(brush_text_, avail ? cfg.col_text : COL_TEMP_NORMAL);
         render_target_->DrawText(lbl, static_cast<UINT32>(wcslen(lbl)), font_small_, lr, brush_text_);
 
-        // パーセンテージ：理想ペース超過が閾値以上→太字赤、ペースマーカー超→黄、それ以外→通常色
-        // 黄・赤いずれも「理想ペースを超過している」状態で、解除条件（pct <= expected_pct）は共通。
+        // パーセンテージ：100% 到達、または理想ペース超過が閾値以上→赤、ペースマーカー超→黄、それ以外→通常色
+        // 他の警告項目（CPU/GPU/RAM 等）と同じ慣例で太字にせず色のみで警告する。
+        // 100% 由来の赤を最優先で判定する（ペース超過由来の黄分岐に埋もれて発火しなくなるのを防ぐ）。
+        // ペース超過由来の黄・赤の解除条件は pct <= expected_pct、100% 由来の赤の解除条件は pct < 100
         // if (avail) の外側で宣言し、後段の残り時間表示からも参照できるようにする
         bool pace_warning = avail && expected_pct > 0.f && pct > expected_pct;
         if (avail) {
@@ -1156,24 +1153,20 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             wchar_t pct_buf[16];
             swprintf_s(pct_buf, L"%3.0f%%", std::clamp(pct, 0.f, 999999.f));
             uint32_t pct_col;
-            IDWriteTextFormat* pct_font;
-            if (pace_warning && (pct - expected_pct) >= warn_pct) {
-                pct_col  = COL_WARN_RED;
-                pct_font = font_small_bold_;
+            if (pct >= 100.f || (pace_warning && (pct - expected_pct) >= warn_pct)) {
+                pct_col = COL_WARN_RED;
             }
             else if (pace_warning) {
-                pct_col  = COL_WARN_YELLOW;
-                pct_font = font_small_;
+                pct_col = COL_WARN_YELLOW;
             }
             else {
-                pct_col  = cfg.col_text;
-                pct_font = font_small_;
+                pct_col = cfg.col_text;
             }
             set_brush_color(brush_text_, pct_col);
-            pct_font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            pct_font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            render_target_->DrawText(pct_buf, static_cast<UINT32>(wcslen(pct_buf)), pct_font, lr, brush_text_);
-            pct_font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            render_target_->DrawText(pct_buf, static_cast<UINT32>(wcslen(pct_buf)), font_small_, lr, brush_text_);
+            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         }
 
         // バー（ラベル右端からリセット時刻左端まで）
@@ -1332,7 +1325,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         // 段落整列の復元はリセット時刻描画後に行う（途中で戻すと警告状態で縦位置が変動する）
         font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        font_small_bold_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         // 5h と 7d の行送りは SECTION_H のみ。視覚的な隙間を詰めるため GAP を含めない。
         // セクション末尾のギャップは draw_bar 呼び出し後に 1 度だけ加算する。
         y += SECTION_H;
