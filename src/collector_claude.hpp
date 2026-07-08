@@ -48,7 +48,7 @@ private:
     std::atomic<HWND>  notify_wnd_ = nullptr;
     int                account_index_ = 0;     // 0=Main, 1=Sub。WM_CLAUDE_DONE の wParam として送る
     double             usage_ttl_  = 120.0;    // Usage API のキャッシュ TTL（秒）
-    bool               nudge_enable_ = false;  // 5h リセット後に claude.exe を起動するか
+    bool               nudge_enable_ = false;  // 5h リセット通過後の未消費間隙で claude.exe を起動するか
     std::string        nudge_cmd_;             // 起動コマンドライン
     // サブアカウント用の .claude ディレクトリ。
     // 非空のとき nudge 実行時に CLAUDE_CONFIG_DIR 環境変数を一時設定して claude.exe を起動する。
@@ -56,7 +56,13 @@ private:
     // CLAUDE_CONFIG_DIR 環境変数経由でのみ可能。設定は子プロセスに限定するためレジストリやプロセス
     // 親環境は変更しない。
     std::wstring       config_dir_;
-    time_t             last_nudge_resets_ts_ = -1;  // 前回 nudge 実行時の 5h resets_ts（重複抑制）
+    // 最後に観測したアクティブ 5h ウィンドウの resets_ts（-1 = 未観測）。
+    // init 時のキャッシュ復元値でも種付けされ、リセット通過後の未消費間隙検知の基準になる。
+    // fetch スレッドと init（スレッド起動前）からのみ触るため排他は不要
+    time_t             watched_5h_resets_ts_ = -1;
+    // nudge 発火済みウィンドウの resets_ts（重複抑制キー）。
+    // 値 1 は「終了ウィンドウの識別子が不明な間隙で発火済み」を示す番兵
+    time_t             last_nudge_resets_ts_ = -1;
     std::atomic<bool>  fetching_   = false;
     std::atomic<bool>  shutdown_   = false;    // shutdown 要求フラグ（fetch スレッドの早期中断用）
     HANDLE             fetch_thread_ = nullptr;

@@ -230,6 +230,27 @@ static json read_cache_raw(const fs::path& path) {
     return nullptr;
 }
 
+// null 値を欠落と同一視して JSON から数値を読む
+//
+// Usage API はウィンドウ非アクティブ時や未使用項目に「キーは存在するが値は null」を返す。
+// json::value() はこのケースでデフォルト値を返さず type_error.302 を投げるため使わない。
+static double json_num(const nlohmann::json& j, const char* key, double def) {
+    auto it = j.find(key);
+    return (it != j.end() && it->is_number()) ? it->get<double>() : def;
+}
+
+// null 値を欠落と同一視して JSON から文字列を読む（欠落・null は空文字）
+static std::string json_str(const nlohmann::json& j, const char* key) {
+    auto it = j.find(key);
+    return (it != j.end() && it->is_string()) ? it->get<std::string>() : std::string();
+}
+
+// null 値を欠落と同一視して JSON から bool を読む
+static bool json_bool(const nlohmann::json& j, const char* key, bool def) {
+    auto it = j.find(key);
+    return (it != j.end() && it->is_boolean()) ? it->get<bool>() : def;
+}
+
 // Usage API レスポンス JSON を ClaudeMetrics に反映する
 //
 // do_fetch（API/キャッシュ経由）と init（前回キャッシュ復元）で共有する。
@@ -241,16 +262,22 @@ static json read_cache_raw(const fs::path& path) {
 static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
     if (usage_j == nullptr) return;
     try {
-        // 非 const operator[] は存在しないキーを自動挿入するため、value() で副作用なく読む
+        // ウィンドウ失効中（次の使用が始まっていない状態）は five_hour / seven_day の
+        // フィールド値、またはオブジェクトごと null になる。null は「値なし」として扱い、
+        // 使用率 0% / リセット時刻「-」/ resets_ts = -1（アクティブウィンドウ無し）へ落とす。
         const json empty_obj = json::object();
-        const json& fh = usage_j.contains("five_hour") ? usage_j.at("five_hour") : empty_obj;
-        const json& sd = usage_j.contains("seven_day") ? usage_j.at("seven_day") : empty_obj;
+        auto section = [&](const char* key) -> const json& {
+            auto it = usage_j.find(key);
+            return (it != usage_j.end() && it->is_object()) ? *it : empty_obj;
+        };
+        const json& fh = section("five_hour");
+        const json& sd = section("seven_day");
         // utilization は API から 0〜100 の % 値で返る
-        result.five_h_pct  = static_cast<float>(fh.value("utilization", 0.0));
-        result.seven_d_pct = static_cast<float>(sd.value("utilization", 0.0));
+        result.five_h_pct  = static_cast<float>(json_num(fh, "utilization", 0.0));
+        result.seven_d_pct = static_cast<float>(json_num(sd, "utilization", 0.0));
 
-        std::string fh_resets_at = fh.value("resets_at", "");
-        std::string sd_resets_at = sd.value("resets_at", "");
+        std::string fh_resets_at = json_str(fh, "resets_at");
+        std::string sd_resets_at = json_str(sd, "resets_at");
         format_reset_time(fh_resets_at, false, result.five_h_reset, _countof(result.five_h_reset));
         format_reset_time(sd_resets_at, true,  result.seven_d_reset, _countof(result.seven_d_reset));
         result.five_h_expected_pct  = calc_expected_pct(fh_resets_at, 5.0 * 3600);
@@ -259,7 +286,7 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
         result.avail = true;
 
-        time_t fetched_ts = static_cast<time_t>(usage_j.value("_ts", 0.0));
+        time_t fetched_ts = static_cast<time_t>(json_num(usage_j, "_ts", 0.0));
         result.fetched_ts = fetched_ts;
         if (fetched_ts > 0) {
             struct tm lt{};
@@ -270,8 +297,8 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         // 超過料金情報（extra_usage）
         if (usage_j.contains("extra_usage") && usage_j.at("extra_usage").is_object()) {
             const json& eu = usage_j.at("extra_usage");
-            result.extra_enabled      = eu.value("is_enabled", false);
-            result.extra_used_dollars = static_cast<float>(eu.value("used_credits", 0.0)) / 100.f;
+            result.extra_enabled      = json_bool(eu, "is_enabled", false);
+            result.extra_used_dollars = static_cast<float>(json_num(eu, "used_credits", 0.0)) / 100.f;
         }
     }
     catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
@@ -339,7 +366,7 @@ static void clear_negative_cache(const fs::path& path) {
     catch (...) {}
 }
 
-// 5h リセット後 nudge：claude.exe を環境変数で構成して起動する
+// 5h リセット通過後の未消費間隙 nudge：claude.exe を環境変数で構成して起動する
 //
 // メイン（config_dir_ 空）は親プロセス環境を継承して起動する。
 // サブ（config_dir_ 非空）は親プロセス環境 + CLAUDE_CONFIG_DIR=<config_dir_> を加えた一時環境で
@@ -347,7 +374,7 @@ static void clear_negative_cache(const fs::path& path) {
 // CLAUDE_CONFIG_DIR 環境変数経由でのみ可能なため。sysmeters 自身のプロセス親環境は変更せず、
 // CreateProcess の lpEnvironment で子プロセスにだけ設定する。
 void ClaudeCollector::run_nudge() {
-    log_info("claude nudge: 5h reset is past, running (account=%d): %s",
+    log_info("claude nudge: 5h window gap detected, running (account=%d): %s",
              account_index_, nudge_cmd_.c_str());
 
     // nudge_cmd_（UTF-8）を Wide へ変換する。CreateProcessW の第 2 引数は書き換え可能バッファ
@@ -452,16 +479,29 @@ void ClaudeCollector::do_fetch() {
     apply_usage_json(usage_j, result);
     result.fetch_error = (usage_j == nullptr);
 
-    // --- 5h リセット後の nudge（claude.exe 起動による使用状況の更新促進）---
-    // 初回フェッチでは現在値を記録するのみ（起動直後の意図しない発火を防ぐ）。
-    // 2 回目以降のフェッチでリセット日時が変わった（= 新しいウィンドウに入った）とき発火する。
-    if (nudge_enable_ && usage_j != nullptr && result.avail && result.five_h_resets_ts > 0) {
+    // --- 5h リセット通過の nudge（claude.exe 起動による次ウィンドウの消費促進）---
+    // アクティブな 5h ウィンドウ（未来の resets_ts）を監視対象として記憶し、
+    // 「監視対象が過去 かつ 現在アクティブウィンドウが無い」＝リセット通過後に消費が
+    // 始まっていない間隙を検知したら、そのウィンドウにつき 1 回 nudge_cmd を起動する。
+    // 間隙は API の応答形式 2 通りで現れる：resets_at が null になる形式（rts = -1）と、
+    // 過去の resets_at を返し続ける形式（rts が過去値）。
+    // 監視対象は init 時のキャッシュ復元値でも種付けされるため、起動直後の間隙でも発火する。
+    // nudge が機能して新ウィンドウが始まれば監視対象の更新側へ入るため、重複発火しない。
+    // フェッチ失敗時（usage_j == nullptr）は古いデータでの誤発火を避けるため判定しない。
+    if (usage_j != nullptr && result.avail) {
         time_t now = static_cast<time_t>(now_ts());
-        if (result.five_h_resets_ts < now &&
-            result.five_h_resets_ts != last_nudge_resets_ts_) {
-            bool should_run = (last_nudge_resets_ts_ != -1);
-            last_nudge_resets_ts_ = result.five_h_resets_ts;
-            if (should_run) {
+        time_t rts = result.five_h_resets_ts;   // -1 = アクティブウィンドウ無し（API null 応答）
+        if (rts > now) {
+            watched_5h_resets_ts_ = rts;
+        }
+        else if (nudge_enable_) {
+            // 終了したウィンドウの識別子が不明なケース（null 形式の間隙中に起動し、キャッシュにも
+            // resets_at が残っていない）は固定キー 1 で 1 回だけ発火させる。間隙の存在自体は
+            // フェッチ成功データで確認できているため発火が正しく、重複はキーの記録で抑止できる
+            time_t ended = (rts > 0) ? rts
+                         : (watched_5h_resets_ts_ > 0) ? watched_5h_resets_ts_ : 1;
+            if (ended <= now && ended != last_nudge_resets_ts_) {
+                last_nudge_resets_ts_ = ended;
                 run_nudge();
             }
         }
@@ -589,6 +629,11 @@ void ClaudeCollector::init(HWND notify_wnd, int account_index,
     ClaudeMetrics result;
     apply_usage_json(read_cache_raw(cache_usage_path_), result);
     apply_plan_json (read_cache_raw(cache_plan_path_),  result);
+
+    // 起動直後の間隙検知を可能にするため、復元したキャッシュの 5h resets_ts を監視対象として
+    // 種付けする。過去値でも可：フェッチ成功時にアクティブウィンドウが無ければ即 nudge となる
+    if (result.five_h_resets_ts > 0) watched_5h_resets_ts_ = result.five_h_resets_ts;
+
     std::lock_guard<std::mutex> lock(result_mutex_);
     pending_ = result;
 }
