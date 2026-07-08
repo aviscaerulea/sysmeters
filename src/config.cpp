@@ -171,6 +171,9 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_underuse_warn_pct      = get_float("claude", "underuse_warn_pct",      cfg.claude_underuse_warn_pct);
         cfg.claude_underuse_ignore_5h_min = get_int  ("claude", "underuse_ignore_5h_min", cfg.claude_underuse_ignore_5h_min);
         cfg.claude_underuse_ignore_7d_min = get_int  ("claude", "underuse_ignore_7d_min", cfg.claude_underuse_ignore_7d_min);
+        cfg.claude_underuse_pace_window_min = get_int("claude", "underuse_pace_window_min", cfg.claude_underuse_pace_window_min);
+        cfg.claude_underuse_grace_5h_min    = get_int("claude", "underuse_grace_5h_min",    cfg.claude_underuse_grace_5h_min);
+        cfg.claude_underuse_grace_7d_min    = get_int("claude", "underuse_grace_7d_min",    cfg.claude_underuse_grace_7d_min);
 
         // メインアカウント設定（[claude] セクション）
         // メインは ~/.claude を固定使用するため config_dir は持たない。
@@ -238,8 +241,13 @@ AppConfig load_config(const std::string& path) {
     cfg.claude_delta_window_min = std::clamp(cfg.claude_delta_window_min, 0, 60);
 
     // 使い切り不能検知のサニティチェック
-    // 目標到達率は 0〜100%、除外しきい値は各ウィンドウ長（5h=300 分、7d=10080 分）を上限とする
+    // 目標到達率は 0〜100%、観測ウィンドウ幅は 30 分（PACE_MIN_SPAN_SECS 未満だと
+    // 傾きが常に推定不可＝検知が恒久的に沈黙するため、これを下限とする）〜1 日、
+    // 猶予時間・除外しきい値は各ウィンドウ長（5h=300 分、7d=10080 分）を上限とする
     cfg.claude_underuse_warn_pct      = std::clamp(cfg.claude_underuse_warn_pct,      0.f, 100.f);
+    cfg.claude_underuse_pace_window_min = std::clamp(cfg.claude_underuse_pace_window_min, 30, 1440);
+    cfg.claude_underuse_grace_5h_min  = std::clamp(cfg.claude_underuse_grace_5h_min,  0, 300);
+    cfg.claude_underuse_grace_7d_min  = std::clamp(cfg.claude_underuse_grace_7d_min,  0, 10080);
     cfg.claude_underuse_ignore_5h_min = std::clamp(cfg.claude_underuse_ignore_5h_min, 0, 300);
     cfg.claude_underuse_ignore_7d_min = std::clamp(cfg.claude_underuse_ignore_7d_min, 0, 10080);
 

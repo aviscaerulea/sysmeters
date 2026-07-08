@@ -342,11 +342,13 @@ void AppWindow::on_claude_done(int account_index) {
     // WM_DESTROY 後に遅延到着した場合の二重防御
     if (account_index == 0) {
         if (!col_claude_main_) return;
-        col_claude_main_->apply_result(metrics_->claude_main, cfg_->claude_delta_window_min);
+        col_claude_main_->apply_result(metrics_->claude_main, cfg_->claude_delta_window_min,
+                                       cfg_->claude_underuse_pace_window_min);
     }
     else if (account_index == 1) {
         if (!col_claude_sub_) return;
-        col_claude_sub_->apply_result(metrics_->claude_sub, cfg_->claude_delta_window_min);
+        col_claude_sub_->apply_result(metrics_->claude_sub, cfg_->claude_delta_window_min,
+                                      cfg_->claude_underuse_pace_window_min);
     }
     else {
         return;

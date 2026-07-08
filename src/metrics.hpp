@@ -91,9 +91,9 @@ struct NetMetrics {
     bool    ip_avail      = false;
 };
 
-// Claude 5h 使用率の時系列サンプル
-// バー上に直近 N 分間の増加分を濃色オーバーレイ表示するための履歴要素。
-// ts はサンプル取得時刻（UTC time_t）、pct はそのときの 5h 使用率（%）
+// Claude 使用率の時系列サンプル
+// 5h バーの濃色オーバーレイ用履歴と、使い切り不能検知のペース追跡（5h/7d）で共用する。
+// ts はサンプル取得時刻（UTC time_t）、pct はそのときの使用率（%）
 struct ClaudeHistorySample {
     time_t ts  = 0;
     float  pct = 0.f;
@@ -120,11 +120,11 @@ struct ClaudeMetrics {
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
     wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、未取得時は空文字）
     time_t fetched_ts = 0;            // Usage API 実フェッチ時刻（UTC time_t、fetched_at の元値。未取得時 0）
-    // 現在ウィンドウ内で観測した使用量増加 TOP3 の平均レート（%/秒、0 = 推定不可）
+    // 直近 n 分間（underuse_pace_window_min）の観測傾きレート（%/秒、0 = 推定不可）
     // 使い切り不能検知（underuse 警告）の「追い上げ可能ペース」として描画側で外挿に使う。
-    // バケット（5h：30 分 / 7d：6 時間）完了ごとに collector が更新する
-    float five_h_top3_rate  = 0.f;
-    float seven_d_top3_rate = 0.f;
+    // collector が保持サンプルの端点差分（最新 − 最古 ÷ 経過秒）で更新する
+    float five_h_pace_rate  = 0.f;
+    float seven_d_pace_rate = 0.f;
     // 5h 使用率の時系列（直近 N+1 分を保持）
     // apply_result 呼び出し時に push し、保持期間外を先頭から破棄する。
     // 描画側で「現在値」と「N 分前の値」の差分を濃色オーバーレイとして表示する
