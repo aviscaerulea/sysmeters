@@ -1088,7 +1088,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     };
 
     // 追い上げ可能な最大到達率（%）を実測ペースから外挿する
-    // rate はウィンドウ内の増加量 TOP3 平均レート（%/秒、collector が算出）。
+    // rate は直近 n 分間の観測傾きレート（%/秒、collector が算出）。
     // rate 0（推定不可：起動直後・ウィンドウ切替直後・増加実績なし）や resets_ts 無効時は
     // -1 を返し、呼び出し側は使い切り不能の判定をしない（警告なしの安全側）
     auto calc_reach_pct = [](time_t resets_ts, float pct, float rate) -> float {
@@ -1123,6 +1123,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // tick_count:       ペースマーカーの縦線本数（0 のとき縦線なし）
     // warn_pct:         理想ペースからの超過率の警告閾値（%）
     // underuse_min_pct: 使い切り不能検知の除外しきい値（使用率換算 %）。pct がこの値以下の間は判定しない
+    // underuse_grace_pct: 使い切り不能検知の判定開始猶予（経過率換算 %）。ウィンドウ経過（expected_pct）が
+    //                     この値以下の間は判定しない。ウィンドウ序盤の早計な警告を防ぐ
     // reach_pct:        追い上げ外挿による予測最大到達率（%）。負値のとき推定不可（判定しない）
     // delta_start_pct:  直近ウィンドウ開始時点の使用率（%）。0 のとき増加分オーバーレイ非表示
     // peak_frac:        ピーク時間帯の開始・終了位置（バー幅に対する比率）。{0,0} のとき非表示
@@ -1130,7 +1132,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     //                    バー左端に警告解除までの残り時間を黒字で表示する（7d のみで使用、5h は 0 のまま非表示）
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct, float underuse_min_pct,
-                         float reach_pct,
+                         float underuse_grace_pct, float reach_pct,
                          float delta_start_pct = 0.f,
                          std::pair<float, float> peak_frac = {0.f, 0.f},
                          double window_secs = 0.0) {
@@ -1179,13 +1181,14 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         float bar_right = x + ww - RESET_W;
         float bar_top   = y + (SECTION_H - CLAUDE_BAR_H) / 2.f;  // 行内で縦中央揃え
         D2D1_RECT_F br  = D2D1::RectF(x + LBL_W + 4.f, bar_top, bar_right, bar_top + CLAUDE_BAR_H);
-        // 使い切り不能検知：現在ウィンドウ内で実証した増加量 TOP3 の平均ペースで
+        // 使い切り不能検知：直近 n 分間の観測傾きのペースで
         // 残り時間を消費し続けても予測到達率（reach_pct）が目標値に届かない＝挽回不能のとき、
         // 未使用部分の背景を暗紫にして容量を余らせる見込みが確定的であることを知らせる。
         // 均等ペース線（緑）との遅れとは独立した情報で、遅れていても挽回可能な間は警告しない。
-        // reach_pct 負値（推定不可）は判定しない。pct が除外しきい値以下の低使用時も
-        // 常時警告となるのを防ぐため判定しない
+        // reach_pct 負値（推定不可）は判定しない。ウィンドウ経過が猶予（underuse_grace_pct）以下の
+        // 序盤と、pct が除外しきい値以下の低使用時も、早計・常時警告となるのを防ぐため判定しない
         bool underuse = avail && expected_pct > 0.f && cfg.claude_underuse_enable
+                     && expected_pct > underuse_grace_pct
                      && pct > underuse_min_pct
                      && reach_pct >= 0.f && reach_pct < cfg.claude_underuse_warn_pct;
         set_brush_color(brush_fill_, underuse ? COL_UNDERUSE_BG : COL_BAR_BG);
@@ -1341,15 +1344,18 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 使い切り不能検知の除外しきい値（分）を使用率（%）に換算する（分 ÷ ウィンドウ長分 × 100）
     float underuse_min_5h = static_cast<float>(cfg.claude_underuse_ignore_5h_min) / (5.f * 60.f) * 100.f;
     float underuse_min_7d = static_cast<float>(cfg.claude_underuse_ignore_7d_min) / (7.f * 24.f * 60.f) * 100.f;
+    // 判定開始猶予（分）を経過率（%）に換算する（同上の式。expected_pct はウィンドウ経過率そのもの）
+    float underuse_grace_5h = static_cast<float>(cfg.claude_underuse_grace_5h_min) / (5.f * 60.f) * 100.f;
+    float underuse_grace_7d = static_cast<float>(cfg.claude_underuse_grace_7d_min) / (7.f * 24.f * 60.f) * 100.f;
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
              calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct,
-             underuse_min_5h,
-             calc_reach_pct(m.five_h_resets_ts, m.five_h_pct, m.five_h_top3_rate),
+             underuse_min_5h, underuse_grace_5h,
+             calc_reach_pct(m.five_h_resets_ts, m.five_h_pct, m.five_h_pace_rate),
              five_h_delta_start, peak);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
              calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7, cfg.warn_claude_7d_pct,
-             underuse_min_7d,
-             calc_reach_pct(m.seven_d_resets_ts, m.seven_d_pct, m.seven_d_top3_rate),
+             underuse_min_7d, underuse_grace_7d,
+             calc_reach_pct(m.seven_d_resets_ts, m.seven_d_pct, m.seven_d_pace_rate),
              0.f, std::pair<float, float>{0.f, 0.f}, 7.0 * 24 * 3600);
     y += GAP;  // セクション末尾の通常ギャップ（後続セクションとの間隔を維持）
 

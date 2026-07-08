@@ -814,13 +814,15 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
     }
 }
 
-// 使い切り不能検知のバケット長
-// TOP3 の増加レートを「持続できた実績ペース」として測るための区切り幅。
-// 短すぎると瞬間バーストのレートを残り数時間〜数日へ外挿することになり、
-// 見積りが楽観的すぎて警告がほぼ発火しなくなる。（特に 7d は 5h 制限が持続ペースの上限になる）
-// 5h ウィンドウは 30 分（10 区切り）、7d は 6 時間（28 区切り）を持続実績の単位とする
-static constexpr time_t PACE_BUCKET_5H_SECS = 30 * 60;
-static constexpr time_t PACE_BUCKET_7D_SECS = 6 * 3600;
+// 使い切り不能検知のウィンドウ切替判定の許容差（秒）
+// 真の切替では resets_ts が最低でもウィンドウ長（5h）ぶん未来へ動くため、
+// API 側 resets_at の秒〜分単位のぶれと確実に区別できる値とする。5h/7d 共通
+static constexpr time_t PACE_WINDOW_DRIFT_TOL_SECS = 30 * 60;
+
+// 使い切り不能検知の最小観測時間（秒）
+// 端点差分の分母が短いと、離散的に増える使用率の数サンプルで傾きが暴れる。
+// この時間以上のスパンを観測して初めて推定値を返す。（それまでは推定不可 = 警告なしの安全側）
+static constexpr time_t PACE_MIN_SPAN_SECS = 30 * 60;
 
 // 使用率逆行の判定幅（%）
 // 同一ウィンドウ内で使用率は単調非減少が前提であり、この幅を超える減少を「逆行」とみなす。
@@ -828,87 +830,62 @@ static constexpr time_t PACE_BUCKET_7D_SECS = 6 * 3600;
 // （数 % 以上の跳ね上がりと復帰）は確実に検知できる値とする。
 static constexpr float PACE_ANOMALY_EPS_PCT = 0.5f;
 
-// 追跡状態を現サンプル起点で初期化する
-// ウィンドウ切替・使用率逆行時の共通処理。TOP3 実績を捨てて新バケットを開始する。
-// 次のバケット完了までは平均 0（推定不可）となり、使い切り不能の警告は出ない。（安全側）
-// suspect_baseline = true は現サンプル自体が異常低値（utilization 欠落時の 0 フォールバック等）
-// である可能性を示す。この場合の初回バケットは正常値への復帰ジャンプを含む過大レートに
-// なり得るため、バケット完了時に記録せず基準を取り直す。
-void ClaudeCollector::PaceTracker::restart(time_t ts, float pct, time_t resets_ts, bool suspect_baseline) {
-    window_ts  = resets_ts;
-    bucket_ts  = ts;
-    bucket_pct = pct;
-    last_pct   = pct;
-    baseline_suspect = suspect_baseline;
-    for (float& r : top) r = 0.f;
-}
-
-// 使い切り不能検知：新サンプルを反映し TOP3 平均レートを返す
+// 使い切り不能検知：新サンプルを反映し端点差分レートを返す
 //
 // resets_ts が無効（<= 0）の間は追跡を停止して 0 を返す。
-// ウィンドウ切替は resets_ts の近接比較（許容差 bucket_secs）で判定する。真の切替では
-// resets_ts が最低でもウィンドウ長ぶん未来へ動くため、API 側 resets_at の秒〜分単位の
-// ぶれでは誤って実績をクリアしない。許容差内のぶれには window_ts を追従させ、
-// ドリフト累積による誤クリアも防ぐ。
+// ウィンドウ切替は resets_ts の近接比較（許容差 PACE_WINDOW_DRIFT_TOL_SECS）で判定する。
+// 許容差内のぶれには window_ts を追従させ、ドリフト累積による誤クリアを防ぐ。
+// 切替時は旧ウィンドウのサンプルをすべて捨て、現サンプルを新基準として追跡し直す。
 // 同一ウィンドウ内で PACE_ANOMALY_EPS_PCT を超える使用率の減少（逆行）を観測したら、
-// 直前の高値が一時的な異常応答（またはプラン変更による % スケール変化）だったとみなし、
-// 汚染された可能性のある TOP3 を全クリアして現サンプルから追跡し直す。
-// 上振れスパイクは復帰時の逆行による全クリアで、下振れ異常は逆行直後の初回バケット
-// 不採用（baseline_suspect）で、それぞれ異常レートの TOP3 混入を防ぐ。いずれも一時的な
-// 異常への防御であり、バケット長を超えて持続する異常値は正常データと原理的に区別できない。
-// バケット完了（開始から bucket_secs 以上経過）時に増加レートを実経過秒で正規化して算出し、
-// 正値のみ TOP3 へ取り込む。スリープ等の長い空白は実経過での正規化によりレートが小さく出る。（安全側）
-// 戻り値は TOP3 に入っている正値レートの平均（%/秒、0 件なら 0 = 推定不可）
-float ClaudeCollector::PaceTracker::update(time_t ts, float pct, time_t resets_ts, time_t bucket_secs) {
+// 直前の高値または現サンプル自体が異常応答（またはプラン変更による % スケール変化）だった
+// とみなし、全サンプルをクリアする。このとき現サンプルは異常低値（utilization 欠落時の
+// 0 フォールバック等）の可能性があるため保持せず、次サンプルから基準を取り直す。
+// キャッシュ再配信による同一時刻サンプルは重複保持しない。
+// 保持期間は直近 pace_window_min 分。レートは保持サンプルの端点差分
+// （最新 pct − 最古 pct ÷ 実経過秒）で、観測スパンが PACE_MIN_SPAN_SECS 未満のときと
+// 増加が 0 以下のときは 0（推定不可）を返す。
+// スリープ等の長い空白は端点間の実経過で希釈され、レートが小さく出る。（安全側）
+float ClaudeCollector::PaceTracker::update(time_t ts, float pct, time_t resets_ts, int pace_window_min) {
     if (resets_ts <= 0) {
         window_ts = -1;
+        samples.clear();
         return 0.f;
     }
     time_t drift = resets_ts - window_ts;
-    if (window_ts <= 0 || drift > bucket_secs || drift < -bucket_secs) {
-        // ウィンドウ切替：実績をクリアして現サンプルから新バケットを開始（基準は正当な低値）
-        restart(ts, pct, resets_ts, false);
+    if (window_ts <= 0 || drift > PACE_WINDOW_DRIFT_TOL_SECS || drift < -PACE_WINDOW_DRIFT_TOL_SECS) {
+        // ウィンドウ切替：現サンプルを新基準として再開（基準は正当な低値）
+        samples.assign(1, {ts, pct});
+        window_ts = resets_ts;
+        last_pct  = pct;
         return 0.f;
     }
     window_ts = resets_ts;
     if (pct < last_pct - PACE_ANOMALY_EPS_PCT) {
-        // 使用率逆行：直前の高値、または現サンプル自体が異常応答だった可能性があるため
-        // 実績を捨てて追跡し直し、初回バケットのレートは不採用とする。
-        restart(ts, pct, resets_ts, true);
+        // 使用率逆行：汚染された可能性のあるサンプルを全て捨てる。
+        // 現サンプルも異常低値の疑いがあるため保持せず、次サンプルを新基準とする
+        samples.clear();
+        last_pct = pct;
         return 0.f;
     }
     last_pct = pct;
-    if (ts - bucket_ts >= bucket_secs) {
-        if (baseline_suspect) {
-            // 基準点が異常低値の疑いを持つ初回バケットは、正常値への復帰ジャンプを含む
-            // 過大レートになり得るため記録せず、基準を現サンプルへ取り直す。
-            baseline_suspect = false;
-        }
-        else {
-            // バケット完了：増加レートを算出し、最小スロットより大きければ置き換えて TOP3 を維持する
-            float rate = (pct - bucket_pct) / static_cast<float>(ts - bucket_ts);
-            if (rate > 0.f) {
-                float* min_slot = &top[0];
-                for (float& r : top)
-                    if (r < *min_slot) min_slot = &r;
-                if (rate > *min_slot) *min_slot = rate;
-            }
-        }
-        bucket_ts  = ts;
-        bucket_pct = pct;
-    }
-    float sum = 0.f;
-    int   n   = 0;
-    for (float r : top) {
-        if (r > 0.f) {
-            sum += r;
-            ++n;
-        }
-    }
-    return n > 0 ? sum / static_cast<float>(n) : 0.f;
+    if (samples.empty() || ts > samples.back().ts)
+        samples.push_back({ts, pct});
+    // 保持期間（pace_window_min 分）より古いサンプルを先頭から破棄する
+    time_t cutoff = ts - static_cast<time_t>(pace_window_min) * 60;
+    auto it = std::find_if(samples.begin(), samples.end(),
+        [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
+    if (it != samples.begin())
+        samples.erase(samples.begin(), it);
+    if (samples.size() < 2)
+        return 0.f;
+    time_t span = samples.back().ts - samples.front().ts;
+    if (span < PACE_MIN_SPAN_SECS)
+        return 0.f;
+    float rate = (samples.back().pct - samples.front().pct) / static_cast<float>(span);
+    return rate > 0.f ? rate : 0.f;
 }
 
-void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min) {
+void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min, int pace_window_min) {
     std::lock_guard<std::mutex> lock(result_mutex_);
     // セッション数・アカウントラベル・有効化フラグは window.cpp 側で管理しているため
     // pending_（fetch 結果）で上書きされないよう退避する。
@@ -939,12 +916,12 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min) {
         // 使い切り不能検知のペース追跡を更新する
         // サンプル時刻はキャッシュ JSON の実フェッチ時刻を優先する。apply_result 呼び出し時刻を
         // 使うと、起動時のキャッシュ復元直後のフェッチで経過時間が過小になりレートが過大評価される。
-        // 同一フェッチ時刻の再配信（キャッシュヒット）は同一バケット内に留まり増分 0 なので無害
+        // 同一フェッチ時刻の再配信（キャッシュヒット）は PaceTracker 側で重複破棄される
         time_t sample_ts = out.fetched_ts > 0 ? out.fetched_ts : now;
-        out.five_h_top3_rate  = pace_5h_.update(sample_ts, out.five_h_pct,
-                                                out.five_h_resets_ts, PACE_BUCKET_5H_SECS);
-        out.seven_d_top3_rate = pace_7d_.update(sample_ts, out.seven_d_pct,
-                                                out.seven_d_resets_ts, PACE_BUCKET_7D_SECS);
+        out.five_h_pace_rate  = pace_5h_.update(sample_ts, out.five_h_pct,
+                                                out.five_h_resets_ts, pace_window_min);
+        out.seven_d_pace_rate = pace_7d_.update(sample_ts, out.seven_d_pct,
+                                                out.seven_d_resets_ts, pace_window_min);
     }
 }
 
