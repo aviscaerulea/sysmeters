@@ -93,6 +93,9 @@ scoop bucket add aviscaerulea https://github.com/aviscaerulea/scoop-bucket
 scoop install sysmeters
 ```
 
+> [!TIP]
+> 設定は `sysmeters.toml` を直接編集せず、同じディレクトリに `sysmeters.local.toml` を作り、デフォルトから変更する項目だけを記述するのがお勧めだ。バージョンアップで `sysmeters.toml` が更新されても設定内容を移行する手間がない。廃止された設定項目が `sysmeters.local.toml` に残っていても無視され、動作はデフォルトに従う。
+
 ## 実行
 
 ```
