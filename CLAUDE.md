@@ -29,24 +29,6 @@ task release
 
 ## アーキテクチャ
 
-### ファイル構成
-
-```
-src/
-├── main.cpp                エントリポイント（main）、多重起動排他、COM 初期化
-├── window.hpp/.cpp         ウィンドウ管理（標準タイトルバー、タスクトレイ、メッセージループ、各種タイマー）
-├── renderer.hpp/.cpp       Direct2D 描画（面グラフ、縦バー、横バー、テキスト）
-├── config.hpp/.cpp         TOML 設定読み書き（sysmeters.toml）
-├── metrics.hpp             全メトリクス構造体定義
-├── ring_buffer.hpp         固定長リングバッファ（テンプレート）
-├── collector_cpu.hpp/.cpp  CPU 使用率（PDH）+ 温度（WMI）
-├── collector_gpu.hpp/.cpp  GPU 使用率/温度/VRAM（NVML 動的ロード）
-├── collector_mem.hpp/.cpp  RAM 使用量（GlobalMemoryStatusEx）
-├── collector_disk.hpp/.cpp Disk I/O（PDH、起動時に検出した固定ドライブ別、最大 8 台）
-├── collector_net.hpp/.cpp  Network I/O（PDH、全 NIC 合算）
-└── collector_claude.hpp/.cpp Claude API 呼び出し（WinHTTP 非同期）+ セッション数
-```
-
 ### データフロー
 
 ```
