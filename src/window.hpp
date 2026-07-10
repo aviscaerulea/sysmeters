@@ -37,6 +37,13 @@ private:
     static constexpr bool DEF_TOPMOST        = false;
     static constexpr bool DEF_TOAST_ALERT    = true;
     static constexpr bool DEF_FULLSCREEN_MUTE = true;
+    // 「常に警告通知を有効にする」のデフォルト。
+    // PC にダメージを与え得る温度系のみ ON とし、使用率系は OFF とする
+    static constexpr bool DEF_ALWAYS_ALERT_CPU       = false;
+    static constexpr bool DEF_ALWAYS_ALERT_TEMP_CPU  = true;
+    static constexpr bool DEF_ALWAYS_ALERT_GPU       = false;
+    static constexpr bool DEF_ALWAYS_ALERT_TEMP_GPU  = true;
+    static constexpr bool DEF_ALWAYS_ALERT_TEMP_DISK = true;
 
     // Claude Code 制限強化時間 通知の発火時刻（ローカル時刻でハードコード固定）
     static constexpr int PEAK_NOTIFY_HOUR = 21;
@@ -50,6 +57,14 @@ private:
     bool topmost_        = DEF_TOPMOST;
     bool toast_alert_    = DEF_TOAST_ALERT;
     bool fullscreen_mute_ = DEF_FULLSCREEN_MUTE;  // フルスクリーンアプリ実行中は通知・警告音を抑制
+    // フルスクリーン抑制中でも Toast＋警告音を通す例外項目（レジストリ保存）
+    bool always_alert_cpu_       = DEF_ALWAYS_ALERT_CPU;        // CPU 使用率
+    bool always_alert_temp_cpu_  = DEF_ALWAYS_ALERT_TEMP_CPU;   // CPU 温度
+    bool always_alert_gpu_       = DEF_ALWAYS_ALERT_GPU;        // GPU 使用率
+    bool always_alert_temp_gpu_  = DEF_ALWAYS_ALERT_TEMP_GPU;   // GPU 温度
+    bool always_alert_temp_disk_ = DEF_ALWAYS_ALERT_TEMP_DISK;  // ディスク温度（全ドライブ一括）
+    // 現在フルスクリーン抑制が働いているか（タイトルバー表示の差分検知用。WM_TIMER で更新）
+    bool fullscreen_silent_ = false;
     Visibility vis_;                   // セクション表示フラグ（カテゴリ単位の表示/非表示）
     UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
     ULONGLONG last_notify_tick_ = 0;   // 前回通知チェック時のローカル時刻（FILETIME 形式 100ns 単位、境界またぎ検出用）
@@ -108,6 +123,11 @@ private:
     void save_toast_alert();    // レジストリに Toast 通知設定を書く
     bool load_fullscreen_mute();  // レジストリからフルスクリーン抑制設定を読む（未設定時は true）
     void save_fullscreen_mute();  // レジストリにフルスクリーン抑制設定を書く
+    void load_always_alert();  // レジストリから「常に警告通知」5 フラグを一括読み込み
+    void save_always_alert();  // レジストリに「常に警告通知」5 フラグを一括保存
+    // 「常に警告通知」フラグを AlertManager::Id のビットマスクに変換する
+    // （ディスク温度は TEMP_NVME_0..7 の全添字に展開する）
+    uint32_t always_alert_mask() const;
     // フルスクリーンアプリが実行中か判定する（SHQueryUserNotificationState 使用）
     bool is_fullscreen_app_running();
     void load_visibility();     // レジストリからセクション表示フラグ全項目を一括読み込み（未設定時は true）

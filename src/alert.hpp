@@ -49,8 +49,11 @@ public:
     //
     // 戻り値：新規発火した Id のビットが立った uint32_t（0 = 発火なし）。
     // mute が true の場合、閾値判定とヒステリシス管理は通常どおり行うが警告音の再生を抑制する。
+    // ただし always_mask のビットに対応する項目は mute 中でも警告音を再生する
+    // （フルスクリーン抑制の例外「常に警告通知を有効にする」。mute が false のとき always_mask は無視される）。
     // Toast の発行は window 側が戻り値を見て行う。
-    uint32_t check(const AllMetrics& m, const AppConfig& cfg, bool mute = false);
+    uint32_t check(const AllMetrics& m, const AppConfig& cfg, bool mute = false,
+                   uint32_t always_mask = 0);
 
 private:
     // CPU/GPU 警告判定に使う平均サンプル数（直近 10 サンプル ≒ 約 9 秒）

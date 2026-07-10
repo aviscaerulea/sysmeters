@@ -24,6 +24,12 @@
 #define IDM_VIS_NET      114
 #define IDM_VIS_CLAUDE_MAIN 115
 #define IDM_VIS_CLAUDE_SUB  116
+// 常に警告通知を有効にするサブメニュー（フルスクリーン抑制の例外項目）
+#define IDM_ALWAYS_ALERT_CPU       120
+#define IDM_ALWAYS_ALERT_TEMP_CPU  121
+#define IDM_ALWAYS_ALERT_GPU       122
+#define IDM_ALWAYS_ALERT_TEMP_GPU  123
+#define IDM_ALWAYS_ALERT_TEMP_DISK 124
 // ドライブ別表示トグル（動的レンジ、ID = BASE + (レター - 'A')、200〜225 を予約。既存 100〜116 と衝突しない）
 #define IDM_VIS_DISK_DRIVE_BASE 200
 // Claude API バックグラウンド完了通知
