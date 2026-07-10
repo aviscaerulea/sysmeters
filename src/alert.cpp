@@ -380,7 +380,8 @@ const wchar_t* AlertManager::label(Id id) const {
     }
 }
 
-uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mute) {
+uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mute,
+                              uint32_t always_mask) {
     uint32_t fired_mask = 0;
 
     // 通常の閾値チェック：超えたら発火、リセット閾値を下回ったら解除
@@ -464,7 +465,9 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
             check_once(CLAUDE_SUB_OVER, m.claude_sub.extra_used_dollars, cfg.warn_claude_over);
     }
 
-    if (fired_mask && !mute && cfg.alert_sound && wav_avail_) play();
+    // mute 中は always_mask の例外項目のみ警告音の対象とする
+    const uint32_t sound_mask = mute ? (fired_mask & always_mask) : fired_mask;
+    if (sound_mask && cfg.alert_sound && wav_avail_) play();
     return fired_mask;
 }
 
