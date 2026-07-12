@@ -34,6 +34,8 @@ struct AppConfig {
     uint32_t col_net_recv   = 0xDDA858;  // Read/recv 用：少し明るいアンバー（disk_read と統一）
     uint32_t col_net_send   = 0x8C642A;  // Write/send 用：暗めアンバー（disk_write と統一）
     uint32_t col_claude_bar = 0xCC923E;  // アンバー（同上）
+    uint32_t col_claude_scoped_bar = 0xCE5C4A;  // 朱色（上位モデル専用 7d ミニバー。claude_bar のアンバーと親和する暖色）
+    uint32_t col_claude_scoped_bar_warn = 0xEF5350;  // 警告赤（上位モデル専用 7d ミニバーが 100% 到達時。COL_WARN_RED と同値）
     uint32_t col_cpu_core   = 0xCC923E;  // アンバー（同上）
 
     // 警告色の閾値
@@ -72,6 +74,8 @@ struct AppConfig {
     // 消費ペースを視覚化する補助表示。メイン/サブ共通。0 で機能無効。
     // サニティチェックで 0〜60 にクランプする。
     int  claude_delta_window_min = 5;
+    // 上位モデル専用 7d ミニバーの縦幅（px）。0 = 非表示、最大 4（7d バー下の行内余白に収まる上限）
+    int  claude_scoped_bar_px = 2;
     // 使い切り不能検知（underuse 警告）
     // 直近 underuse_pace_window_min 分の観測傾き（端点差分）のペースで
     // 残り時間を消費し続けても予測到達率が underuse_warn_pct に届かない＝挽回不能を検知し、

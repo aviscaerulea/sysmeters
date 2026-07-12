@@ -24,6 +24,7 @@ public:
         DISK_GBH, UPTIME,
         CLAUDE_MAIN_5H, CLAUDE_MAIN_7D, CLAUDE_MAIN_OVER,
         CLAUDE_SUB_5H,  CLAUDE_SUB_7D,  CLAUDE_SUB_OVER,
+        CLAUDE_MAIN_SCOPED, CLAUDE_SUB_SCOPED,
         COUNT_
     };
     static_assert(COUNT_ <= 32, "Id count exceeds uint32_t bitmask capacity");
