@@ -1364,6 +1364,29 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
              underuse_min_7d, underuse_grace_7d, underuse_lag_7d, false,
              calc_reach_pct(m.seven_d_resets_ts, m.seven_d_pct, m.seven_d_pace_rate),
              0.f, std::pair<float, float>{0.f, 0.f}, 7.0 * 24 * 3600);
+    // モデルスコープ（Fable 等）7d 専用ミニバー
+    // 7d バー下端に隙間なく密着する塗り矩形のみ（縦幅は cfg.claude_scoped_bar_px、0 = 非表示）。
+    // バー全幅 = スコープ枠の 100%。
+    // テキスト・背景トラック・警告色は持たず、行高（section_h_claude）にも影響しない。
+    // 縦幅は config 側で 0〜4 にクランプ済みで、行内のバー下余白 (SECTION_H - BAR_H) / 2 = 4px に
+    // 必ず収まるためレイアウト調整は不要。
+    // weekly_scoped を返さないアカウントでは非表示（seven_d_scoped_pct < 0）
+    if (m.avail && m.seven_d_scoped_pct >= 0.f && cfg.claude_scoped_bar_px > 0) {
+        float bar_left  = x + LBL_W + 4.f;
+        float bar_right = x + ww - RESET_W;
+        float fill_w = std::clamp(m.seven_d_scoped_pct, 0.f, 100.f) / 100.f * (bar_right - bar_left);
+        if (fill_w > 0.f) {
+            float top = y - (SECTION_H - BAR_H) / 2.f;  // draw_bar が y を進めた後なので、これが 7d バー下端
+            // 100% 到達時は警告色（col_claude_scoped_bar_warn）で塗り、それ以外は通常色。
+            // 判定は AlertManager の CLAUDE_*_SCOPED と同一条件（100% 到達）で同時に発火する
+            uint32_t bar_col = (m.seven_d_scoped_pct >= 100.f)
+                ? cfg.col_claude_scoped_bar_warn : cfg.col_claude_scoped_bar;
+            set_brush_color(brush_fill_, bar_col);
+            render_target_->FillRectangle(
+                D2D1::RectF(bar_left, top, bar_left + fill_w,
+                            top + static_cast<float>(cfg.claude_scoped_bar_px)), brush_fill_);
+        }
+    }
     y += GAP;  // セクション末尾の通常ギャップ（後続セクションとの間隔を維持）
 
     return y;

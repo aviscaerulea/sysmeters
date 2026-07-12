@@ -116,6 +116,10 @@ struct ClaudeMetrics {
     bool  fetch_error   = false;      // Usage API 取得失敗フラグ（ERR 表示用）
     float extra_used_dollars = 0.f;   // 超過使用額（ドル換算：used_credits / 100）
     bool  extra_enabled      = false; // 超過料金が有効か（is_enabled）
+    // モデルスコープ 7d 使用率（%）。Usage API limits[] の kind=="weekly_scoped" の percent。
+    // Fable 等の上位モデル専用 7d 枠の消費率で、分母は専用枠の週次総容量（weekly_all とは別枠）。
+    // API がエントリを返さない場合は -1（未提供 = ミニバー非表示）
+    float seven_d_scoped_pct = -1.f;
     wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
     wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、未取得時は空文字）

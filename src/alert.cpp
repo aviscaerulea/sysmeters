@@ -376,6 +376,8 @@ const wchar_t* AlertManager::label(Id id) const {
     case CLAUDE_SUB_5H:    return L"Claude Sub 5h レートリミット";
     case CLAUDE_SUB_7D:    return L"Claude Sub 7d レートリミット";
     case CLAUDE_SUB_OVER:  return L"Claude Sub 超過料金";
+    case CLAUDE_MAIN_SCOPED: return L"Claude Main 上位モデル 7d レートリミット";
+    case CLAUDE_SUB_SCOPED:  return L"Claude Sub 上位モデル 7d レートリミット";
     default:         return L"不明";
     }
 }
@@ -452,6 +454,10 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
         // extra_enabled が無効になっても fired_[CLAUDE_MAIN_OVER] は保持される（check_once はリセットなし）
         if (m.claude_main.extra_enabled)
             check_once(CLAUDE_MAIN_OVER, m.claude_main.extra_used_dollars, cfg.warn_claude_over);
+        // 上位モデル（Fable 等）専用 7d 枠の 100% 到達警告
+        // 閾値は固定 100%（使い切り警告のため設定不要）。100% 未満へ戻ったらリセット
+        if (m.claude_main.seven_d_scoped_pct >= 0.f)
+            check_item(CLAUDE_MAIN_SCOPED, m.claude_main.seven_d_scoped_pct, 100.f, 100.f);
     }
     // Claude Sub：account_enabled で TOML サブ機能 ON 時のみ判定
     if (m.claude_sub.account_enabled && m.claude_sub.avail) {
@@ -463,6 +469,9 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
                        cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
         if (m.claude_sub.extra_enabled)
             check_once(CLAUDE_SUB_OVER, m.claude_sub.extra_used_dollars, cfg.warn_claude_over);
+        // 上位モデル専用 7d 枠の 100% 到達警告（Main と同一条件）
+        if (m.claude_sub.seven_d_scoped_pct >= 0.f)
+            check_item(CLAUDE_SUB_SCOPED, m.claude_sub.seven_d_scoped_pct, 100.f, 100.f);
     }
 
     // mute 中は always_mask の例外項目のみ警告音の対象とする

@@ -300,6 +300,21 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
             result.extra_enabled      = json_bool(eu, "is_enabled", false);
             result.extra_used_dollars = static_cast<float>(json_num(eu, "used_credits", 0.0)) / 100.f;
         }
+
+        // モデルスコープ 7d 使用率（limits 配列の kind=="weekly_scoped"）
+        // Fable 等の上位モデル専用 7d 枠の消費率。特定モデル名では絞らず weekly_scoped の
+        // 最初のエントリを採用する（現状 1 件のみ観測。モデル世代交代への耐性を優先）。
+        // 呼び出し元は前回値を引き継いだ result を渡すため、走査前に必ず -1（未提供）へ
+        // リセットする。エントリが消えた場合に古い値が残り続けるのを防ぐ
+        result.seven_d_scoped_pct = -1.f;
+        if (usage_j.contains("limits") && usage_j.at("limits").is_array()) {
+            for (const auto& lim : usage_j.at("limits")) {
+                if (lim.is_object() && json_str(lim, "kind") == "weekly_scoped") {
+                    result.seven_d_scoped_pct = static_cast<float>(json_num(lim, "percent", -1.0));
+                    break;
+                }
+            }
+        }
     }
     catch (const nlohmann::json::exception& e) { log_error("%s", e.what()); }
 }
