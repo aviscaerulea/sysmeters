@@ -935,22 +935,39 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min, int
     // 5h/7d 履歴に現在値を追加し、保持期間外を破棄する
     // データ未取得（avail=false）時は履歴の信頼性が無いため push しない。
     // 保持期間は (delta_window + 1) × 60 秒（N 分前のサンプル参照に必要な分 + バッファ 1 分）。
+    // 7d は保持期間より古いサンプルのうち最新の 1 個をアンカーとして追加保持する。
+    // アプリ・OS の停止明けに「停止前最後の観測」を基準とした実質ペース判定を即時再開する
+    // ためで、5h には不要（anchor_floor = 0 で無効化）。
     // 7d ウィンドウのリセットで履歴はクリアしない。旧ウィンドウの高 pct サンプルが残っても、
     // 描画側の「増加分のみ描画」と「レート ≤ 0 は判定しない」条件で無害化される。
     // avail 時は push_and_trim 直後に cache_hist_path_ へ毎回上書き保存し、アプリ再起動後も
-    // init() 経由で直近の履歴（7d はデフォルト 12h 分）を復元できるようにする。（クラッシュ耐性優先の設計）
+    // init() 経由で直近の履歴（7d はデフォルト 12h 分 + アンカー）を復元できるようにする。（クラッシュ耐性優先の設計）
     if (out.avail) {
         time_t now = time(nullptr);
-        auto push_and_trim = [now](std::vector<ClaudeHistorySample>& hist, float pct, int win_min) {
+        // anchor_floor > 0 のとき、cutoff より古いサンプルのうち最新の 1 個を
+        // アンカーとして残す。（ts >= anchor_floor のものに限る。0 でアンカー無効）
+        auto push_and_trim = [now](std::vector<ClaudeHistorySample>& hist, float pct, int win_min,
+                                   time_t anchor_floor) {
             hist.push_back({now, pct});
             time_t cutoff = now - static_cast<time_t>(win_min + 1) * 60;
             auto it = std::find_if(hist.begin(), hist.end(),
                 [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
-            if (it != hist.begin())
+            if (it != hist.begin()) {
+                if (anchor_floor > 0 && std::prev(it)->ts >= anchor_floor) --it;
                 hist.erase(hist.begin(), it);
+            }
         };
-        push_and_trim(out.five_h_history,  out.five_h_pct,  delta_window_min);
-        push_and_trim(out.seven_d_history, out.seven_d_pct, delta_window_7d_min);
+        // 7d アンカーの下限時刻：窓幅の 2 倍（デフォルト 24h）より古い、または現行 7d
+        // ウィンドウ開始より前のサンプルはアンカーにしない。前者は古すぎる基準による過剰な
+        // 平滑化の防止、後者は旧ウィンドウの pct を跨いだ誤ったレート算出の防止。
+        // delta_window_7d_min = 0 のときは anchor_floor = now となり自然に無効化される
+        time_t anchor_floor = now - static_cast<time_t>(delta_window_7d_min) * 120;
+        if (out.seven_d_resets_ts > 0) {
+            time_t win_start = out.seven_d_resets_ts - static_cast<time_t>(7) * 24 * 3600;
+            if (win_start > anchor_floor) anchor_floor = win_start;
+        }
+        push_and_trim(out.five_h_history,  out.five_h_pct,  delta_window_min, 0);
+        push_and_trim(out.seven_d_history, out.seven_d_pct, delta_window_7d_min, anchor_floor);
         // 7d 保持上限は (delta_window_7d_min + 1) 分 ≒ 12h、取得サイクル ~60 秒で高々 750
         // サンプル前後・数十 KB のため、毎回書いても実害がない
         save_history_cache(cache_hist_path_, out.five_h_history, out.seven_d_history);

@@ -1096,6 +1096,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 新しい順に走査し、ts <= now - N 分 の最初のサンプルを返す。
     // N 分前のサンプルが無い場合、最古サンプルの経過時間が 60 秒以上なら最古サンプルを返す
     // （起動直後でもおおむねペースが見える効果。1 分未満は誤差が大きいため抑制）
+    // 長時間停止明けは collector が残したアンカー（停止前最後のサンプル）が「N 分以上前の
+    // 最新サンプル」に該当するため、起点が N 分前より古くなる。（停止中の増分も濃色に含まれる）
     auto calc_delta_start_pct = [&](const std::vector<ClaudeHistorySample>& hist, int win_min) -> float {
         if (win_min <= 0 || hist.empty()) return 0.f;
         time_t now = time(nullptr);
@@ -1107,25 +1109,33 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         return 0.f;
     };
 
-    // 7d 履歴から直近 win_min 分の平均消費レート（%/秒）を求める
-    // 「win_min 分以上前」の最新サンプルを基準点とし、(現在 pct − 基準 pct) ÷ 実経過秒 を返す。
-    // 基準サンプル不在（起動直後・履歴が win_min 分に満たない）と増加 0 以下
-    //（リセット跨ぎで旧ウィンドウの高値が基準になった場合を含む）は 0（推定不可）を返す。
-    // calc_delta_start_pct の最古サンプルフォールバックは使わない。短スパンの外挿は
-    // 傾きが暴れるため、確実に win_min 分経過したサンプルのみを基準とする。（安全側）
+    // 短スパン外挿の抑制下限（秒）
+    // コールドスタート直後（win_min 分前の基準サンプルが無い）に最古サンプルで代用する際、
+    // これ未満の観測時間では傾きが暴れるため推定不可扱いにする
+    constexpr time_t UNDERUSE_MIN_SPAN_SECS = 30 * 60;
+    // 7d 履歴から直近の実質平均消費レート（%/秒）を求める
+    // 基準点は「win_min 分以上前」の最新サンプル。（アプリ停止明けは collector が残した
+    // アンカー＝停止前最後のサンプルが該当し、停止期間も分母に含んだ正味ペースになる）
+    // 基準サンプルが無い場合（コールドスタート直後）は最古サンプルで代用するが、
+    // 観測時間が UNDERUSE_MIN_SPAN_SECS 未満なら 0（推定不可）を返す。
+    // 増加 0 以下（リセット跨ぎで旧ウィンドウの高値が基準になった場合を含む）も 0 を返す
     auto calc_hist_rate = [](const std::vector<ClaudeHistorySample>& hist, int win_min, float pct_now) -> float {
         if (win_min <= 0 || hist.empty()) return 0.f;
         time_t now = time(nullptr);
         time_t target = now - static_cast<time_t>(win_min) * 60;
+        const ClaudeHistorySample* base = nullptr;
         for (auto it = hist.rbegin(); it != hist.rend(); ++it) {
             if (it->ts <= target) {
-                time_t span = now - it->ts;
-                if (span <= 0) return 0.f;
-                float rate = (pct_now - it->pct) / static_cast<float>(span);
-                return rate > 0.f ? rate : 0.f;
+                base = &*it;
+                break;
             }
         }
-        return 0.f;
+        if (!base && now - hist.front().ts >= UNDERUSE_MIN_SPAN_SECS) base = &hist.front();
+        if (!base) return 0.f;
+        time_t span = now - base->ts;
+        if (span <= 0) return 0.f;
+        float rate = (pct_now - base->pct) / static_cast<float>(span);
+        return rate > 0.f ? rate : 0.f;
     };
 
     // Claude レートリミット横バーを 1 本描画する
@@ -1346,10 +1356,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     float seven_d_delta_start = calc_delta_start_pct(m.seven_d_history, cfg.claude_delta_window_7d_min);
     // 7d 使い切り不能検知：条件は次の 2 つのみ。（5h には検知を行わない）
     // (1) ウィンドウ開始（リセット）から delta_window_7d_min 分以上経過している
-    // (2) 直近 delta_window_7d_min 分の平均消費ペースで残り時間を外挿した予測到達率が
-    //     underuse_warn_pct 未満（レート推定不可のときは reach_pct が -1 になり判定しない）
-    // リセット直後は (1) が 12h（デフォルト）の間判定を止め、その間に旧ウィンドウの高 pct
-    // サンプルは履歴の保持期間切れで消えるため、旧データによる誤判定は起きない
+    // (2) 直近の実質平均消費ペース（calc_hist_rate。停止期間も分母に含む正味レート）で
+    //     残り時間を外挿した予測到達率が underuse_warn_pct 未満
+    //     （レート推定不可のときは reach_pct が -1 になり判定しない）
+    // リセット直後は (1) が 12h（デフォルト）の間判定を止める。旧ウィンドウのサンプルは
+    // 保持期間切れの破棄と、アンカーのウィンドウ開始チェック（collector 側）で基準にならない
     bool underuse_7d = false;
     if (m.avail && cfg.claude_underuse_enable && m.seven_d_resets_ts > 0) {
         constexpr double WIN_7D_SECS = 7.0 * 24 * 3600;
