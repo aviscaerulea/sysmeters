@@ -230,6 +230,74 @@ static json read_cache_raw(const fs::path& path) {
     return nullptr;
 }
 
+// [ts, pct] 形式の 1 要素をサンプルへ変換する。数値でない要素は false を返す（呼び出し側でスキップする）
+static bool parse_hist_sample(const json& elem, ClaudeHistorySample& out) {
+    if (!elem.is_array() || elem.size() < 2 || !elem[0].is_number() || !elem[1].is_number())
+        return false;
+    out.ts  = static_cast<time_t>(elem[0].get<double>());
+    out.pct = static_cast<float>(elem[1].get<double>());
+    return true;
+}
+
+// JSON 配列（[[ts, pct], ...] 形式）を履歴ベクタへ変換する。
+// 数値でない要素はスキップする。（古いサンプルは呼び出し側の push_and_trim が自然に落とすため
+// ここでは鮮度チェックをしない。未来時刻のサンプルもレート算出側の span<=0 ガードで無害）
+static std::vector<ClaudeHistorySample> parse_hist_array(const json& arr) {
+    std::vector<ClaudeHistorySample> hist;
+    if (!arr.is_array()) return hist;
+    for (const auto& elem : arr) {
+        ClaudeHistorySample s;
+        if (parse_hist_sample(elem, s)) hist.push_back(s);
+    }
+    return hist;
+}
+
+// 履歴ベクタを JSON 配列（[[ts, pct], ...] 形式）へ変換する
+static json hist_to_json_array(const std::vector<ClaudeHistorySample>& hist) {
+    json arr = json::array();
+    for (const auto& s : hist)
+        arr.push_back(json::array({static_cast<double>(s.ts), static_cast<double>(s.pct)}));
+    return arr;
+}
+
+// 5h/7d 履歴キャッシュ（{"five_h":[[ts,pct],...], "seven_d":[[ts,pct],...]}）を読み込む
+//
+// init() から一度だけ呼ばれ、起動直後の履歴（restored_hist5_ / restored_hist7_）の種にする。
+// read_cache_raw を再利用するため TTL 判定はなく、ファイル未存在・parse 失敗時は
+// out_five / out_seven を空のまま返す。（現状互換：履歴なしからスタートする挙動に退化する）
+static void load_history_cache(const fs::path& path,
+                               std::vector<ClaudeHistorySample>& out_five,
+                               std::vector<ClaudeHistorySample>& out_seven) {
+    out_five.clear();
+    out_seven.clear();
+    json j = read_cache_raw(path);
+    if (j.is_null()) return;
+    try {
+        out_five  = parse_hist_array(j.value("five_h",  json::array()));
+        out_seven = parse_hist_array(j.value("seven_d", json::array()));
+    }
+    catch (...) {}
+}
+
+// 5h/7d 履歴キャッシュを直接上書き保存する
+//
+// apply_result が avail 時に毎回呼ぶ。既存の usage/plan キャッシュと同じ流儀で
+// テンポラリ→リネームは行わず ofstream で直接上書きする。（クラッシュ時は次回 parse 失敗となり
+// 復元なしに退化するだけで許容する）
+static void save_history_cache(const fs::path& path,
+                               const std::vector<ClaudeHistorySample>& five,
+                               const std::vector<ClaudeHistorySample>& seven) {
+    if (path.empty()) return;
+    try {
+        json j;
+        j["five_h"]  = hist_to_json_array(five);
+        j["seven_d"] = hist_to_json_array(seven);
+        std::ofstream ofs(path);
+        ofs << j.dump();
+    }
+    catch (...) {}
+}
+
 // null 値を欠落と同一視して JSON から数値を読む
 //
 // Usage API はウィンドウ非アクティブ時や未使用項目に「キーは存在するが値は null」を返す。
@@ -638,12 +706,18 @@ void ClaudeCollector::init(HWND notify_wnd, int account_index,
         std::string plan_name  = "claude-plan-cache"  + cache_suffix + ".json";
         cache_usage_path_ = fs::path(tmp) / fs::path(usage_name);
         cache_plan_path_  = fs::path(tmp) / fs::path(plan_name);
+        std::string hist_name = "claude-history-cache" + cache_suffix + ".json";
+        cache_hist_path_  = fs::path(tmp) / fs::path(hist_name);
     }
 
     // API 取得完了までの空白を埋めるため、TTL 無視で前回キャッシュを暫定値として読み込む
     ClaudeMetrics result;
     apply_usage_json(read_cache_raw(cache_usage_path_), result);
     apply_plan_json (read_cache_raw(cache_plan_path_),  result);
+
+    // 5h/7d 履歴キャッシュを読み込み、起動直後の apply_result 初回呼び出しで
+    // out 側の履歴（空）へ一度だけ種付けする。（詳細は apply_result 宣言部のコメント参照）
+    load_history_cache(cache_hist_path_, restored_hist5_, restored_hist7_);
 
     // 起動直後の間隙検知を可能にするため、復元したキャッシュの 5h resets_ts を監視対象として
     // 種付けする。過去値でも可：フェッチ成功時にアクティブウィンドウが無ければ即 nudge となる
@@ -829,114 +903,57 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
     }
 }
 
-// 使い切り不能検知のウィンドウ切替判定の許容差（秒）
-// 真の切替では resets_ts が最低でもウィンドウ長（5h）ぶん未来へ動くため、
-// API 側 resets_at の秒〜分単位のぶれと確実に区別できる値とする。5h/7d 共通
-static constexpr time_t PACE_WINDOW_DRIFT_TOL_SECS = 30 * 60;
-
-// 使い切り不能検知の最小観測時間（秒）
-// 端点差分の分母が短いと、離散的に増える使用率の数サンプルで傾きが暴れる。
-// この時間以上のスパンを観測して初めて推定値を返す。（それまでは推定不可 = 警告なしの安全側）
-static constexpr time_t PACE_MIN_SPAN_SECS = 30 * 60;
-
-// 使用率逆行の判定幅（%）
-// 同一ウィンドウ内で使用率は単調非減少が前提であり、この幅を超える減少を「逆行」とみなす。
-// API の浮動小数の微小な揺れを異常と誤認しないための緩衝で、実害のある異常応答
-// （数 % 以上の跳ね上がりと復帰）は確実に検知できる値とする。
-static constexpr float PACE_ANOMALY_EPS_PCT = 0.5f;
-
-// 使い切り不能検知：新サンプルを反映し端点差分レートを返す
-//
-// resets_ts が無効（<= 0）の間は追跡を停止して 0 を返す。
-// ウィンドウ切替は resets_ts の近接比較（許容差 PACE_WINDOW_DRIFT_TOL_SECS）で判定する。
-// 許容差内のぶれには window_ts を追従させ、ドリフト累積による誤クリアを防ぐ。
-// 切替時は旧ウィンドウのサンプルをすべて捨て、現サンプルを新基準として追跡し直す。
-// 同一ウィンドウ内で PACE_ANOMALY_EPS_PCT を超える使用率の減少（逆行）を観測したら、
-// 直前の高値または現サンプル自体が異常応答（またはプラン変更による % スケール変化）だった
-// とみなし、全サンプルをクリアする。このとき現サンプルは異常低値（utilization 欠落時の
-// 0 フォールバック等）の可能性があるため保持せず、次サンプルから基準を取り直す。
-// キャッシュ再配信による同一時刻サンプルは重複保持しない。
-// 保持期間は直近 pace_window_min 分。レートは保持サンプルの端点差分
-// （最新 pct − 最古 pct ÷ 実経過秒）で、観測スパンが PACE_MIN_SPAN_SECS 未満のときと
-// 増加が 0 以下のときは 0（推定不可）を返す。
-// スリープ等の長い空白は端点間の実経過で希釈され、レートが小さく出る。（安全側）
-float ClaudeCollector::PaceTracker::update(time_t ts, float pct, time_t resets_ts, int pace_window_min) {
-    if (resets_ts <= 0) {
-        window_ts = -1;
-        samples.clear();
-        return 0.f;
-    }
-    time_t drift = resets_ts - window_ts;
-    if (window_ts <= 0 || drift > PACE_WINDOW_DRIFT_TOL_SECS || drift < -PACE_WINDOW_DRIFT_TOL_SECS) {
-        // ウィンドウ切替：現サンプルを新基準として再開（基準は正当な低値）
-        samples.assign(1, {ts, pct});
-        window_ts = resets_ts;
-        last_pct  = pct;
-        return 0.f;
-    }
-    window_ts = resets_ts;
-    if (pct < last_pct - PACE_ANOMALY_EPS_PCT) {
-        // 使用率逆行：汚染された可能性のあるサンプルを全て捨てる。
-        // 現サンプルも異常低値の疑いがあるため保持せず、次サンプルを新基準とする
-        samples.clear();
-        last_pct = pct;
-        return 0.f;
-    }
-    last_pct = pct;
-    if (samples.empty() || ts > samples.back().ts)
-        samples.push_back({ts, pct});
-    // 保持期間（pace_window_min 分）より古いサンプルを先頭から破棄する
-    time_t cutoff = ts - static_cast<time_t>(pace_window_min) * 60;
-    auto it = std::find_if(samples.begin(), samples.end(),
-        [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
-    if (it != samples.begin())
-        samples.erase(samples.begin(), it);
-    if (samples.size() < 2)
-        return 0.f;
-    time_t span = samples.back().ts - samples.front().ts;
-    if (span < PACE_MIN_SPAN_SECS)
-        return 0.f;
-    float rate = (samples.back().pct - samples.front().pct) / static_cast<float>(span);
-    return rate > 0.f ? rate : 0.f;
-}
-
-void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min, int pace_window_min) {
+void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min, int delta_window_7d_min) {
     std::lock_guard<std::mutex> lock(result_mutex_);
     // セッション数・アカウントラベル・有効化フラグは window.cpp 側で管理しているため
     // pending_（fetch 結果）で上書きされないよう退避する。
-    // 5h 履歴も pending_ には無いため退避してから戻す
+    // 5h/7d 履歴も pending_ には無いため退避してから戻す
     int sessions = out.session_count;
     wchar_t label_keep[24];
     wcsncpy_s(label_keep, out.account_label, _TRUNCATE);
     bool enabled_keep = out.account_enabled;
-    std::vector<ClaudeHistorySample> hist_keep = std::move(out.five_h_history);
+    std::vector<ClaudeHistorySample> hist5_keep = std::move(out.five_h_history);
+    std::vector<ClaudeHistorySample> hist7_keep = std::move(out.seven_d_history);
+    // 起動直後の一度きりの種付け：out 側の履歴が空（アプリ起動後まだ 1 度も push していない）
+    // かつ init() が復元した履歴が非空なら、それを種として採用する。
+    // 採用後は復元メンバを明示的に空にし、以後の呼び出しで再利用されないようにする
+    if (hist5_keep.empty() && !restored_hist5_.empty()) {
+        hist5_keep = std::move(restored_hist5_);
+        restored_hist5_.clear();
+    }
+    if (hist7_keep.empty() && !restored_hist7_.empty()) {
+        hist7_keep = std::move(restored_hist7_);
+        restored_hist7_.clear();
+    }
     out = pending_;
     out.session_count = sessions;
     wcsncpy_s(out.account_label, label_keep, _TRUNCATE);
     out.account_enabled = enabled_keep;
-    out.five_h_history = std::move(hist_keep);
+    out.five_h_history  = std::move(hist5_keep);
+    out.seven_d_history = std::move(hist7_keep);
 
-    // 5h 履歴に現在値を追加し、保持期間外を破棄する
+    // 5h/7d 履歴に現在値を追加し、保持期間外を破棄する
     // データ未取得（avail=false）時は履歴の信頼性が無いため push しない。
-    // 保持期間は (delta_window_min + 1) × 60 秒（N 分前のサンプル参照に必要な分 + バッファ 1 分）
+    // 保持期間は (delta_window + 1) × 60 秒（N 分前のサンプル参照に必要な分 + バッファ 1 分）。
+    // 7d ウィンドウのリセットで履歴はクリアしない。旧ウィンドウの高 pct サンプルが残っても、
+    // 描画側の「増加分のみ描画」と「レート ≤ 0 は判定しない」条件で無害化される。
+    // avail 時は push_and_trim 直後に cache_hist_path_ へ毎回上書き保存し、アプリ再起動後も
+    // init() 経由で直近の履歴（7d はデフォルト 12h 分）を復元できるようにする。（クラッシュ耐性優先の設計）
     if (out.avail) {
         time_t now = time(nullptr);
-        out.five_h_history.push_back({now, out.five_h_pct});
-        time_t cutoff = now - static_cast<time_t>((delta_window_min + 1) * 60);
-        auto it = std::find_if(out.five_h_history.begin(), out.five_h_history.end(),
-            [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
-        if (it != out.five_h_history.begin())
-            out.five_h_history.erase(out.five_h_history.begin(), it);
-
-        // 使い切り不能検知のペース追跡を更新する
-        // サンプル時刻はキャッシュ JSON の実フェッチ時刻を優先する。apply_result 呼び出し時刻を
-        // 使うと、起動時のキャッシュ復元直後のフェッチで経過時間が過小になりレートが過大評価される。
-        // 同一フェッチ時刻の再配信（キャッシュヒット）は PaceTracker 側で重複破棄される
-        time_t sample_ts = out.fetched_ts > 0 ? out.fetched_ts : now;
-        out.five_h_pace_rate  = pace_5h_.update(sample_ts, out.five_h_pct,
-                                                out.five_h_resets_ts, pace_window_min);
-        out.seven_d_pace_rate = pace_7d_.update(sample_ts, out.seven_d_pct,
-                                                out.seven_d_resets_ts, pace_window_min);
+        auto push_and_trim = [now](std::vector<ClaudeHistorySample>& hist, float pct, int win_min) {
+            hist.push_back({now, pct});
+            time_t cutoff = now - static_cast<time_t>(win_min + 1) * 60;
+            auto it = std::find_if(hist.begin(), hist.end(),
+                [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
+            if (it != hist.begin())
+                hist.erase(hist.begin(), it);
+        };
+        push_and_trim(out.five_h_history,  out.five_h_pct,  delta_window_min);
+        push_and_trim(out.seven_d_history, out.seven_d_pct, delta_window_7d_min);
+        // 7d 保持上限は (delta_window_7d_min + 1) 分 ≒ 12h、取得サイクル ~60 秒で高々 750
+        // サンプル前後・数十 KB のため、毎回書いても実害がない
+        save_history_cache(cache_hist_path_, out.five_h_history, out.seven_d_history);
     }
 }
 

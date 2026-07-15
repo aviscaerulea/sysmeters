@@ -344,12 +344,12 @@ void AppWindow::on_claude_done(int account_index) {
     if (account_index == 0) {
         if (!col_claude_main_) return;
         col_claude_main_->apply_result(metrics_->claude_main, cfg_->claude_delta_window_min,
-                                       cfg_->claude_underuse_pace_window_min);
+                                       cfg_->claude_delta_window_7d_min);
     }
     else if (account_index == 1) {
         if (!col_claude_sub_) return;
         col_claude_sub_->apply_result(metrics_->claude_sub, cfg_->claude_delta_window_min,
-                                      cfg_->claude_underuse_pace_window_min);
+                                      cfg_->claude_delta_window_7d_min);
     }
     else {
         return;
