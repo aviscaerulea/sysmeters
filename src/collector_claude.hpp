@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <vector>
 
 // Claude Code レートリミット情報とセッション数の収集
 //
@@ -14,6 +15,9 @@
 //   - credentials.json から OAuth トークン取得
 //   - Anthropic Usage API / Account API を呼び出し
 //   - $TEMP に JSON キャッシュを保存（Usage: usage_interval_sec 秒、Plan: 3600 秒）
+//   - $TEMP に 5h/7d 使用率の時系列履歴を保存（TTL なし、apply_result 実行毎に直接上書き）。
+//     アプリ再起動後も init() で読み込み、履歴を復元する。
+//     （保持期間は各 delta ウィンドウ幅に従う。7d はデフォルト 12h、5h は数分）
 //
 // アカウントごとに 1 インスタンスを持つ。
 // - account_index：WM_CLAUDE_DONE の wParam として送る識別子（0=Main, 1=Sub）
@@ -32,9 +36,16 @@ public:
     void update(ClaudeMetrics& out);
 
     // 取得結果を out へ反映する（WM_CLAUDE_DONE 受信後、メインスレッドから呼ぶ）
-    // delta_window_min は 5h 履歴の保持期間決定に使用する。（0 で履歴記録自体は行うが描画側で無効化される）
-    // 履歴は out.five_h_history に push し、(delta_window_min + 1) × 60 秒より古いサンプルを破棄する
-    void apply_result(ClaudeMetrics& out, int delta_window_min, int pace_window_min);
+    // delta_window_min / delta_window_7d_min は 5h / 7d 履歴の保持期間決定に使う。
+    // 履歴は out.five_h_history / out.seven_d_history に push し、
+    // (delta_window + 1) × 60 秒より古いサンプルを破棄する。
+    // （0 で履歴保持が 1 分に縮退し、描画側のオーバーレイ・underuse 判定が事実上無効になる）
+    // out 側の履歴が空（アプリ起動後まだ 1 度も push していない）かつ init() が復元した履歴
+    // （restored_hist5_ / restored_hist7_）が非空の場合、それを種として一度だけ引き継ぐ。
+    // （以後は通常の push_and_trim のみで運用する） avail 時は毎回 cache_hist_path_ へ
+    // 直接上書き保存し、次回起動時の復元に備える。（クラッシュ耐性優先。テンポラリ→リネームの
+    // 原子的更新はしない。保存に失敗しても現状同様、次回起動時は履歴なしからの復帰に退化する）
+    void apply_result(ClaudeMetrics& out, int delta_window_min, int delta_window_7d_min);
 
     // 2 段階終了：複数コレクタを並行停止できるよう、フラグ立てと join 待ちを分離
     // 両方のコレクタに request_shutdown() を先に呼んでから wait_shutdown() を順に呼ぶことで、
@@ -74,31 +85,20 @@ private:
     std::filesystem::path creds_path_;
     std::filesystem::path cache_usage_path_;
     std::filesystem::path cache_plan_path_;
+    // 5h/7d 履歴の永続化キャッシュ（claude-history-cache{cache_suffix}.json）。
+    // apply_result が avail 時に毎回上書き保存し、init() が起動時に読み込んで
+    // restored_hist5_ / restored_hist7_ の種にする
+    std::filesystem::path cache_hist_path_;
 
     // バックグラウンドで取得した結果（仮置き）
     ClaudeMetrics pending_{};
 
-    // 使い切り不能検知用のウィンドウ内ペース追跡
-    //
-    // 直近 pace_window_min 分の観測サンプル（取得時刻と使用率）を保持し、
-    // 端点差分（最新 − 最古 ÷ 実経過秒）を「追い上げ可能ペース」として返す。
-    // 描画側が残り時間への外挿に使う。
-    // ウィンドウ切替（resets_ts の大幅な変化）で全サンプルをクリアする。
-    // 観測スパンが最小観測時間（collector 側定数）に満たない間は 0（推定不可）を返し、
-    // 警告を出さない安全側に倒す。
-    // 一時的な異常応答への耐性として、同一ウィンドウ内での使用率逆行を検知したら
-    // 全サンプルをクリアする。（詳細は update の実装コメントを参照）
-    // apply_result（メインスレッド）からのみ触るため排他は不要
-    struct PaceTracker {
-        time_t window_ts = -1;   // 追跡中ウィンドウの resets_ts（切替検知用）
-        float  last_pct  = 0.f;  // 直前サンプルの使用率（%、逆行 = 異常応答の検知用）
-        std::vector<ClaudeHistorySample> samples;  // 直近 pace_window_min 分の観測サンプル
-
-        // 新サンプルを反映し、端点差分レート（%/秒、0 = 推定不可）を返す
-        float update(time_t ts, float pct, time_t resets_ts, int pace_window_min);
-    };
-    PaceTracker pace_5h_;
-    PaceTracker pace_7d_;
+    // init() でキャッシュファイルから復元した 5h/7d 履歴（起動直後の一度きりの種）。
+    // apply_result 初回呼び出しで out 側の履歴（空）へ移し替えたら空にする。
+    // pending_ 経由にしない理由：pending_ は do_fetch 完了ごとに丸ごと上書きされ、
+    // フェッチ結果 JSON には履歴フィールドが存在しないため、pending_ 経由だと復元値が消えるため
+    std::vector<ClaudeHistorySample> restored_hist5_;
+    std::vector<ClaudeHistorySample> restored_hist7_;
 
     static DWORD WINAPI fetch_thread(LPVOID param);
     void do_fetch();

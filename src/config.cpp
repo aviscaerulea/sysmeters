@@ -126,6 +126,7 @@ AppConfig load_config(const std::string& path) {
         cfg.col_claude_bar = get_u32("color", "claude_bar", cfg.col_claude_bar);
         cfg.col_claude_scoped_bar = get_u32("color", "claude_scoped_bar", cfg.col_claude_scoped_bar);
         cfg.col_claude_scoped_bar_warn = get_u32("color", "claude_scoped_bar_warn", cfg.col_claude_scoped_bar_warn);
+        cfg.col_claude_underuse_bg = get_u32("color", "claude_underuse_bg", cfg.col_claude_underuse_bg);
         cfg.col_cpu_core   = get_u32("color", "cpu_core",   cfg.col_cpu_core);
 
         cfg.warn_cpu_pct       = get_float("threshold", "cpu_pct",       cfg.warn_cpu_pct);
@@ -169,16 +170,10 @@ AppConfig load_config(const std::string& path) {
         catch (...) {}
         cfg.show_peak_bar = get_bool("claude", "show_peak_bar", cfg.show_peak_bar);
         cfg.claude_delta_window_min = get_int("claude", "delta_window_min", cfg.claude_delta_window_min);
+        cfg.claude_delta_window_7d_min = get_int("claude", "delta_window_7d_min", cfg.claude_delta_window_7d_min);
         cfg.claude_scoped_bar_px = get_int("claude", "scoped_bar_px", cfg.claude_scoped_bar_px);
-        cfg.claude_underuse_enable        = get_bool ("claude", "underuse_enable",        cfg.claude_underuse_enable);
-        cfg.claude_underuse_warn_pct      = get_float("claude", "underuse_warn_pct",      cfg.claude_underuse_warn_pct);
-        cfg.claude_underuse_ignore_5h_min = get_int  ("claude", "underuse_ignore_5h_min", cfg.claude_underuse_ignore_5h_min);
-        cfg.claude_underuse_ignore_7d_min = get_int  ("claude", "underuse_ignore_7d_min", cfg.claude_underuse_ignore_7d_min);
-        cfg.claude_underuse_pace_window_min = get_int("claude", "underuse_pace_window_min", cfg.claude_underuse_pace_window_min);
-        cfg.claude_underuse_grace_5h_min    = get_int("claude", "underuse_grace_5h_min",    cfg.claude_underuse_grace_5h_min);
-        cfg.claude_underuse_grace_7d_min    = get_int("claude", "underuse_grace_7d_min",    cfg.claude_underuse_grace_7d_min);
-        cfg.claude_underuse_lag_5h_min      = get_int("claude", "underuse_lag_5h_min",      cfg.claude_underuse_lag_5h_min);
-        cfg.claude_underuse_lag_7d_min      = get_int("claude", "underuse_lag_7d_min",      cfg.claude_underuse_lag_7d_min);
+        cfg.claude_underuse_enable   = get_bool ("claude", "underuse_enable",   cfg.claude_underuse_enable);
+        cfg.claude_underuse_warn_pct = get_float("claude", "underuse_warn_pct", cfg.claude_underuse_warn_pct);
 
         // メインアカウント設定（[claude] セクション）
         // メインは ~/.claude を固定使用するため config_dir は持たない。
@@ -245,22 +240,16 @@ AppConfig load_config(const std::string& path) {
     // 上限 60 分は保持メモリの暴走防止と、5h ウィンドウ内で意味のある時間幅。0 は機能無効を意味する
     cfg.claude_delta_window_min = std::clamp(cfg.claude_delta_window_min, 0, 60);
 
+    // 7d 増加分濃色オーバーレイ兼 underuse ペース算出ウィンドウ幅のサニティチェック（0〜2880 分）
+    // 上限 48 時間は「直近ペース」としての意味を保つ幅。0 は 7d オーバーレイと underuse 検知の両方を無効化する。
+    cfg.claude_delta_window_7d_min = std::clamp(cfg.claude_delta_window_7d_min, 0, 2880);
+
     // 上位モデル専用 7d ミニバー縦幅のサニティチェック（0〜4px）
     // 4px 超は 7d バー行内の下余白に収まらずレイアウト変更を要するため上限とする。0 は非表示
     cfg.claude_scoped_bar_px = std::clamp(cfg.claude_scoped_bar_px, 0, 4);
 
-    // 使い切り不能検知のサニティチェック
-    // 目標到達率は 0〜100%、観測ウィンドウ幅は 30 分（PACE_MIN_SPAN_SECS 未満だと
-    // 傾きが常に推定不可＝検知が恒久的に沈黙するため、これを下限とする）〜1 日、
-    // 猶予時間・除外しきい値・均等ペース遅れしきい値は各ウィンドウ長（5h=300 分、7d=10080 分）を上限とする
-    cfg.claude_underuse_warn_pct      = std::clamp(cfg.claude_underuse_warn_pct,      0.f, 100.f);
-    cfg.claude_underuse_pace_window_min = std::clamp(cfg.claude_underuse_pace_window_min, 30, 1440);
-    cfg.claude_underuse_grace_5h_min  = std::clamp(cfg.claude_underuse_grace_5h_min,  0, 300);
-    cfg.claude_underuse_grace_7d_min  = std::clamp(cfg.claude_underuse_grace_7d_min,  0, 10080);
-    cfg.claude_underuse_ignore_5h_min = std::clamp(cfg.claude_underuse_ignore_5h_min, 0, 300);
-    cfg.claude_underuse_ignore_7d_min = std::clamp(cfg.claude_underuse_ignore_7d_min, 0, 10080);
-    cfg.claude_underuse_lag_5h_min    = std::clamp(cfg.claude_underuse_lag_5h_min,    0, 300);
-    cfg.claude_underuse_lag_7d_min    = std::clamp(cfg.claude_underuse_lag_7d_min,    0, 10080);
+    // 使い切り不能検知のサニティチェック（目標到達率 0〜100%）
+    cfg.claude_underuse_warn_pct = std::clamp(cfg.claude_underuse_warn_pct, 0.f, 100.f);
 
     // ガードトーン長のサニティチェック（0〜10 秒）
     cfg.guard_tone_ms = std::clamp(cfg.guard_tone_ms, 0, 10000);
