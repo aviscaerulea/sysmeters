@@ -17,7 +17,8 @@
 //   - $TEMP に JSON キャッシュを保存（Usage: usage_interval_sec 秒、Plan: 3600 秒）
 //   - $TEMP に 5h/7d 使用率の時系列履歴を保存（TTL なし、apply_result 実行毎に直接上書き）。
 //     アプリ再起動後も init() で読み込み、履歴を復元する。
-//     （保持期間は各 delta ウィンドウ幅に従う。7d はデフォルト 12h、5h は数分）
+//     （保持期間は各 delta ウィンドウ幅に従う。7d はデフォルト 12h、5h は数分。
+//      7d は加えて停止明け判定用のアンカー 1 個を最大で窓幅 2 倍前まで残す）
 //
 // アカウントごとに 1 インスタンスを持つ。
 // - account_index：WM_CLAUDE_DONE の wParam として送る識別子（0=Main, 1=Sub）
@@ -39,6 +40,8 @@ public:
     // delta_window_min / delta_window_7d_min は 5h / 7d 履歴の保持期間決定に使う。
     // 履歴は out.five_h_history / out.seven_d_history に push し、
     // (delta_window + 1) × 60 秒より古いサンプルを破棄する。
+    // 7d は保持期間より古い最新 1 サンプルをアンカーとして追加保持する（窓幅 2 倍以内かつ
+    // 現行 7d ウィンドウ開始以降のもの）。停止明けの実質ペース判定を即時再開するため。
     // （0 で履歴保持が 1 分に縮退し、描画側のオーバーレイ・underuse 判定が事実上無効になる）
     // out 側の履歴が空（アプリ起動後まだ 1 度も push していない）かつ init() が復元した履歴
     // （restored_hist5_ / restored_hist7_）が非空の場合、それを種として一度だけ引き継ぐ。
