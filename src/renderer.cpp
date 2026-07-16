@@ -1355,11 +1355,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     float five_h_delta_start  = calc_delta_start_pct(m.five_h_history,  cfg.claude_delta_window_min);
     float seven_d_delta_start = calc_delta_start_pct(m.seven_d_history, cfg.claude_delta_window_7d_min);
     // 7d 使い切り不能検知：条件は次の 2 つのみ。（5h には検知を行わない）
-    // (1) ウィンドウ開始（リセット）から delta_window_7d_min 分以上経過している
+    // (1) ウィンドウ開始（リセット）から underuse_grace_hours 時間以上経過している
     // (2) 直近の実質平均消費ペース（calc_hist_rate。停止期間も分母に含む正味レート）で
     //     残り時間を外挿した予測到達率が underuse_warn_pct 未満
     //     （レート推定不可のときは reach_pct が -1 になり判定しない）
-    // リセット直後は (1) が 12h（デフォルト）の間判定を止める。旧ウィンドウのサンプルは
+    // リセット直後は (1) が 48h（デフォルト）の間判定を止める。旧ウィンドウのサンプルは
     // 保持期間切れの破棄と、アンカーのウィンドウ開始チェック（collector 側）で基準にならない
     bool underuse_7d = false;
     if (m.avail && cfg.claude_underuse_enable && m.seven_d_resets_ts > 0) {
@@ -1368,7 +1368,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                                         - static_cast<double>(time(nullptr)));
         float rate  = calc_hist_rate(m.seven_d_history, cfg.claude_delta_window_7d_min, m.seven_d_pct);
         float reach = calc_reach_pct(m.seven_d_resets_ts, m.seven_d_pct, rate);
-        underuse_7d = elapsed >= static_cast<double>(cfg.claude_delta_window_7d_min) * 60.0
+        underuse_7d = elapsed >= static_cast<double>(cfg.claude_underuse_grace_hours) * 3600.0
                    && reach >= 0.f && reach < cfg.claude_underuse_warn_pct;
     }
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
