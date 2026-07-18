@@ -111,21 +111,10 @@ struct AppConfig {
     // 環境変数経由のみ）
     std::string claude_nudge_cmd    = "claude.exe --safe-mode --model haiku --effort low -p \"say 'ok'\"";
 
-    // 5h バー上に PT 平日 5:00〜10:59 を暗赤色で重ねるピーク時間帯背景表示。
-    // 2026-05 に Anthropic がピーク時間帯レート制限を撤廃したためデフォルト OFF。
-    bool show_peak_bar = false;
-
     // メイン/サブそれぞれのアカウント設定
     // メインはロード時に enable=true 強制、サブはデフォルト OFF
     ClaudeAccountConfig claude_main;
     ClaudeAccountConfig claude_sub;
-
-    // Claude Code 制限強化時間 Toast 通知（ローカル平日 21:00 固定）
-    // 2026-05 にピーク時間帯レート制限が撤廃されたためデフォルト OFF。
-    bool         notify_peak_limit_enable = false;
-    bool         notify_peak_limit_sound  = false;
-    std::wstring notify_peak_limit_title  = L"Claude Code";
-    std::wstring notify_peak_limit_body   = L"平日 21:00〜03:00 ピーク制限時間です";
 
     // 更新チェック設定
     // 起動時に GitHub の最新リリースを確認し、新版があれば Toast 通知とトレイメニューで知らせる。

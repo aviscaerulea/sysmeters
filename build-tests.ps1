@@ -41,14 +41,13 @@ $testSources = @(
 # 追加で必要なライブラリ：
 #   ole32.lib     : alert.cpp の WASAPI 関連（CoCreateInstance, IMMDeviceEnumerator 等）
 #   user32.lib    : renderer.cpp の GetClientRect 等のウィンドウ API
-#   advapi32.lib  : renderer.cpp の EnumDynamicTimeZoneInformation（Claude ピーク時間表示）
 $prodSources = @(
     "src\config.cpp",
     "src\alert.cpp",
     "src\renderer.cpp",
     "src\logger.cpp"
 )
-$libs        = @("ole32.lib", "user32.lib", "advapi32.lib")
+$libs        = @("ole32.lib", "user32.lib")
 
 # コンパイルオプション
 $commonFlags = @(

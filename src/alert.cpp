@@ -480,6 +480,3 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
     return fired_mask;
 }
 
-void AlertManager::play_external() {
-    if (wav_avail_) play();
-}

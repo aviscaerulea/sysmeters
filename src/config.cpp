@@ -168,7 +168,6 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_usage_interval_sec = get_int("claude", "usage_interval_sec", cfg.claude_usage_interval_sec);
         try { cfg.claude_nudge_cmd = toml::find_or<std::string>(data, "claude", "nudge_cmd", cfg.claude_nudge_cmd); }
         catch (...) {}
-        cfg.show_peak_bar = get_bool("claude", "show_peak_bar", cfg.show_peak_bar);
         cfg.claude_delta_window_min = get_int("claude", "delta_window_min", cfg.claude_delta_window_min);
         cfg.claude_delta_window_7d_min = get_int("claude", "delta_window_7d_min", cfg.claude_delta_window_7d_min);
         cfg.claude_scoped_bar_px = get_int("claude", "scoped_bar_px", cfg.claude_scoped_bar_px);
@@ -210,19 +209,6 @@ AppConfig load_config(const std::string& path) {
             }
         }
 
-        cfg.notify_peak_limit_enable = get_bool ("notify", "peak_limit_enable", cfg.notify_peak_limit_enable);
-        cfg.notify_peak_limit_sound  = get_bool ("notify", "peak_limit_sound",  cfg.notify_peak_limit_sound);
-        cfg.notify_peak_limit_title  = get_wstr ("notify", "peak_limit_title",  cfg.notify_peak_limit_title);
-        cfg.notify_peak_limit_body   = get_wstr ("notify", "peak_limit_body",   cfg.notify_peak_limit_body);
-        // szInfoTitle は 64 wchar、szInfo は 256 wchar が上限
-        // 境界直前が上位サロゲート（0xD800〜0xDBFF）の場合、ペアの途中で分断しないよう 1 文字分短くする
-        auto trim_wstr = [](std::wstring& s, size_t max) {
-            if (s.size() <= max) return;
-            if (max > 0 && s[max - 1] >= 0xD800 && s[max - 1] <= 0xDBFF) --max;
-            s.resize(max);
-        };
-        trim_wstr(cfg.notify_peak_limit_title, 63);
-        trim_wstr(cfg.notify_peak_limit_body,  255);
     }
     catch (...) {
         cfg.config_error = "TOML parse failed: " + path;

@@ -45,12 +45,6 @@ private:
     static constexpr bool DEF_ALWAYS_ALERT_TEMP_GPU  = true;
     static constexpr bool DEF_ALWAYS_ALERT_TEMP_DISK = true;
 
-    // Claude Code 制限強化時間 通知の発火時刻（ローカル時刻でハードコード固定）
-    static constexpr int PEAK_NOTIFY_HOUR = 21;
-    static constexpr int PEAK_NOTIFY_MIN  = 0;
-    // 60 秒周期の通知チェックタイマー ID
-    static constexpr int TIMER_NOTIFY_SCHED = 110;
-
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
     int  last_pref_h_  = 0;            // update_window_size 早期リターン用キャッシュ
@@ -67,7 +61,6 @@ private:
     bool fullscreen_silent_ = false;
     Visibility vis_;                   // セクション表示フラグ（カテゴリ単位の表示/非表示）
     UINT WM_TASKBAR_CREATED_ = 0;      // Explorer 再起動によるタスクバー再生成通知
-    ULONGLONG last_notify_tick_ = 0;   // 前回通知チェック時のローカル時刻（FILETIME 形式 100ns 単位、境界またぎ検出用）
 
     // 更新チェック状態（UI スレッドのみが参照する。WM_UPDATE_DONE 受信時に確定）
     bool         update_available_ = false;  // GitHub に新版ありなら true
@@ -105,10 +98,6 @@ private:
     void show_balloon(uint32_t fired_mask);
     // 指定タイトル・本文で Toast 通知（情報レベル）を表示する
     void show_notify(const wchar_t* title, const wchar_t* body);
-    // 制限強化時間 通知の発火判定と実行（TIMER_NOTIFY_SCHED から呼ばれる）
-    void check_peak_limit_notify();
-    // 起動時にピーク期間内なら即時通知する（create() から 1 度だけ呼ぶ）
-    void check_peak_limit_on_startup();
     // 起動時に GitHub リリースチェックをバックグラウンドスレッドで開始する（create() から 1 度だけ呼ぶ）
     void start_update_check();
     // WM_UPDATE_DONE 受信時に新版状態を確定し、未通知版なら Toast 通知する

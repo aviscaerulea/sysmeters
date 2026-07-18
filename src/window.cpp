@@ -68,14 +68,6 @@ static COLORREF rgb_to_colorref(uint32_t rgb) {
     return ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF);
 }
 
-// SYSTEMTIME → FILETIME 形式（100ns 単位）の 64bit 値変換
-// UTC 変換ではなく、ローカル時刻同士の前後比較・境界判定にのみ使う。
-static ULONGLONG to_100ns(const SYSTEMTIME& st) {
-    FILETIME ft{};
-    SystemTimeToFileTime(&st, &ft);
-    return (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
-}
-
 static AppWindow* g_window = nullptr;
 
 bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
@@ -202,16 +194,6 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
         update_process_priority();
     }
 
-    // 制限強化時間 通知チェックタイマー（60 秒周期）
-    SetTimer(hwnd_, TIMER_NOTIFY_SCHED, 60'000, nullptr);
-
-    // 通知境界判定の前回時刻を起動時刻で初期化（初回 tick から境界またぎを検出できるようにする）
-    {
-        SYSTEMTIME lt;
-        GetLocalTime(&lt);
-        last_notify_tick_ = to_100ns(lt);
-    }
-
     // OS 情報初期取得（マシン名は不変、OS ラベルは 1 時間ごとに update_os_label で再取得）
     {
         DWORD sz = MAX_COMPUTERNAME_LENGTH + 1;
@@ -256,9 +238,6 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
 
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     UpdateWindow(hwnd_);
-
-    // 起動時点でピーク期間内なら即時通知
-    check_peak_limit_on_startup();
 
     // GitHub の更新チェックを開始（設定有効時のみ、別スレッドで非同期実行）
     start_update_check();
@@ -436,72 +415,6 @@ void AppWindow::show_notify(const wchar_t* title, const wchar_t* body) {
     wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
     wcsncpy_s(nid.szInfo,      body,  _TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &nid);
-}
-
-// Claude Code 制限強化時間 通知の発火判定（60 秒周期タイマーから呼ばれる）
-//
-// 前回 tick と今回 tick の間にローカル平日 21:00 の境界をまたいだとき 1 回だけ発火する。
-// 時刻差で判定するため、タイマー遅延やスリープ復帰で分 0 の tick を飛ばしても取りこぼさない。
-// 前回時刻は create() で起動時刻に初期化される（20:59 台起動 → 21:00 台初回 tick でも発火する）。
-void AppWindow::check_peak_limit_notify() {
-    if (!cfg_->notify_peak_limit_enable) return;
-
-    SYSTEMTIME lt;
-    GetLocalTime(&lt);
-    const ULONGLONG now  = to_100ns(lt);
-    const ULONGLONG prev = last_notify_tick_;
-    last_notify_tick_ = now;
-    if (prev >= now) return;  // 時計の巻き戻し等は発火しない
-
-    // 今日の通知時刻（ローカル 21:00）の境界が (prev, now] に含まれるか
-    // 境界は常に今日の日付で計算するため、前回 tick が前日でも当日分以外は発火しない
-    SYSTEMTIME bt = lt;
-    bt.wHour         = PEAK_NOTIFY_HOUR;
-    bt.wMinute       = PEAK_NOTIFY_MIN;
-    bt.wSecond       = 0;
-    bt.wMilliseconds = 0;
-    const ULONGLONG boundary = to_100ns(bt);
-    if (boundary <= prev || boundary > now) return;
-
-    // 平日のみ発火（境界の属する日 = 今日）
-    if (lt.wDayOfWeek < 1 || lt.wDayOfWeek > 5) return;
-
-    // フルスクリーン中は通知を保留する。tick を巻き戻して次回 tick で境界を再検出させる
-    if (fullscreen_mute_ && is_fullscreen_app_running()) {
-        last_notify_tick_ = prev;
-        return;
-    }
-
-    show_notify(cfg_->notify_peak_limit_title.c_str(),
-                cfg_->notify_peak_limit_body.c_str());
-    if (cfg_->notify_peak_limit_sound && alert_) alert_->play_external();
-    log_info("notify: peak limit toast fired");
-}
-
-// 起動時にピーク期間内なら即時通知する（create() から 1 度だけ呼ぶ）
-//
-// ローカル平日 21:00〜翌 03:00 を近似ピーク期間とみなす。
-// 夏時間中は PT 5:00〜11:00 と 1 時間ずれるが、時刻固定方針に従う。
-void AppWindow::check_peak_limit_on_startup() {
-    if (!cfg_->notify_peak_limit_enable) return;
-
-    SYSTEMTIME lt;
-    GetLocalTime(&lt);
-
-    bool in_peak = false;
-    if (lt.wHour >= 21 && lt.wDayOfWeek >= 1 && lt.wDayOfWeek <= 5) {
-        in_peak = true;  // 平日夜 21-23 時台
-    }
-    else if (lt.wHour < 3 && lt.wDayOfWeek >= 2 && lt.wDayOfWeek <= 6) {
-        in_peak = true;  // 翌日早朝 00-02 時台（前日が平日 = 今日は火〜土）
-    }
-    if (!in_peak) return;
-    if (fullscreen_mute_ && is_fullscreen_app_running()) return;
-
-    show_notify(cfg_->notify_peak_limit_title.c_str(),
-                cfg_->notify_peak_limit_body.c_str());
-    if (cfg_->notify_peak_limit_sound && alert_) alert_->play_external();
-    log_info("notify: startup peak limit toast fired");
 }
 
 // GitHub リリースチェックを別スレッドで開始する
@@ -1008,7 +921,6 @@ void AppWindow::destroy() {
         KillTimer(hwnd_, TIMER_IP);
         KillTimer(hwnd_, TIMER_ANIM);
         KillTimer(hwnd_, TIMER_PRIORITY);
-        KillTimer(hwnd_, TIMER_NOTIFY_SCHED);
     }
     restore_process_priority();
     remove_tray_icon();
@@ -1100,11 +1012,6 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // コアバー補間アニメーション（30fps）：変化があれば再描画。警告チェック・ウィンドウリサイズは不要
             if (renderer_->update_core_animation(metrics_->cpu))
                 InvalidateRect(hwnd, nullptr, FALSE);
-            return 0;
-        }
-        else if (wp == TIMER_NOTIFY_SCHED) {
-            // 制限強化時間 通知チェック（60 秒周期）：再描画・警告チェック対象外
-            check_peak_limit_notify();
             return 0;
         }
         if (alert_) {
