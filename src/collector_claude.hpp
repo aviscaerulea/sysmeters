@@ -105,7 +105,8 @@ private:
 
     static DWORD WINAPI fetch_thread(LPVOID param);
     void do_fetch();
-    void run_nudge();
+    // presumed = true は ERR 経路（フェッチ失敗中の時計ベース推定発火）を示し、ログ文言を区別する
+    void run_nudge(bool presumed);
     std::string get_token();
 };
 
