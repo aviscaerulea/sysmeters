@@ -451,13 +451,17 @@ static void clear_negative_cache(const fs::path& path) {
 
 // 5h リセット通過後の未消費間隙 nudge：claude.exe を環境変数で構成して起動する
 //
+// presumed = false はフェッチ成功データで間隙を確認した通常発火、true はフェッチ失敗（ERR）中に
+// 監視対象の時計通過だけを根拠とする推定発火を示す。動作は同一でログ文言のみ区別する。
+//
 // メイン（config_dir_ 空）は親プロセス環境を継承して起動する。
 // サブ（config_dir_ 非空）は親プロセス環境 + CLAUDE_CONFIG_DIR=<config_dir_> を加えた一時環境で
 // 起動する。Claude CLI には --config-dir コマンドオプションが存在せず、設定ディレクトリの上書きは
 // CLAUDE_CONFIG_DIR 環境変数経由でのみ可能なため。sysmeters 自身のプロセス親環境は変更せず、
 // CreateProcess の lpEnvironment で子プロセスにだけ設定する。
-void ClaudeCollector::run_nudge() {
-    log_info("claude nudge: 5h window gap detected, running (account=%d): %s",
+void ClaudeCollector::run_nudge(bool presumed) {
+    log_info("claude nudge: 5h window gap %s, running (account=%d): %s",
+             presumed ? "presumed (usage fetch failing)" : "detected",
              account_index_, nudge_cmd_.c_str());
 
     // nudge_cmd_（UTF-8）を Wide へ変換する。CreateProcessW の第 2 引数は書き換え可能バッファ
@@ -570,7 +574,11 @@ void ClaudeCollector::do_fetch() {
     // 過去の resets_at を返し続ける形式（rts が過去値）。
     // 監視対象は init 時のキャッシュ復元値でも種付けされるため、起動直後の間隙でも発火する。
     // nudge が機能して新ウィンドウが始まれば監視対象の更新側へ入るため、重複発火しない。
-    // フェッチ失敗時（usage_j == nullptr）は古いデータでの誤発火を避けるため判定しない。
+    // フェッチ失敗（ERR）中も、把握済み監視対象のリセット時刻通過は時計だけで確定できるため
+    // 推定発火する（下の else if）。新ウィンドウが既に始まっているかは確認できないが、
+    // 誤発火コストは極小（デフォルト cmd は haiku への極小プロンプト 1 回）で、重複はキー記録で
+    // 抑止される。401 認証切れ由来の ERR では claude.exe 起動がトークンを更新し ERR 自体を
+    // 治癒する副次効果もある。監視対象が未観測（-1）の間は根拠が無いため発火しない。
     if (usage_j != nullptr && result.avail) {
         time_t now = static_cast<time_t>(now_ts());
         time_t rts = result.five_h_resets_ts;   // -1 = アクティブウィンドウ無し（API null 応答）
@@ -585,8 +593,17 @@ void ClaudeCollector::do_fetch() {
                          : (watched_5h_resets_ts_ > 0) ? watched_5h_resets_ts_ : 1;
             if (ended <= now && ended != last_nudge_resets_ts_) {
                 last_nudge_resets_ts_ = ended;
-                run_nudge();
+                run_nudge(false);
             }
+        }
+    }
+    else if (usage_j == nullptr && nudge_enable_ && watched_5h_resets_ts_ > 0) {
+        // ERR 経路：監視対象の時計通過のみを根拠に推定発火する。キーに watched 値を記録する
+        // ため、ERR 復旧後の成功フェッチが同じ間隙を検知しても再発火しない
+        time_t now = static_cast<time_t>(now_ts());
+        if (watched_5h_resets_ts_ <= now && watched_5h_resets_ts_ != last_nudge_resets_ts_) {
+            last_nudge_resets_ts_ = watched_5h_resets_ts_;
+            run_nudge(true);
         }
     }
 
