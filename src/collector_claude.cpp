@@ -48,6 +48,12 @@ static double now_ts() {
 // API 失敗時のネガティブキャッシュ有効期間（秒）
 static constexpr double NEGATIVE_TTL = 60.0;
 
+// fetch スレッドのハング判定閾値（ms）。TIMER_CLAUDE の 60 秒周期を 1.5 周期分としてマージンを取る。
+// 通常時の do_fetch 所要は数秒以内で終わる。
+// Usage API / Account API の各 HTTP は WinHttpSetTimeouts の 1500ms + 読み取り 30 秒デッドラインで
+// 有界のため、90 秒を超える継続は WinHTTP 内部ハング等の異常とみなす
+static constexpr uint64_t FETCH_STALL_TIMEOUT_MS = 90000;
+
 // キャッシュ JSON を読む。TTL 内なら内容を返す。期限切れなら null。
 // エラーキャッシュ（"error" フィールドあり）は NEGATIVE_TTL で判定する。
 static json read_cache(const fs::path& path, double ttl) {
@@ -522,6 +528,11 @@ void ClaudeCollector::run_nudge(bool presumed) {
 
 // バックグラウンドで Usage API + Account API を叩く
 void ClaudeCollector::do_fetch() {
+    // 自世代を捕獲する。update() の watchdog 発火や新スレッド起動で fetch_gen_ が進んでいれば、
+    // 終端で pending_ 更新・WM_CLAUDE_DONE 通知・fetching_ 復帰をスキップし、遅延復帰した
+    // 旧スレッドが新世代の状態を破壊しないようにする
+    uint32_t my_gen = fetch_gen_.load();
+
     // 初回フェッチ時はネガティブキャッシュを削除して必ず API を叩く
     if (first_fetch_) {
         clear_negative_cache(cache_usage_path_);
@@ -676,6 +687,11 @@ void ClaudeCollector::do_fetch() {
     }
 
     apply_plan_json(plan_j, result);
+
+    // 世代不一致（自スレッドは watchdog で既に捨てられている）なら pending_ / 通知 / fetching_ を
+    // 触らずに終了する。新世代のスレッドがすでに動いているため、pending_ を古い値で汚す・
+    // fetching_ を誤って false にして watchdog を無効化するのを防ぐ
+    if (my_gen != fetch_gen_.load()) return;
 
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
@@ -907,12 +923,37 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
     // session_count は呼び出し側 (window.cpp) が count_claude_sessions_split で
     // メイン/サブ一括計算したものを書き込むため、ここでは触らない
 
+    // ハング検知：fetching_ が true のまま FETCH_STALL_TIMEOUT_MS 以上経過している場合、
+    // do_fetch スレッドが fetching_.store(false) に到達せず滞留したとみなす。
+    // （WinHTTP 内部の無限待機など、http_get 側タイムアウトが効かないケースへの保険）
+    // 経過時間は GetTickCount64 の単調時計で計測し、NTP 補正等の壁掛け時計飛びに強くする。
+    // ハンドルは CloseHandle して閉じる。スレッド自体は生きている可能性があるが、
+    // fetch_gen_ を進めるため、遅延復帰した旧スレッドは終端で pending_ / fetching_ を触らない。
+    // TerminateThread はロック未解放・リソースリークの危険があるため使わない
+    if (fetching_.load()) {
+        uint64_t elapsed_ms = GetTickCount64() - fetch_start_tick_.load();
+        if (elapsed_ms > FETCH_STALL_TIMEOUT_MS) {
+            log_error("claude fetch stalled %llums (account=%d), resetting",
+                      static_cast<unsigned long long>(elapsed_ms), account_index_);
+            if (fetch_thread_) {
+                CloseHandle(fetch_thread_);
+                fetch_thread_ = nullptr;
+            }
+            fetch_gen_.fetch_add(1);  // 旧スレッドを非現世代に格下げ
+            fetching_.store(false);
+            // 停滞中に書かれた可能性のあるネガティブキャッシュを次回強制無視し、即再取得させる
+            first_fetch_ = true;
+        }
+    }
+
     if (!fetching_.load()) {
         if (fetch_thread_ && WaitForSingleObject(fetch_thread_, 0) == WAIT_OBJECT_0) {
             CloseHandle(fetch_thread_);
             fetch_thread_ = nullptr;
         }
         if (!fetch_thread_) {
+            fetch_gen_.fetch_add(1);
+            fetch_start_tick_.store(GetTickCount64());
             fetching_.store(true);
             fetch_thread_ = CreateThread(nullptr, 0, fetch_thread, this, 0, nullptr);
             if (!fetch_thread_) fetching_.store(false);  // 起動失敗時は次回タイマーで再試行できるようリセット
