@@ -895,12 +895,16 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     set_brush_color(brush_text_, cfg.col_text);
     render_target_->DrawText(plan_name, static_cast<UINT32>(wcslen(plan_name)), font_small_, hsr, brush_text_);
 
-    // Usage API 取得失敗インジケータ（プラン名の右に赤で "ERR"）
+    // Usage API 取得失敗／未ログインインジケータ（プラン名の右に赤で "Err" または "Logout"）
+    // Logout はトークン未取得（ログアウト状態）を示し、fetch_error に依らず点灯する。
+    // キャッシュ TTL 内でデータ表示が続いていても、ログアウトした瞬間から可視化するため。
+    // プラン名が空のときは先頭セパレータを省き、書き出し位置をプラン名開始と揃える
     int text_cursor = static_cast<int>(wcslen(plan_name));
-    if (m.fetch_error) {
+    if (m.fetch_error || m.token_missing) {
         wchar_t err_buf[24] = {};
         wmemset(err_buf, L' ', text_cursor);
-        swprintf_s(err_buf + text_cursor, static_cast<int>(_countof(err_buf)) - text_cursor, L" ERR");
+        swprintf_s(err_buf + text_cursor, static_cast<int>(_countof(err_buf)) - text_cursor,
+                   text_cursor ? L" %s" : L"%s", m.token_missing ? L"Logout" : L"Err");
         set_brush_color(brush_text_, COL_WARN_RED);
         render_target_->DrawText(err_buf, static_cast<UINT32>(wcslen(err_buf)), font_small_, hsr, brush_text_);
         text_cursor = static_cast<int>(wcslen(err_buf));

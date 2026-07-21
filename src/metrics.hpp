@@ -114,7 +114,10 @@ struct ClaudeMetrics {
     char  plan_label[16]    = {};       // "Max5", "Pro" 等
     int   session_count = 0;
     bool  avail         = false;
-    bool  fetch_error   = false;      // Usage API 取得失敗フラグ（ERR 表示用）
+    bool  fetch_error   = false;      // Usage API 取得失敗フラグ（Err 表示用）
+    // OAuth トークン未取得フラグ（credentials.json 不在・パース失敗・accessToken 空）。
+    // ログアウト状態を示し、立っている間は fetch_error に依らず Logout を表示する
+    bool  token_missing = false;
     float extra_used_dollars = 0.f;   // 超過使用額（ドル換算：used_credits / 100）
     bool  extra_enabled      = false; // 超過料金が有効か（is_enabled）
     // モデルスコープ 7d 使用率（%）。Usage API limits[] の kind=="weekly_scoped" の percent。

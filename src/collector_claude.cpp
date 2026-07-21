@@ -555,6 +555,10 @@ void ClaudeCollector::do_fetch() {
     }
 
     std::string token = get_token();
+    // トークン未取得＝ログアウト状態の判定。fetch_or_cache はトークン空だと HTTP を試みず
+    // 即 nullptr を返すため、失敗ログもネガティブキャッシュも残らない。表示側が通信障害の
+    // Err と区別して Logout を点灯できるよう、フラグとして毎フェッチで更新する
+    result.token_missing = token.empty();
 
     // --- Usage API ---
     int usage_status = 0;
@@ -825,15 +829,34 @@ static std::wstring read_process_env_var(DWORD pid, const std::wstring& name) {
                 if (ReadProcessMemory(proc,
                         reinterpret_cast<BYTE*>(upp) + UPP_OFFSET_ENVIRONMENT_X64,
                         &env_block, sizeof(env_block), &n) && n == sizeof(env_block) && env_block) {
-                    // 環境変数ブロックを 64KB まで読み取る
-                    // 形式は "KEY=VAL\0KEY=VAL\0...\0\0"（UTF-16）。
-                    // EnvironmentSize のオフセットは更に不安定なため、固定上限で読んで終端 NUL を探す方式とする
+                    // 環境変数ブロック（"KEY=VAL\0KEY=VAL\0...\0\0" の UTF-16）を最大 64KB まで、
+                    // ページ境界に整列したチャンク単位で読み進める。
+                    // ブロックのコミット済みサイズは通常数 KB で、先頭から 64KB を一括要求すると
+                    // ReadProcessMemory が未コミット領域を跨いで全体失敗する。（この失敗により
+                    // v1.23.1 まで環境変数が常に読めず、サブ判定が一度も機能していなかった）
+                    // 各読み取りを 1 ページ内に収めれば、コミット済み範囲だけを確実に取得できる。
+                    // EnvironmentSize フィールドのオフセットは OS バージョン間で不安定なため使わない
                     constexpr SIZE_T MAX_ENV_BYTES = 64 * 1024;
-                    std::vector<wchar_t> buf(MAX_ENV_BYTES / sizeof(wchar_t));
-                    SIZE_T read = 0;
-                    if (ReadProcessMemory(proc, env_block, buf.data(), MAX_ENV_BYTES, &read)
-                        && read >= sizeof(wchar_t)) {
-                        const SIZE_T chars = read / sizeof(wchar_t);
+                    constexpr SIZE_T PAGE_BYTES    = 4096;
+                    std::vector<wchar_t> buf;
+                    buf.reserve(MAX_ENV_BYTES / sizeof(wchar_t));
+                    SIZE_T total = 0;
+                    while (total < MAX_ENV_BYTES) {
+                        const ULONG_PTR addr = reinterpret_cast<ULONG_PTR>(env_block) + total;
+                        SIZE_T chunk = PAGE_BYTES - (addr & (PAGE_BYTES - 1));  // 次のページ境界までに制限
+                        if (total + chunk > MAX_ENV_BYTES) chunk = MAX_ENV_BYTES - total;
+                        wchar_t page[PAGE_BYTES / sizeof(wchar_t)];
+                        SIZE_T read = 0;
+                        if (!ReadProcessMemory(proc, reinterpret_cast<LPCVOID>(addr), page, chunk, &read)
+                            || read == 0) {
+                            break;  // 未コミット領域に到達＝環境ブロックの終端より後ろ
+                        }
+                        buf.insert(buf.end(), page, page + read / sizeof(wchar_t));
+                        total += read;
+                        if (read < chunk) break;  // 部分読みはこれ以上進めない
+                    }
+                    if (!buf.empty()) {
+                        const SIZE_T chars = buf.size();
                         const std::wstring prefix = name + L"=";
                         const wchar_t* p = buf.data();
                         const wchar_t* end = p + chars;
