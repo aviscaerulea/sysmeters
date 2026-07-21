@@ -1023,11 +1023,16 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // delta_start_pct:  直近ウィンドウ開始時点の使用率（%）。0 のとき増加分オーバーレイ非表示
     // window_secs:      ウィンドウ長（秒）。0 より大きいとき、パーセンテージが警告色（黄・赤）の間
     //                    バー左端に警告解除までの残り時間を黒字で表示する（7d のみで使用、5h は 0 のまま非表示）
+    // turns_left:       5h 残ターン数（7d リセットまでに実行できる 5h ウィンドウ数、現ターン含む）。
+    //                    0 以上のときバー右側、7d 行のリセット日時の月数字と桁を揃えた位置に
+    //                    リセット時刻と同色・同フォントで右詰め描画する
+    //                    （5h のみで使用、7d は -1 のまま非表示。判定・算出は呼び出し側で行う）
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
                          bool underuse = false,
                          float delta_start_pct = 0.f,
-                         double window_secs = 0.0) {
+                         double window_secs = 0.0,
+                         int turns_left = -1) {
         static constexpr float CLAUDE_BAR_H = BAR_H;  // VRAM 等と同じバー高さに揃える
 
         // ラベル（"5h"/"7d"）は常に通常色で左寄せ、パーセンテージは条件付き色・フォントで右寄せ
@@ -1163,11 +1168,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         // リセット時刻（右端、font_small_）
         // 7d 形式（"M/D 曜 HH:MM"）はスペース 2 つで 3 分割し曜日前後を圧縮描画する
         // 未取得時はグレーのプレースホルダ "--:--" を表示する
+        static constexpr float TIME_W = 54.f;  // "HH:MM" 描画幅
+        static constexpr float DAY_W  = 22.f;  // 曜日文字（全角 1 文字）描画幅
+        static constexpr float DAY_GAP = 4.f;  // 曜日前後ギャップ（通常スペースの 70%）
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         if (avail) {
-            static constexpr float TIME_W = 54.f;  // "HH:MM" 描画幅
-            static constexpr float DAY_W  = 22.f;  // 曜日文字（全角 1 文字）描画幅
-            static constexpr float DAY_GAP = 4.f;  // 曜日前後ギャップ（通常スペースの 70%）
             wchar_t rtbuf[40];
             swprintf_s(rtbuf, L"%.38s", reset);
             set_brush_color(brush_text_, cfg.col_text, 1.0f);
@@ -1201,6 +1206,23 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             render_target_->DrawText(L"--:--", 5, font_small_,
                 D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H), brush_text_);
         }
+        // 5h 残ターン数（リセット時刻と同色・同フォント）
+        // 7d 行のリセット日時 "M/D 曜 HH:MM" の月数字と桁を揃えて右詰めで描画する。
+        // 月数字の右端 = 日付右端（x + ww - TIME_W - DAY_GAP - DAY_W - DAY_GAP）から
+        // "/DD" 3 文字分（DATE_DAY_W）左。font_small_ は Consolas（等幅）のため、
+        // 残数が 2 桁でも月 2 桁（10〜12 月）と同じ桁位置に揃う。
+        // （日が 1 桁の月は日付が 1 文字分右へ寄り、桁ずれするが許容する）
+        // 5h 行のリセット時刻 "HH:MM" は右端 TIME_W 幅内に収まるため重ならない
+        if (turns_left >= 0) {
+            static constexpr float DATE_DAY_W = 30.f;  // "/DD" 3 文字分（Consolas 18pt 半角 ≈10px/文字）
+            wchar_t tbuf[8];
+            swprintf_s(tbuf, L"%d", turns_left);
+            set_brush_color(brush_text_, cfg.col_text);
+            render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_small_,
+                D2D1::RectF(bar_right + 4.f, y,
+                            x + ww - TIME_W - DAY_GAP - DAY_W - DAY_GAP - DATE_DAY_W,
+                            y + SECTION_H), brush_text_);
+        }
         font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         // 段落整列の復元はリセット時刻描画後に行う（途中で戻すと警告状態で縦位置が変動する）
         font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
@@ -1228,9 +1250,31 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         underuse_7d = elapsed >= static_cast<double>(cfg.claude_underuse_grace_hours) * 3600.0
                    && reach >= 0.f && reach < cfg.claude_underuse_warn_pct;
     }
+    // 5h 残ターン数：7d リセットまでに実行できる 5h ウィンドウ数。（進行中の現ターンを含む）
+    // 現ターンの終端は、5h ウィンドウがアクティブ（five_h_resets_ts が未来）ならそのリセット時刻、
+    // 非アクティブ（リセット通過後の間隙）なら「今開始した」と仮定した now + 5h とする。
+    // 以降は 5h 刻みで隙間なく開始し続けた場合に開始できるターン数を切り上げで加算する。
+    // 7d リセット通過後の未更新データでは 0。（次回フェッチで新ウィンドウの値に置き換わる）
+    // 残数が turns_show_from を超える間、未取得、機能無効（0）の間は非表示（-1）
+    int turns_left = -1;
+    if (m.avail && cfg.claude_turns_show_from > 0 && m.seven_d_resets_ts > 0) {
+        constexpr double FIVE_H_SECS = 5.0 * 3600.0;
+        time_t now = time(nullptr);
+        if (m.seven_d_resets_ts <= now) {
+            turns_left = 0;
+        }
+        else {
+            double cur_end = (m.five_h_resets_ts > now)
+                           ? static_cast<double>(m.five_h_resets_ts)
+                           : static_cast<double>(now) + FIVE_H_SECS;
+            double after = static_cast<double>(m.seven_d_resets_ts) - cur_end;
+            turns_left = 1 + (after > 0.0 ? static_cast<int>(std::ceil(after / FIVE_H_SECS)) : 0);
+        }
+        if (turns_left > cfg.claude_turns_show_from) turns_left = -1;
+    }
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
              calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct,
-             false, five_h_delta_start);
+             false, five_h_delta_start, 0.0, turns_left);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
              calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7, cfg.warn_claude_7d_pct,
              underuse_7d, seven_d_delta_start, 7.0 * 24 * 3600);

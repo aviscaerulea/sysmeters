@@ -34,7 +34,7 @@ struct AppConfig {
     uint32_t col_net_recv   = 0xDDA858;  // Read/recv 用：少し明るいアンバー（disk_read と統一）
     uint32_t col_net_send   = 0x8C642A;  // Write/send 用：暗めアンバー（disk_write と統一）
     uint32_t col_claude_bar = 0xCC923E;  // アンバー（同上）
-    uint32_t col_claude_scoped_bar = 0xD4D4D4;  // ライトグレー（上位モデル専用 7d ミニバー。col_text と同系で純白より馴染む）
+    uint32_t col_claude_scoped_bar = 0xACACAC;  // グレー（上位モデル専用 7d ミニバー。塗り矩形は同値の文字より明るく見えるため、col_text より一段暗くして見た目を揃える）
     uint32_t col_claude_scoped_bar_warn = 0xEF5350;  // 警告赤（上位モデル専用 7d ミニバーが 100% 到達時。COL_WARN_RED と同値）
     // 使い切り不能検知（underuse）発火中の 7d バー未使用部分の背景色。
     // 通常のバー背景（0x2A2A2A）よりわずかに明るい寒色で、アンバー系の暖色塗りと対比させ
@@ -85,6 +85,11 @@ struct AppConfig {
     int  claude_delta_window_7d_min = 720;
     // 上位モデル専用 7d ミニバーの縦幅（px）。0 = 非表示、最大 4（7d バー下の行内余白に収まる上限）
     int  claude_scoped_bar_px = 3;
+    // 5h 残ターン数表示の開始値。7d リセットまでに実行できる 5h ウィンドウ数（進行中の
+    // 現ターンを含む）がこの値以下になったら、5h バーのすぐ右に残数を表示する。
+    // メイン/サブ共通。0 = 非表示。（機能無効）
+    // サニティチェックで 0〜34 にクランプする。（34 = ceil(168h / 5h)、7d 内の最大ターン数）
+    int  claude_turns_show_from = 9;
     // 使い切り不能検知（underuse 警告、7d バー専用）
     // 直近の実測平均消費ペースで残り時間を消費し続けても予測到達率が
     // underuse_warn_pct に届かない＝挽回不能を検知し、
