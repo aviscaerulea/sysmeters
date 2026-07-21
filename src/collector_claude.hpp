@@ -78,6 +78,14 @@ private:
     // 値 1 は「終了ウィンドウの識別子が不明な間隙で発火済み」を示す番兵
     time_t             last_nudge_resets_ts_ = -1;
     std::atomic<bool>  fetching_   = false;
+    // fetch スレッドの世代番号。update() が新スレッド起動または watchdog リセットを行うたびに
+    // インクリメントする。do_fetch は起動時に自世代を捕獲し、終端で「自世代のときのみ
+    // pending_ / fetching_ / WM_CLAUDE_DONE 通知を実行する」ことで、遅延復帰した旧スレッドが
+    // 新世代の状態を破壊するのを防ぐ
+    std::atomic<uint32_t> fetch_gen_ = 0;
+    // 直近 fetch スレッド起動時刻（GetTickCount64 の ms、単調時計）。update() のハング検知に使う。
+    // system_clock を避けるのは NTP 補正等の壁掛け時計飛びで誤発火や見逃しが起きるため
+    std::atomic<uint64_t> fetch_start_tick_ = 0;
     std::atomic<bool>  shutdown_   = false;    // shutdown 要求フラグ（fetch スレッドの早期中断用）
     HANDLE             fetch_thread_ = nullptr;
     std::mutex         result_mutex_;
