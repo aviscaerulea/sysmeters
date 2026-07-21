@@ -171,6 +171,7 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_delta_window_min = get_int("claude", "delta_window_min", cfg.claude_delta_window_min);
         cfg.claude_delta_window_7d_min = get_int("claude", "delta_window_7d_min", cfg.claude_delta_window_7d_min);
         cfg.claude_scoped_bar_px = get_int("claude", "scoped_bar_px", cfg.claude_scoped_bar_px);
+        cfg.claude_turns_show_from = get_int("claude", "turns_show_from", cfg.claude_turns_show_from);
         cfg.claude_underuse_enable   = get_bool ("claude", "underuse_enable",   cfg.claude_underuse_enable);
         cfg.claude_underuse_grace_hours = get_int("claude", "underuse_grace_hours", cfg.claude_underuse_grace_hours);
         cfg.claude_underuse_warn_pct = get_float("claude", "underuse_warn_pct", cfg.claude_underuse_warn_pct);
@@ -234,6 +235,9 @@ AppConfig load_config(const std::string& path) {
     // 上位モデル専用 7d ミニバー縦幅のサニティチェック（0〜4px）
     // 4px 超は 7d バー行内の下余白に収まらずレイアウト変更を要するため上限とする。0 は非表示
     cfg.claude_scoped_bar_px = std::clamp(cfg.claude_scoped_bar_px, 0, 4);
+
+    // 5h 残ターン数表示開始値のサニティチェック。（0〜34 = 7d 内の最大ターン数）0 は機能無効
+    cfg.claude_turns_show_from = std::clamp(cfg.claude_turns_show_from, 0, 34);
 
     // 使い切り不能検知のサニティチェック（目標到達率 0〜100%）
     cfg.claude_underuse_warn_pct = std::clamp(cfg.claude_underuse_warn_pct, 0.f, 100.f);
