@@ -37,6 +37,7 @@ private:
     static constexpr bool DEF_TOPMOST        = false;
     static constexpr bool DEF_TOAST_ALERT    = true;
     static constexpr bool DEF_FULLSCREEN_MUTE = true;
+    static constexpr bool DEF_COMPACT        = false;
     // 「常に警告通知を有効にする」のデフォルト。
     // PC にダメージを与え得る温度系のみ ON とし、使用率系は OFF とする
     static constexpr bool DEF_ALWAYS_ALERT_CPU       = false;
@@ -51,6 +52,7 @@ private:
     bool topmost_        = DEF_TOPMOST;
     bool toast_alert_    = DEF_TOAST_ALERT;
     bool fullscreen_mute_ = DEF_FULLSCREEN_MUTE;  // フルスクリーンアプリ実行中は通知・警告音を抑制
+    bool compact_        = DEF_COMPACT;   // コンパクト表示（全体を COMPACT_SCALE 倍に縮小、レジストリ保存）
     // フルスクリーン抑制中でも Toast＋警告音を通す例外項目（レジストリ保存）
     bool always_alert_cpu_       = DEF_ALWAYS_ALERT_CPU;        // CPU 使用率
     bool always_alert_temp_cpu_  = DEF_ALWAYS_ALERT_TEMP_CPU;   // CPU 温度
@@ -112,6 +114,10 @@ private:
     void save_toast_alert();    // レジストリに Toast 通知設定を書く
     bool load_fullscreen_mute();  // レジストリからフルスクリーン抑制設定を読む（未設定時は true）
     void save_fullscreen_mute();  // レジストリにフルスクリーン抑制設定を書く
+    bool load_compact();          // レジストリからコンパクト表示設定を読む（未設定時は false）
+    void save_compact();          // レジストリにコンパクト表示設定を書く
+    // 現在の描画スケールを反映した物理クライアント幅（ceil(win_width × scale)）
+    int  client_width() const;
     void load_always_alert();  // レジストリから「常に警告通知」5 フラグを一括読み込み
     void save_always_alert();  // レジストリに「常に警告通知」5 フラグを一括保存
     // 「常に警告通知」フラグを AlertManager::Id のビットマスクに変換する
@@ -121,8 +127,10 @@ private:
     bool is_fullscreen_app_running();
     void load_visibility();     // レジストリからセクション表示フラグ全項目を一括読み込み（未設定時は true）
     void save_visibility();     // レジストリにセクション表示フラグ全項目を一括保存
-    // 表示トグル共通の後処理：永続化 → 高さ事前計算 → 先行リサイズ → 同期再描画
-    // （二段表示防止のため SetWindowPos を paint() より先行させる。IDM_VIS_* とドライブ別トグルが共用）
+    // 高さ事前計算 → 先行リサイズ → 同期再描画
+    // （二段表示防止のため SetWindowPos を paint() より先行させる。表示トグルとコンパクト切替が共用）
+    void relayout_window();
+    // 表示トグル共通の後処理：永続化 → relayout_window()（IDM_VIS_* とドライブ別トグルが共用）
     void on_visibility_toggled();
     bool is_startup_registered(); // Windows スタートアップ（HKCU\...\Run）の登録有無を返す
     void set_startup(bool enable);// Windows スタートアップに現在の実行ファイルを登録 / 解除する
