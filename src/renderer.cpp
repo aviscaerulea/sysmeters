@@ -57,6 +57,8 @@ static constexpr float INFO_LINE_H = 27.f;  // Space 下テキスト行高さ（
 // paint() 側は draw_*() の戻り値で y を累積する設計を維持しており、
 // 各式は対応する draw_*() 内の y 累積と数値上一致させる必要がある。
 // レイアウト定数（SECTION_H 等）を変更した場合は両側を必ず揃える。
+// 高さの加算は全て論理座標系（コンパクト縮小前）で行い、scale の適用は
+// preferred 高さを物理 px 化する最終段のみとする。
 namespace {
 inline float section_h_os()             { return SECTION_H; }
 inline float section_h_cpu()            { return SECTION_H + GRAPH_H_LG + GAP + CORE_BAR_H + GAP + SECTION_H; }
@@ -1313,6 +1315,9 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
     if (!render_target_) return;
 
     render_target_->BeginDraw();
+    // コンパクト表示：描画コードは論理座標系のまま、transform だけで一括縮小する。
+    //（テキストもベクタ描画されるため縮小しても滲まない）
+    render_target_->SetTransform(D2D1::Matrix3x2F::Scale(scale(), scale()));
     render_target_->Clear(from_rgb(cfg.col_background));
 
     float y = PAD;
@@ -1333,7 +1338,8 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
         y = draw_claude(m.claude_sub, cfg, y);
     }
 
-    preferred_h_ = static_cast<int>(y + PAD);
+    // 物理 px 化。切り上げで最下行のクリップを防ぐ
+    preferred_h_ = static_cast<int>(std::ceil((y + PAD) * scale()));
 
     HRESULT hr = render_target_->EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) {
@@ -1358,5 +1364,6 @@ int Renderer::compute_preferred_height(const AllMetrics& m, const Visibility& vi
     if (vis.claude_sub && m.claude_sub.account_enabled) {
         y += section_h_claude();
     }
-    return static_cast<int>(y + PAD);
+    // paint() の preferred_h_ 確定式と同一（物理 px 化・切り上げ）
+    return static_cast<int>(std::ceil((y + PAD) * scale()));
 }

@@ -33,6 +33,18 @@ struct Visibility {
 // WM_PAINT で Paint() を呼び出すと AllMetrics の内容を描画する。
 class Renderer {
 public:
+    // コンパクト表示の縮小率
+    // paint() の SetTransform と物理サイズ算出（preferred 高さ・クライアント幅）の唯一の係数。
+    // 描画コードは全て論理座標のままとし、この係数は transform と外形サイズにのみ現れる。
+    // 1/2 では文字が小さすぎたため 3/5 とした。（実画面評価による）
+    static constexpr float COMPACT_SCALE = 0.6f;
+
+    // コンパクト表示の ON/OFF（window 側のトレイメニュー・レジストリ設定から反映する）
+    void  set_compact(bool on) { compact_ = on; }
+
+    // 現在の描画スケール（通常 1.0、コンパクト時 COMPACT_SCALE）
+    float scale() const { return compact_ ? COMPACT_SCALE : 1.f; }
+
     // HWND に紐付けた D2D レンダーターゲットを作成する
     bool init(HWND hwnd, const AppConfig& cfg);
 
@@ -41,8 +53,8 @@ public:
 
     // vis に基づき paint() を実行せずに preferred_height を事前計算する
     //
-    // WM_COMMAND の表示トグル時、SetWindowPos を paint() より先行させるために使う。
-    // paint() のセクション加算式と厳密に一致させる必要がある。
+    // WM_COMMAND の表示トグル・コンパクト切替時、SetWindowPos を paint() より先行させるために使う。
+    // paint() のセクション加算式と論理座標系で厳密に一致させ、戻り値のみ scale 適用後の物理 px とする。
     int compute_preferred_height(const AllMetrics& m, const Visibility& vis) const;
 
     // コアバーの補間アニメーションを 1 ステップ進める
@@ -58,7 +70,7 @@ public:
     void shutdown();
     ~Renderer() { shutdown(); }
 
-    // ウィンドウ全体の高さ（コンテンツに合わせて計算する）
+    // ウィンドウ全体の高さ（コンテンツに合わせて計算する。scale 適用後の物理 px）
     int preferred_height() const { return preferred_h_; }
 
 private:
@@ -83,6 +95,9 @@ private:
     ID2D1SolidColorBrush*  brush_fill_  = nullptr;  // 汎用（後で色を変えて使う）
 
     int preferred_h_ = 880;
+
+    // コンパクト表示フラグ（true で全描画を COMPACT_SCALE 倍に縮小）
+    bool compact_ = false;
 
     // コアバーのアニメーション補間用表示値（update_core_animation で更新）
     std::vector<float> core_disp_;

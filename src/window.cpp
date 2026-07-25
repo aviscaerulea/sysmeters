@@ -23,6 +23,7 @@
 #pragma comment(lib, "dwmapi.lib")
 #include <filesystem>
 #include <thread>
+#include <cmath>
 #include <cstring>
 namespace fs = std::filesystem;
 
@@ -106,8 +107,13 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
         return false;
     }
 
-    // 初期クライアントサイズ(win_width × 880)からウィンドウ全体サイズを計算
-    RECT adj = {0, 0, cfg_->win_width, 880};
+    // コンパクト表示設定をレジストリから復元し、初期ウィンドウ幅の算出前に renderer へ反映する
+    compact_ = load_compact();
+    renderer_->set_compact(compact_);
+
+    // 初期クライアントサイズ（スケール適用幅 × 880）からウィンドウ全体サイズを計算
+    //（高さ 880 は論理値のままだが、ShowWindow 前の apply_window_height で物理値に補正される）
+    RECT adj = {0, 0, client_width(), 880};
     AdjustWindowRectEx(&adj, WND_STYLE, FALSE, WND_EX_STYLE);
 
     // ウィンドウ作成（標準タイトルバー＋閉じるボタン、タスクバー非表示）
@@ -287,16 +293,26 @@ void AppWindow::update_window_size() {
     apply_window_height(renderer_->preferred_height());
 }
 
+// 現在の描画スケールを反映した物理クライアント幅
+//
+// 通常時は cfg の win_width そのまま、コンパクト時は ceil(win_width × COMPACT_SCALE)。
+// 切り上げは右端の描画クリップ防止のため
+int AppWindow::client_width() const {
+    return static_cast<int>(std::ceil(cfg_->win_width * renderer_->scale()));
+}
+
 // 指定の client 領域高さでウィンドウをリサイズする
 //
+// target_client_h は物理 px。（renderer 側で scale 適用済み）
 // MIN_CLIENT_H クランプ・モニタ作業領域クランプ・キャッシュ判定・renderer.resize() を行う。
 // 表示トグル経路は呼び出し前に last_pref_h_ = 0 を設定してキャッシュを無効化する。
+// MIN_CLIENT_H はドラッグ可能領域の確保が目的の物理値のためスケールしない。
 void AppWindow::apply_window_height(int target_client_h) {
     int client_h = max(target_client_h, MIN_CLIENT_H);
     if (client_h == last_pref_h_) return;
     last_pref_h_ = client_h;
 
-    RECT adj = {0, 0, cfg_->win_width, client_h};
+    RECT adj = {0, 0, client_width(), client_h};
     AdjustWindowRectEx(&adj, WND_STYLE, FALSE, WND_EX_STYLE);
     int full_h = adj.bottom - adj.top;
 
@@ -311,10 +327,11 @@ void AppWindow::apply_window_height(int target_client_h) {
 
     RECT rc;
     GetWindowRect(hwnd_, &rc);
-    if ((rc.bottom - rc.top) != full_h) {
+    // コンパクト切替では高さが MIN_CLIENT_H クランプで一致し得るため、幅の差分も見る
+    if ((rc.bottom - rc.top) != full_h || (rc.right - rc.left) != (adj.right - adj.left)) {
         SetWindowPos(hwnd_, nullptr, 0, 0, adj.right - adj.left, full_h,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        renderer_->resize(cfg_->win_width, client_h);
+        renderer_->resize(client_width(), client_h);
     }
 }
 
@@ -456,6 +473,8 @@ void AppWindow::show_context_menu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (topmost_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_TOPMOST, L"常に最前面に表示");
+    AppendMenuW(menu, MF_STRING | (compact_ ? MF_CHECKED : MF_UNCHECKED),
+                IDM_COMPACT, L"コンパクト表示");
     AppendMenuW(menu, MF_STRING | (toast_alert_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_ALERT_TOAST, L"Toast 通知");
     AppendMenuW(menu, MF_STRING | (fullscreen_mute_ ? MF_CHECKED : MF_UNCHECKED),
@@ -557,6 +576,7 @@ static constexpr LPCWSTR REG_KEY         = L"Software\\sysmeters";  // HKCU 以�
 static constexpr LPCWSTR REG_TOPMOST     = L"Topmost";              // 最前面設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_ALERT_TOAST    = L"AlertToast";         // Toast 通知設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_FULLSCREEN_MUTE = L"FullscreenMute";  // フルスクリーン抑制設定の値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_COMPACT         = L"Compact";          // コンパクト表示設定の値名（REG_DWORD、0 or 1）
 // 「常に警告通知を有効にする」（フルスクリーン抑制の例外項目）の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_ALWAYS_ALERT_CPU       = L"AlwaysAlert_CPU";
 static constexpr LPCWSTR REG_ALWAYS_ALERT_TEMP_CPU  = L"AlwaysAlert_TempCPU";
@@ -669,6 +689,8 @@ bool AppWindow::load_toast_alert()  { return load_reg_bool(REG_ALERT_TOAST, DEF_
 void AppWindow::save_toast_alert()  { save_reg_bool(REG_ALERT_TOAST, toast_alert_);           }
 bool AppWindow::load_fullscreen_mute()  { return load_reg_bool(REG_FULLSCREEN_MUTE, DEF_FULLSCREEN_MUTE); }
 void AppWindow::save_fullscreen_mute()  { save_reg_bool(REG_FULLSCREEN_MUTE, fullscreen_mute_);           }
+bool AppWindow::load_compact()          { return load_reg_bool(REG_COMPACT,     DEF_COMPACT);             }
+void AppWindow::save_compact()          { save_reg_bool(REG_COMPACT,     compact_);                       }
 
 void AppWindow::load_always_alert() {
     always_alert_cpu_       = load_reg_bool(REG_ALWAYS_ALERT_CPU,       DEF_ALWAYS_ALERT_CPU);
@@ -767,16 +789,20 @@ void AppWindow::save_visibility() {
     }
 }
 
-// 表示トグル共通の後処理：永続化 → 高さ事前計算 → 先行リサイズ → 同期再描画
-// （二段表示防止のため SetWindowPos を paint() より先行させる。IDM_VIS_* とドライブ別トグルが共用）
-void AppWindow::on_visibility_toggled() {
-    save_visibility();
-
+// 高さ事前計算 → 先行リサイズ → 同期再描画
+// （二段表示防止のため SetWindowPos を paint() より先行させる。表示トグルとコンパクト切替が共用）
+void AppWindow::relayout_window() {
     int new_pref_h = renderer_->compute_preferred_height(*metrics_, vis_);
     last_pref_h_ = 0;  // apply_window_height のキャッシュを無効化
     apply_window_height(new_pref_h);
     InvalidateRect(hwnd_, nullptr, FALSE);
     UpdateWindow(hwnd_);
+}
+
+// 表示トグル共通の後処理：永続化 → relayout_window()（IDM_VIS_* とドライブ別トグルが共用）
+void AppWindow::on_visibility_toggled() {
+    save_visibility();
+    relayout_window();
 }
 
 // Windows スタートアップ用レジストリ（HKCU\Software\Microsoft\Windows\CurrentVersion\Run キー配下の sysmeters 値）
@@ -1072,6 +1098,13 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_FULLSCREEN_MUTE:
             fullscreen_mute_ = !fullscreen_mute_;
             save_fullscreen_mute();
+            break;
+        // コンパクト表示トグル：フラグ反転 → 永続化 → renderer 反映 → 先行リサイズ＋同期再描画
+        case IDM_COMPACT:
+            compact_ = !compact_;
+            save_compact();
+            renderer_->set_compact(compact_);
+            relayout_window();
             break;
         // 常に警告通知トグル：フラグ反転 → 永続化（再描画・リサイズは不要）
         case IDM_ALWAYS_ALERT_CPU:       always_alert_cpu_       = !always_alert_cpu_;       save_always_alert(); break;
