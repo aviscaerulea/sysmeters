@@ -63,6 +63,13 @@ struct AppConfig {
     // ガードトーン長（ミリ秒、再生前後の 19kHz 不可聴トーン）
     // BLE ヘッドフォンの省電力移行を防ぐ。冒頭・末尾に共通で適用する。0 で無効。
     int   guard_tone_ms      = 1500;
+    // 警告音判定に使う直近サンプルの平均数
+    // 瞬間スパイクによる誤警告を防ぐため、直近 N サンプルの平均値で閾値判定する。
+    // 更新間隔が系統で異なるため 2 系統に分ける。（CPU/GPU は 0.9 秒、RAM/VRAM は 2.0 秒間隔）
+    // 1 = 平均を取らず瞬間値で判定。サニティチェックで 1〜60 にクランプする。
+    //（60 = 履歴 RingBuffer の容量。0 以下は average() が 0 を返し警告が発火しなくなるため下限 1）
+    int   alert_avg_samples     = 15;  // CPU/GPU 使用率（0.9 秒 × 15 ≒ 13.5 秒）
+    int   alert_avg_samples_mem =  7;  // RAM/VRAM 使用率（2.0 秒 × 7 = 14 秒）
     float reset_cpu_pct      = 90.f;  // CPU 使用率の警告音リセット閾値（%）
     float reset_gpu_pct      = 90.f;  // GPU 使用率の警告音リセット閾値（%）
     float reset_mem_pct       = 85.f;  // RAM/VRAM の警告音リセット閾値（%）

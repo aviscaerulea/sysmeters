@@ -153,6 +153,8 @@ AppConfig load_config(const std::string& path) {
         cfg.reset_disk_gbh      = get_float("threshold", "reset_disk_gbh",      cfg.reset_disk_gbh);
         cfg.reset_claude_5h_pct = get_float("threshold", "reset_claude_5h_pct", cfg.reset_claude_5h_pct);
         cfg.reset_claude_7d_pct = get_float("threshold", "reset_claude_7d_pct", cfg.reset_claude_7d_pct);
+        cfg.alert_avg_samples     = get_int("threshold", "avg_samples",     cfg.alert_avg_samples);
+        cfg.alert_avg_samples_mem = get_int("threshold", "avg_samples_mem", cfg.alert_avg_samples_mem);
 
         cfg.guard_tone_ms = get_int("guard", "tone_ms", cfg.guard_tone_ms);
 
@@ -297,6 +299,12 @@ AppConfig load_config(const std::string& path) {
     clamp_below(cfg.reset_disk_gbh,       cfg.warn_disk_gbh,       1.f);
     clamp_below(cfg.reset_claude_5h_pct,  cfg.warn_claude_5h_pct,  5.f);
     clamp_below(cfg.reset_claude_7d_pct,  cfg.warn_claude_7d_pct,  5.f);
+
+    // 警告音の平均サンプル数のサニティチェック（1〜60）
+    // 上限は履歴 RingBuffer の容量、下限は 1（瞬間値判定）。
+    // 0 以下だと average() が 0 を返し、当該項目の警告音が二度と鳴らなくなるため許容しない。
+    cfg.alert_avg_samples     = std::clamp(cfg.alert_avg_samples,     1, 60);
+    cfg.alert_avg_samples_mem = std::clamp(cfg.alert_avg_samples_mem, 1, 60);
 
     return cfg;
 }

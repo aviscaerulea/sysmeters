@@ -406,12 +406,17 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
         }
     };
 
-    check_item(CPU,    m.cpu.total_history.average(AVG_SAMPLES),  cfg.warn_cpu_pct, cfg.reset_cpu_pct);
+    // 平均判定のサンプル数は cfg から取得する（1〜60 にクランプ済み）
+    // CPU/GPU（0.9 秒間隔）と RAM/VRAM（2.0 秒間隔）で更新頻度が異なるため系統を分ける
+    const std::size_t avg_n     = static_cast<std::size_t>(cfg.alert_avg_samples);
+    const std::size_t avg_n_mem = static_cast<std::size_t>(cfg.alert_avg_samples_mem);
+
+    check_item(CPU,    m.cpu.total_history.average(avg_n),  cfg.warn_cpu_pct, cfg.reset_cpu_pct);
     if (m.gpu.avail)
-        check_item(GPU, m.gpu.usage_history.average(AVG_SAMPLES), cfg.warn_gpu_pct, cfg.reset_gpu_pct);
-    check_item(RAM,    m.mem.usage_pct,  cfg.warn_mem_pct, cfg.reset_mem_pct);
+        check_item(GPU, m.gpu.usage_history.average(avg_n), cfg.warn_gpu_pct, cfg.reset_gpu_pct);
+    check_item(RAM,    m.mem.usage_history.average(avg_n_mem),  cfg.warn_mem_pct, cfg.reset_mem_pct);
     if (m.vram.avail)
-        check_item(VRAM, m.vram.usage_pct, cfg.warn_mem_pct, cfg.reset_mem_pct);
+        check_item(VRAM, m.vram.usage_history.average(avg_n_mem), cfg.warn_mem_pct, cfg.reset_mem_pct);
     // ディスク系：検出ドライブ全台を添字対応の ID で判定する（表示 OFF でも警告は継続する）
     // m.disks は列挙上限 kMaxDiskDrives 以下が契約だが、ID 範囲逸脱を防ぐため防御的に切り詰める
     {
