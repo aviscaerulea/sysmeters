@@ -66,6 +66,7 @@ void MemCollector::update(MemMetrics& out) {
     if (!GlobalMemoryStatusEx(&ms)) return;
 
     out.usage_pct = static_cast<float>(ms.dwMemoryLoad);
+    out.usage_history.push(out.usage_pct);
     out.total_gb  = static_cast<float>(ms.ullTotalPhys) / (1024.f * 1024.f * 1024.f);
     out.used_gb   = out.total_gb - static_cast<float>(ms.ullAvailPhys) / (1024.f * 1024.f * 1024.f);
 

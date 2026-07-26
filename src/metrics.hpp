@@ -44,6 +44,10 @@ struct MemMetrics {
     float used_gb   = 0.f;
     float total_gb  = 0.f;
     float wsl_gb    = 0.f;  // vmmemWSL プロセスの Working Set 合計（WSL 非使用時は 0）
+    // 使用率履歴（%）：警告音の平均判定専用（描画は瞬間値の横バーのみで履歴を使わない）
+    // update() から push される。起動時の初回取得を除き TIMER_SLOW（2.0 秒）間隔のため、
+    // N サンプルは概ね N × 2 秒の窓に相当する
+    RingBuffer<float, 60> usage_history;
     RingBuffer<float, 60> hard_fault_history;  // ハードフォールト履歴（\Memory\Page Reads/sec）
 };
 
