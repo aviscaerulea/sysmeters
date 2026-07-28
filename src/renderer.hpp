@@ -102,6 +102,12 @@ private:
     // コアバーのアニメーション補間用表示値（update_core_animation で更新）
     std::vector<float> core_disp_;
 
+    // トッププロセス表示のヒステリシス状態（前回判定で表示していたか。CPU/GPU 別）
+    // 表示中は閾値を緩めて判定し、境界付近の点滅を防ぐ。
+    // （描画側の topproc_visible が更新し、セクション非表示中は paint がリセットする）
+    bool topproc_shown_cpu_ = false;
+    bool topproc_shown_gpu_ = false;
+
     void create_device_resources(const AppConfig& cfg);
     void release_device_resources();
 
