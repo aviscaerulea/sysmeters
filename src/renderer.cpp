@@ -242,6 +242,24 @@ void Renderer::draw_section_label_with_model(float x, float y, float ww,
     }
 }
 
+// トッププロセス表示の可否判定（CPU/GPU 共通）
+//
+// 名前が空でない（収集済み）ことに加え、大パーセンテージが show_pct 以上、かつトップの
+// 使用率が「大パーセンテージ × min_share_pct / 100」以上のときに表示を開始する。
+// 後者 2 つは「何が特に高負荷か」の把握に寄与しない低情報の表示を抑える条件。
+// （全体が低負荷なとき、および全体が高くても負荷が特定プロセスに偏っていないとき）
+// 表示中は両閾値を TOPPROC_HYST 倍に緩めて判定し、実測値の揺れによる境界付近の
+// 点滅を防ぐ。shown は前回判定の表示状態で、呼び出し側が保持し本関数が更新する。
+static bool topproc_visible(const wchar_t* name, float top_pct, float overall_pct,
+                            const AppConfig& cfg, bool& shown) {
+    constexpr float TOPPROC_HYST = 0.8f;  // 解除側の閾値緩和係数（表示中のみ適用）
+    const float k = shown ? TOPPROC_HYST : 1.f;
+    shown = name[0] != L'\0'
+        && overall_pct >= cfg.topproc_show_pct * k
+        && top_pct >= overall_pct * cfg.topproc_min_share_pct * k / 100.f;
+    return shown;
+}
+
 void Renderer::draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, const AppConfig& cfg) {
     const float band_w = (ol.right - TOPPROC_R) - (ol.left + TOPPROC_X);
     const int   cols   = min(static_cast<int>(band_w / TOPPROC_COL_W), TOPPROC_MAX_COLS);
@@ -501,9 +519,8 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
-    // トッププロセス名（大パーセンテージの右）。空文字は表示 OFF か値未確定。
-    // 大パーセンテージが topproc_show_pct 未満の低負荷時は情報価値が薄いため表示しない
-    if (m.top_proc_name[0] && m.total_pct >= cfg.topproc_show_pct)
+    // トッププロセス名（大パーセンテージの右）。表示条件は topproc_visible を参照
+    if (topproc_visible(m.top_proc_name, m.top_proc_pct, m.total_pct, cfg, topproc_shown_cpu_))
         draw_top_proc(m.top_proc_name, m.top_proc_pct, ol, cfg);
 
     // 温度（右寄せ、3 段階色。取得不可時は "--℃"）
@@ -613,6 +630,8 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
         set_brush_color(brush_text_, COL_TEMP_NORMAL);
         D2D1_RECT_F r = D2D1::RectF(x, y, x + ww, y + LINE_H);
         render_target_->DrawText(L"N/A", 3, font_normal_, r, brush_text_);
+        // N/A 中はトッププロセスも描かないため、ヒステリシス状態を「表示していない」に揃える
+        topproc_shown_gpu_ = false;
         return y + LINE_H + GAP;
     }
 
@@ -629,7 +648,7 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
     // トッププロセス名（CPU セクションと同一レイアウト・同一表示条件。GPU 側は HF 表示がないぶん余裕がある）
-    if (m.top_proc_name[0] && m.usage_pct >= cfg.topproc_show_pct)
+    if (topproc_visible(m.top_proc_name, m.top_proc_pct, m.usage_pct, cfg, topproc_shown_gpu_))
         draw_top_proc(m.top_proc_name, m.top_proc_pct, ol, cfg);
 
     // 温度（右寄せ、3 段階色）
@@ -1387,8 +1406,10 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
     float y = PAD;
     y = draw_os(m.os, cfg, y);                            y += SECTION_GAP;
     if (vis.cpu)    { y = draw_cpu(m.cpu, m.mem, cfg, y); y += SECTION_GAP; }
+    else            { topproc_shown_cpu_ = false; }  // 非表示中は「表示していない」に揃え、再表示時に緩和閾値で始まるのを防ぐ
     if (vis.gpu)    { y = draw_gpu(m.gpu, cfg, y);        y += SECTION_GAP;
                       y = draw_vram(m.vram, cfg, y);      y += SECTION_GAP; }
+    else            { topproc_shown_gpu_ = false; }  // 同上（GPU 側）
     if (vis.mem)    { y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP; }
     if (visible_disk_count(m.disks, vis) > 0) { y = draw_disk(m.disks, vis, cfg, y); y += SECTION_GAP; }
     if (vis.net)    { y = draw_net(m.net, cfg, y);        y += SECTION_GAP; }
