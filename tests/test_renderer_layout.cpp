@@ -45,7 +45,11 @@ TEST_CASE("Renderer::compute_preferred_height: GPU OFF は GPU + VRAM を一括 
 TEST_CASE("Renderer::compute_preferred_height: 全セクション OFF でも OS 行分は残る") {
     Renderer r;
     AllMetrics m;
-    Visibility vis_none{false, false, false, false, false, false, false};
+    // Visibility はコンストラクタを持つため集成体初期化できない。全カテゴリを個別に OFF にする
+    Visibility vis_none;
+    vis_none.cpu = vis_none.gpu = vis_none.mem = false;
+    vis_none.disk = vis_none.net = false;
+    vis_none.claude_main = vis_none.claude_sub = false;
     int h_none = r.compute_preferred_height(m, vis_none);
     CHECK(h_none > 0);
     Visibility vis_all;
