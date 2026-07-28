@@ -9,6 +9,8 @@
 // GPU 側は PDH の \GPU Engine(*)\Utilization Percentage の 3D/Compute 系エンジンを
 // 同名 exe × アダプタ × エンジン種別のバケット内で合算し、バケット間は最大値を採った
 // 最上位 1 件を GpuMetrics に書く。（集計方式の根拠は pick_gpu_top のコメントを参照）
+// CPU/GPU とも、四捨五入した整数 % が直前選出プロセスと同値の間は直前を優先して維持し、
+// 同率トップによる表示の入れ替わりを抑える。
 //
 // NVML の per-process API（nvmlDeviceGetProcessUtilization 等）は WDDM ドライバモデルで
 // グラフィックスプロセスの値が返らない事例が多く採用しない。PDH の GPU Engine は

@@ -8,6 +8,7 @@
 #pragma comment(lib, "pdh.lib")
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <string>
 #include <unordered_map>
@@ -112,10 +113,18 @@ struct TopProcCollector::Impl {
     int  gpu_tick   = 0;            // TIMER_CPU tick カウンタ（GPU_TICK_DIV で 1 周）
     bool gpu_primed = false;        // 2 サンプル目に到達したか（レート型カウンタの初回無効値対策）
 
+    // 直前に選出したトッププロセス名。（空 = 直前選出なし。表示閾値による非表示中も選出は続く）
+    // 四捨五入した整数 % が同値の候補が並ぶ間は直前の選出を優先し、同率トップで
+    // 名前だけが入れ替わり続けるのを防ぐための状態。
+    // 候補なし、表示下限未満で選出を見送った tick、および差分基準の取り直し
+    // （スリープ復帰等）で消去する。一時的な取得失敗の tick では保持する。
+    std::wstring last_cpu_top;
+    std::wstring last_gpu_top;
+
     // Impl は private ネスト型のためファイルスコープの静的関数からは参照できず、
     // 収集ヘルパーは Impl 自身のメンバ関数として持つ（定義は本ファイル後方）
     bool take_snapshot();
-    void pick_cpu_top(ULONGLONG elapsed_ms, CpuMetrics& out) const;
+    void pick_cpu_top(ULONGLONG elapsed_ms, CpuMetrics& out);
     void pick_gpu_top(GpuMetrics& out);
 };
 
@@ -174,7 +183,10 @@ bool TopProcCollector::Impl::take_snapshot() {
 // 面グラフ左端の大パーセンテージと一致する。
 // 同名合算はパスを見ない exe 名一致で行う（chrome の多プロセスをまとめるのが目的）。
 // MIN_SHOW_PCT 未満のときは out に書かず、name は空のまま = 非表示となる。
-void TopProcCollector::Impl::pick_cpu_top(ULONGLONG elapsed_ms, CpuMetrics& out) const {
+// 四捨五入した整数 % が直前選出（last_cpu_top）と同値の間は直前選出を優先して表示を安定させる。
+// このため生値の厳密な最大でない候補を書くことがある。
+// 選出結果は last_cpu_top に記録する。（副作用。このため const メンバではない）
+void TopProcCollector::Impl::pick_cpu_top(ULONGLONG elapsed_ms, CpuMetrics& out) {
     std::unordered_map<std::wstring, ULONGLONG> by_name;
     for (const auto& [pid, e] : cur) {
         auto it = prev.find(pid);
@@ -182,17 +194,40 @@ void TopProcCollector::Impl::pick_cpu_top(ULONGLONG elapsed_ms, CpuMetrics& out)
         if (e.cpu_100ns <= it->second.cpu_100ns) continue; // PID 再利用等での累積逆行を無視
         by_name[e.name] += e.cpu_100ns - it->second.cpu_100ns;
     }
-    if (by_name.empty()) return;
+    if (by_name.empty()) {
+        last_cpu_top.clear();
+        return;
+    }
 
-    const auto top = std::max_element(by_name.begin(), by_name.end(),
+    auto top = std::max_element(by_name.begin(), by_name.end(),
         [](const auto& a, const auto& b) { return a.second < b.second; });
 
     // elapsed_ms(ms) × 10000 = 100ns 単位の経過時間
     const double denom = static_cast<double>(elapsed_ms) * 10000.0 * core_count;
-    const float  pct   = std::clamp(
-        static_cast<float>(static_cast<double>(top->second) / denom * 100.0), 0.f, 100.f);
-    if (pct < MIN_SHOW_PCT) return;
+    const auto pct_of = [&](ULONGLONG v) {
+        return std::clamp(static_cast<float>(static_cast<double>(v) / denom * 100.0), 0.f, 100.f);
+    };
+    float pct = pct_of(top->second);
 
+    // 表示の安定化：四捨五入した整数 % が直前選出プロセスと同値の間は直前を維持する。
+    // 同率トップで名前だけが毎 tick 入れ替わるのを防ぐ。（unordered_map の走査順は
+    // 不定のため、完全同値が並ぶと max_element の選択自体も tick ごとに揺れる）
+    if (!last_cpu_top.empty() && last_cpu_top != top->first) {
+        const auto last = by_name.find(last_cpu_top);
+        if (last != by_name.end()) {
+            const float last_pct = pct_of(last->second);
+            if (std::lroundf(last_pct) == std::lroundf(pct)) {
+                top = last;
+                pct = last_pct;
+            }
+        }
+    }
+    if (pct < MIN_SHOW_PCT) {
+        last_cpu_top.clear();
+        return;
+    }
+
+    last_cpu_top = top->first;
     wcsncpy_s(out.top_proc_name, top->first.c_str(), _TRUNCATE);
     out.top_proc_pct = pct;
 }
@@ -243,6 +278,8 @@ static bool is_gpu_core_engine(const wchar_t* engtype) {
 // バケットを跨いで加算しない方針はタスクマネージャの GPU 列と同じ。（同一バケット内の
 // 合算はタスクマネージャより大きい値になり得る点が異なる）
 // 同種エンジンが複数あるアダプタでは合算が 100% を超え得るためクランプは維持する。
+// 四捨五入した整数 % が直前選出（last_gpu_top）と同値の間は直前選出を優先して表示を安定させる。
+// このため生値の厳密な最大でない候補を書くことがある。
 void TopProcCollector::Impl::pick_gpu_top(GpuMetrics& out) {
     DWORD size = 0, count = 0;
     if (PdhGetFormattedCounterArrayW(gpu_counter, PDH_FMT_DOUBLE, &size, &count, nullptr)
@@ -292,14 +329,33 @@ void TopProcCollector::Impl::pick_gpu_top(GpuMetrics& out) {
         double& slot = by_name[name];
         if (v > slot) slot = v;
     }
-    if (by_name.empty()) return;
+    if (by_name.empty()) {
+        last_gpu_top.clear();
+        return;
+    }
 
-    const auto top = std::max_element(by_name.begin(), by_name.end(),
+    auto top = std::max_element(by_name.begin(), by_name.end(),
         [](const auto& a, const auto& b) { return a.second < b.second; });
 
-    const float pct = std::clamp(static_cast<float>(top->second), 0.f, 100.f);
-    if (pct < MIN_SHOW_PCT) return;
+    float pct = std::clamp(static_cast<float>(top->second), 0.f, 100.f);
 
+    // 表示の安定化（pick_cpu_top と同旨）：四捨五入した整数 % が同値の間は直前選出を維持する
+    if (!last_gpu_top.empty() && last_gpu_top != top->first) {
+        const auto last = by_name.find(last_gpu_top);
+        if (last != by_name.end()) {
+            const float last_pct = std::clamp(static_cast<float>(last->second), 0.f, 100.f);
+            if (std::lroundf(last_pct) == std::lroundf(pct)) {
+                top = last;
+                pct = last_pct;
+            }
+        }
+    }
+    if (pct < MIN_SHOW_PCT) {
+        last_gpu_top.clear();
+        return;
+    }
+
+    last_gpu_top = top->first;
     wcsncpy_s(out.top_proc_name, top->first.c_str(), _TRUNCATE);
     out.top_proc_pct = pct;
 }
@@ -346,6 +402,12 @@ void TopProcCollector::update(CpuMetrics& cpu, GpuMetrics& gpu, bool enabled) {
         // 初回と長時間停止明け（スリープ復帰等）は差分が信頼できないため基準の取り直しに留める
         if (impl_->prev_tick_ms != 0 && elapsed_ms > 0 && elapsed_ms <= MAX_ELAPSED_MS) {
             impl_->pick_cpu_top(elapsed_ms, cpu);
+        }
+        else {
+            // 基準の取り直し（初回・スリープ復帰等）では選出の連続性も切れているため、
+            // 同率優先の対象となる直前選出名を消去して白紙から選び直す
+            impl_->last_cpu_top.clear();
+            impl_->last_gpu_top.clear();
         }
         impl_->prev.swap(impl_->cur);
         impl_->prev_tick_ms = now;
