@@ -6,9 +6,10 @@
 
 namespace {
 
-// AVG_SAMPLES=10 と同数のサンプルを埋めて total_history.average(10) を確定値にする
+// alert_avg_samples のデフォルト（15）と同数のサンプルを埋め、平均を v に確定させる
+// サンプル数がデフォルト未満だと直近平均に前段の値が混ざり、ヒステリシスの想定が崩れる
 void fill_cpu_history(AllMetrics& m, float v) {
-    for (int i = 0; i < 10; ++i) m.cpu.total_history.push(v);
+    for (int i = 0; i < 15; ++i) m.cpu.total_history.push(v);
 }
 
 // AlertManager::Id ビット位置からマスクを構成する
