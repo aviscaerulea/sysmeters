@@ -17,6 +17,7 @@
 #define IDM_STARTUP      106
 #define IDM_FULLSCREEN_MUTE 107
 #define IDM_COMPACT      108
+#define IDM_TOP_PROC     109
 // 表示項目サブメニュー（カテゴリ単位の表示/非表示切替）
 #define IDM_VIS_CPU      110
 #define IDM_VIS_GPU      111

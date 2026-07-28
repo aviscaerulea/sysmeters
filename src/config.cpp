@@ -156,6 +156,8 @@ AppConfig load_config(const std::string& path) {
         cfg.alert_avg_samples     = get_int("threshold", "avg_samples",     cfg.alert_avg_samples);
         cfg.alert_avg_samples_mem = get_int("threshold", "avg_samples_mem", cfg.alert_avg_samples_mem);
 
+        cfg.topproc_show_pct = get_float("topproc", "show_pct", cfg.topproc_show_pct);
+
         cfg.guard_tone_ms = get_int("guard", "tone_ms", cfg.guard_tone_ms);
 
         cfg.update_check_enabled = get_bool("update", "enabled", cfg.update_check_enabled);
@@ -276,6 +278,7 @@ AppConfig load_config(const std::string& path) {
     cfg.warn_processes   = std::clamp(cfg.warn_processes, 0, 999999);
     cfg.warn_threads     = std::clamp(cfg.warn_threads,   0, 999999);
     cfg.warn_handles     = std::clamp(cfg.warn_handles,   0, 9999999);
+    cfg.topproc_show_pct = std::clamp(cfg.topproc_show_pct, 0.f, 100.f);
 
     // 警告音リセット閾値のサニティチェック
     //
