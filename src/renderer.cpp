@@ -51,6 +51,19 @@ static constexpr float TOTAL_W    = 50.f;   // RAM/VRAM 総量テキスト幅（
 static constexpr float DISK_GAP   = 20.f;  // Disk I/O グラフと Space バーの間ギャップ
 static constexpr float INFO_LINE_H = 27.f;  // Space 下テキスト行高さ（容量/GB/h）
 
+// トッププロセス表示（CPU/GPU 面グラフ内、大パーセンテージの右）のレイアウト定数
+// いずれも draw_cpu / draw_gpu のオーバーレイ矩形 ol を基準とする相対値
+static constexpr float TOPPROC_X     = 136.f;  // ol.left からの X オフセット
+                                               // font_xlarge_ の "100.0%"（Consolas 40pt × 6 桁 ≒ 132px）+ 余白
+static constexpr float TOPPROC_Y     = 12.f;   // ol.top からの Y オフセット
+                                               // 大パーセンテージ（font_xlarge_ は矩形縦中央揃え）との見た目合わせの調整値（実画面評価による）
+static constexpr float TOPPROC_R     = 80.f;   // ol.right からの右余白
+                                               // 右寄せの "HF:9999"（18pt × 7 桁 ≒ 69px）と衝突しない幅
+static constexpr float TOPPROC_COL_W = 8.8f;   // font_tiny_（Consolas 16pt）の 1 桁幅（1126/2048 em × 16）
+static constexpr int   TOPPROC_MAX_COLS = 18;  // 表示桁数の上限（" NN%" を含む総桁数）
+                                               // 帯幅いっぱい（デフォルト幅で約 24 桁）では長すぎるため、
+                                               // 実用上の視認性から名前部 14 桁前後に抑える（実画面評価による）
+
 // セクションごとの縦幅ヘルパー
 //
 // compute_preferred_height() が paint() を実行せず縦幅を見積るために使う。
@@ -227,6 +240,48 @@ void Renderer::draw_section_label_with_model(float x, float y, float ww,
         render_target_->DrawText(lbl, static_cast<UINT32>(wcslen(lbl)), font_small_,
             D2D1::RectF(x + PREFIX_W, y, x + ww, y + SECTION_H), brush_text_);
     }
+}
+
+void Renderer::draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, const AppConfig& cfg) {
+    const float band_w = (ol.right - TOPPROC_R) - (ol.left + TOPPROC_X);
+    const int   cols   = min(static_cast<int>(band_w / TOPPROC_COL_W), TOPPROC_MAX_COLS);
+    if (cols < 6) return;  // win_width を極端に狭めた設定では表示を諦める
+
+    // NaN 等の非有限値が渡っても swprintf_s の不正パラメータ扱い（既定でプロセス終了）に
+    // ならないよう余裕を持たせる。（MSVC の "-nan(ind)" は 9 文字で 8 要素には収まらない）
+    wchar_t pct_buf[16];
+    swprintf_s(pct_buf, L" %.0f%%", pct);
+    const int name_cols = cols - static_cast<int>(wcslen(pct_buf));
+
+    // 帯に収まる桁数まで名前を切り詰める。Consolas は等幅のため DirectWrite の実測を行わず
+    // 桁数計算で足りる。全角文字（U+0080 以降）は 2 桁として数え、日本語名の exe でも溢れない。
+    // 収まらないときだけ "…"（1 桁）の分を予算から先に差し引いて切り詰める。
+    // 予算超過を許すと DirectWrite 既定の折り返しで " NN%" が 2 行目に落ちるため、
+    // 合計桁数は必ず cols 以内に収める
+    std::wstring shown;
+    int total = 0;
+    for (const wchar_t* p = name; *p; ++p) total += (*p < 0x80) ? 1 : 2;
+    if (total <= name_cols) {
+        shown = name;
+    }
+    else {
+        int used = 0;
+        for (const wchar_t* p = name; *p; ++p) {
+            const int w = (*p < 0x80) ? 1 : 2;
+            if (used + w > name_cols - 1) break;
+            shown += *p;
+            used  += w;
+        }
+        shown += L'…';
+    }
+    shown += pct_buf;
+
+    // 大パーセンテージ（alpha 0.9）より一段落として副情報であることを示す
+    set_brush_color(brush_text_, cfg.col_text, 0.6f);
+    D2D1_RECT_F r = D2D1::RectF(ol.left + TOPPROC_X, ol.top + TOPPROC_Y,
+                                ol.right - TOPPROC_R, ol.bottom);
+    render_target_->DrawText(shown.c_str(), static_cast<UINT32>(shown.size()),
+                             font_tiny_, r, brush_text_);
 }
 
 // グラフ領域にグリッド線を描画する（10 秒間隔の縦線 5 本 + 25% 間隔の横線 3 本）
@@ -446,6 +501,11 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
+    // トッププロセス名（大パーセンテージの右）。空文字は表示 OFF か値未確定。
+    // 大パーセンテージが topproc_show_pct 未満の低負荷時は情報価値が薄いため表示しない
+    if (m.top_proc_name[0] && m.total_pct >= cfg.topproc_show_pct)
+        draw_top_proc(m.top_proc_name, m.top_proc_pct, ol, cfg);
+
     // 温度（右寄せ、3 段階色。取得不可時は "--℃"）
     {
         wchar_t tbuf[16];
@@ -567,6 +627,10 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
     set_brush_color(brush_text_, gpu_text_col, 0.9f);
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
+
+    // トッププロセス名（CPU セクションと同一レイアウト・同一表示条件。GPU 側は HF 表示がないぶん余裕がある）
+    if (m.top_proc_name[0] && m.usage_pct >= cfg.topproc_show_pct)
+        draw_top_proc(m.top_proc_name, m.top_proc_pct, ol, cfg);
 
     // 温度（右寄せ、3 段階色）
     wchar_t tbuf[16];

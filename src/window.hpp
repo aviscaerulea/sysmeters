@@ -14,6 +14,7 @@ class GpuCollector;
 class MemCollector;
 class DiskCollector;
 class NetCollector;
+class TopProcCollector;
 class ClaudeCollector;
 class IpCollector;
 class AlertManager;
@@ -38,6 +39,8 @@ private:
     static constexpr bool DEF_TOAST_ALERT    = true;
     static constexpr bool DEF_FULLSCREEN_MUTE = true;
     static constexpr bool DEF_COMPACT        = false;
+    // トッププロセス表示のデフォルト。常時表示が本機能の主目的のため ON とする
+    static constexpr bool DEF_TOP_PROC       = true;
     // 「常に警告通知を有効にする」のデフォルト。
     // PC にダメージを与え得る温度系のみ ON とし、使用率系は OFF とする
     static constexpr bool DEF_ALWAYS_ALERT_CPU       = false;
@@ -53,6 +56,9 @@ private:
     bool toast_alert_    = DEF_TOAST_ALERT;
     bool fullscreen_mute_ = DEF_FULLSCREEN_MUTE;  // フルスクリーンアプリ実行中は通知・警告音を抑制
     bool compact_        = DEF_COMPACT;   // コンパクト表示（全体を COMPACT_SCALE 倍に縮小、レジストリ保存）
+    // CPU/GPU 面グラフ内のトッププロセス名表示（レジストリ保存）。
+    // OFF の間はコレクタ側で収集自体を停止する
+    bool top_proc_       = DEF_TOP_PROC;
     // フルスクリーン抑制中でも Toast＋警告音を通す例外項目（レジストリ保存）
     bool always_alert_cpu_       = DEF_ALWAYS_ALERT_CPU;        // CPU 使用率
     bool always_alert_temp_cpu_  = DEF_ALWAYS_ALERT_TEMP_CPU;   // CPU 温度
@@ -82,6 +88,7 @@ private:
     MemCollector*    col_mem_  = nullptr;
     DiskCollector*   col_disk_   = nullptr;
     NetCollector*    col_net_    = nullptr;
+    TopProcCollector* col_topproc_ = nullptr;
     // Claude コレクタはアカウント別に独立インスタンスを持つ。
     // サブは [claude_sub] enable=true かつ config_dir 検証が成功したときのみ生成される
     ClaudeCollector* col_claude_main_ = nullptr;
@@ -116,6 +123,8 @@ private:
     void save_fullscreen_mute();  // レジストリにフルスクリーン抑制設定を書く
     bool load_compact();          // レジストリからコンパクト表示設定を読む（未設定時は false）
     void save_compact();          // レジストリにコンパクト表示設定を書く
+    bool load_top_proc();         // レジストリからトッププロセス表示設定を読む（未設定時は true）
+    void save_top_proc();         // レジストリにトッププロセス表示設定を書く
     // 現在の描画スケールを反映した物理クライアント幅（ceil(win_width × scale)）
     int  client_width() const;
     void load_always_alert();  // レジストリから「常に警告通知」5 フラグを一括読み込み

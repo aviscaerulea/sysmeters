@@ -129,6 +129,12 @@ private:
     void draw_section_label_with_model(float x, float y, float ww,
         const wchar_t* prefix, const char* model_name, const AppConfig& cfg);
 
+    // 面グラフ内のトッププロセス表示（CPU/GPU 共通）
+    // ol は大パーセンテージの描画に使うオーバーレイ矩形。その左端から TOPPROC_X 右に寄せ、
+    // 右端の温度・HF 表示に届かないよう TOPPROC_R の余白を残した帯に "名前 NN%" を描く。
+    // name が空文字のときは呼び出さないこと（収集 OFF・値未確定を表す）
+    void draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, const AppConfig& cfg);
+
     // メーター各セクションの描画
     float draw_os(const OsMetrics& m, const AppConfig& cfg, float y);
     float draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppConfig& cfg, float y);

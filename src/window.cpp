@@ -11,6 +11,7 @@
 #include "collector_mem.hpp"
 #include "collector_disk.hpp"
 #include "collector_net.hpp"
+#include "collector_topproc.hpp"
 #include "collector_claude.hpp"
 #include "collector_ip.hpp"
 #include "update_check.hpp"
@@ -84,6 +85,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_mem_  = new MemCollector();
     col_disk_ = new DiskCollector();
     col_net_  = new NetCollector();
+    col_topproc_ = new TopProcCollector();
     col_claude_main_ = new ClaudeCollector();
     if (cfg_->claude_sub.enable) col_claude_sub_ = new ClaudeCollector();
     col_ip_     = new IpCollector();
@@ -110,6 +112,9 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     // コンパクト表示設定をレジストリから復元し、初期ウィンドウ幅の算出前に renderer へ反映する
     compact_ = load_compact();
     renderer_->set_compact(compact_);
+    // トッププロセス表示は初回一括取得より前に確定させる必要があるため、
+    // 他のレジストリ設定より先行してここで読む（収集を行うか否かを決めるフラグのため）
+    top_proc_ = load_top_proc();
 
     // 初期クライアントサイズ（スケール適用幅 × 880）からウィンドウ全体サイズを計算
     //（高さ 880 は論理値のままだが、ShowWindow 前の apply_window_height で物理値に補正される）
@@ -212,6 +217,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     col_cpu_->update(metrics_->cpu);
     col_gpu_->update_gpu(metrics_->gpu);
     col_gpu_->update_vram(metrics_->vram);
+    // 初回は差分の基準を取るだけで値は出ない（2 回目の TIMER_CPU で確定する）
+    col_topproc_->update(metrics_->cpu, metrics_->gpu, top_proc_);
     col_mem_->update(metrics_->mem);
     col_disk_->update(metrics_->disks);
     col_disk_->update_space(metrics_->disks);
@@ -475,6 +482,8 @@ void AppWindow::show_context_menu() {
                 IDM_TOPMOST, L"常に最前面に表示");
     AppendMenuW(menu, MF_STRING | (compact_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_COMPACT, L"コンパクト表示");
+    AppendMenuW(menu, MF_STRING | (top_proc_ ? MF_CHECKED : MF_UNCHECKED),
+                IDM_TOP_PROC, L"トッププロセス表示");
     AppendMenuW(menu, MF_STRING | (toast_alert_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_ALERT_TOAST, L"Toast 通知");
     AppendMenuW(menu, MF_STRING | (fullscreen_mute_ ? MF_CHECKED : MF_UNCHECKED),
@@ -577,6 +586,7 @@ static constexpr LPCWSTR REG_TOPMOST     = L"Topmost";              // 最前面
 static constexpr LPCWSTR REG_ALERT_TOAST    = L"AlertToast";         // Toast 通知設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_FULLSCREEN_MUTE = L"FullscreenMute";  // フルスクリーン抑制設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_COMPACT         = L"Compact";          // コンパクト表示設定の値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_TOP_PROC        = L"TopProcess";       // トッププロセス表示設定の値名（REG_DWORD、0 or 1）
 // 「常に警告通知を有効にする」（フルスクリーン抑制の例外項目）の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_ALWAYS_ALERT_CPU       = L"AlwaysAlert_CPU";
 static constexpr LPCWSTR REG_ALWAYS_ALERT_TEMP_CPU  = L"AlwaysAlert_TempCPU";
@@ -691,6 +701,8 @@ bool AppWindow::load_fullscreen_mute()  { return load_reg_bool(REG_FULLSCREEN_MU
 void AppWindow::save_fullscreen_mute()  { save_reg_bool(REG_FULLSCREEN_MUTE, fullscreen_mute_);           }
 bool AppWindow::load_compact()          { return load_reg_bool(REG_COMPACT,     DEF_COMPACT);             }
 void AppWindow::save_compact()          { save_reg_bool(REG_COMPACT,     compact_);                       }
+bool AppWindow::load_top_proc()         { return load_reg_bool(REG_TOP_PROC,    DEF_TOP_PROC);            }
+void AppWindow::save_top_proc()         { save_reg_bool(REG_TOP_PROC,    top_proc_);                      }
 
 void AppWindow::load_always_alert() {
     always_alert_cpu_       = load_reg_bool(REG_ALWAYS_ALERT_CPU,       DEF_ALWAYS_ALERT_CPU);
@@ -959,6 +971,7 @@ void AppWindow::destroy() {
     destroy_obj(col_gpu_);
     destroy_obj(col_disk_);
     destroy_obj(col_net_);
+    destroy_obj(col_topproc_);
     // Claude コレクタは 2 本を並行停止する。
     // 順次 shutdown() を呼ぶと wait の 15 秒 * 2 が直列化するため、
     // 先に両方の request_shutdown を立ててから個別 destroy_obj に進む
@@ -992,6 +1005,8 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // CPU/GPU/ハードフォールト更新（0.9 秒）：CPU グラフ描画タイミングを同期
             col_cpu_->update(metrics_->cpu);
             col_gpu_->update_gpu(metrics_->gpu);
+            // トッププロセスは大パーセンテージと同一 tick で更新し、面グラフ内の 2 つの数字の時点をそろえる
+            col_topproc_->update(metrics_->cpu, metrics_->gpu, top_proc_);
             col_mem_->update_hard_faults(metrics_->mem);
         }
         else if (wp == TIMER_FAST) {
@@ -1105,6 +1120,16 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             save_compact();
             renderer_->set_compact(compact_);
             relayout_window();
+            break;
+        // トッププロセス表示トグル：フラグ反転 → 永続化 → 収集状態を即時反映 → 再描画。
+        // update() の enabled=false 側が表示クリアと内部状態解放を行うため OFF にした瞬間に文字が消える。
+        // ON にした場合はここで差分の基準を取り、次 tick から値が出る。
+        // セクション高さは変わらないため relayout_window() は不要
+        case IDM_TOP_PROC:
+            top_proc_ = !top_proc_;
+            save_top_proc();
+            col_topproc_->update(metrics_->cpu, metrics_->gpu, top_proc_);
+            InvalidateRect(hwnd, nullptr, FALSE);
             break;
         // 常に警告通知トグル：フラグ反転 → 永続化（再描画・リサイズは不要）
         case IDM_ALWAYS_ALERT_CPU:       always_alert_cpu_       = !always_alert_cpu_;       save_always_alert(); break;
