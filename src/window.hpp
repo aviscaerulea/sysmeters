@@ -25,8 +25,15 @@ class AlertManager;
 // タスクトレイアイコンを表示し、右クリックメニューで操作する。
 class AppWindow {
 public:
+    // ウィンドウ・トレイアイコン・全コレクタ・タイマーを初期化して表示する
+    // cfg は内部へコピーして保持する。失敗時は false を返す。（呼び出し側はアプリを終了させる）
     bool create(HINSTANCE hinstance, const AppConfig& cfg);
+
+    // メッセージループを実行する。（WM_QUIT 受信まで返らない）
     void run();
+
+    // タイマー停止・コレクタ停止・全リソース解放を行う
+    // WM_DESTROY から呼ばれる。取得スレッドの停止待ちを含むため数十秒かかることがある
     void destroy();
 
     // WM_CLAUDE_DONE 受信時に呼ぶ。

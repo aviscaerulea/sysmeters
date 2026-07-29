@@ -83,7 +83,7 @@ private:
     IDWriteTextFormat*     font_normal_     = nullptr;  // 通常テキスト（22pt）
     IDWriteTextFormat*     font_small_      = nullptr;  // 小テキスト（18pt）
     IDWriteTextFormat*     font_tiny_       = nullptr;  // 極小テキスト（16pt）
-    IDWriteTextFormat*     font_large_      = nullptr;  // グラフ内オーバーレイ（22pt bold）
+    IDWriteTextFormat*     font_large_      = nullptr;  // グラフ内オーバーレイ（25pt bold）
     IDWriteTextFormat*     font_xlarge_     = nullptr;  // CPU/GPU 使用率オーバーレイ（40pt bold）
     // 7d バーの警告解除までの残り時間表示専用（13.5pt、プロポーショナルフォント）。
     // 他フォントは等幅の Consolas だが、バー塗り部分の狭い横幅に収めるため字幅の詰まる
@@ -121,10 +121,10 @@ private:
     void draw_area_graph(const RingBuffer<float, 60>& buf,
                          float max_val, D2D1_RECT_F rect, uint32_t color_rgb, bool draw_bg = true);
 
-    // 横バー（0-max_val のレンジ）を描画する
+    // 横バー（0〜max_val のレンジ）を描画する
     void draw_hbar(float val, float max_val, D2D1_RECT_F rect, uint32_t color_rgb);
 
-    // 縦バー（0-100%）を描画する
+    // 縦バー（0〜100%）を描画する
     void draw_vbar(float pct, D2D1_RECT_F rect, uint32_t color_rgb);
 
     // 温度色（3段階）を返す

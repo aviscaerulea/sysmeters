@@ -8,7 +8,8 @@
 
 // 全メトリクスデータ構造体
 
-// OS 情報：マシン名、OS バージョン、アップタイム（起動時 1 回取得 + 毎秒更新）
+// OS 情報：マシン名、OS バージョン、アップタイム
+// マシン名は起動時 1 回取得、アップタイムは 60 秒ごと、OS ラベルは 1 時間ごとに更新する
 struct OsMetrics {
     wchar_t machine_name[MAX_COMPUTERNAME_LENGTH + 1] = {};
     wchar_t os_label[64] = {};    // "Windows 11 Pro (24H2 26100)" 形式
@@ -63,7 +64,7 @@ struct MemMetrics {
     float usage_pct = 0.f;
     float used_gb   = 0.f;
     float total_gb  = 0.f;
-    float wsl_gb    = 0.f;  // vmmemWSL プロセスの Working Set 合計（WSL 非使用時は 0）
+    float wsl_gb    = 0.f;  // vmmem / vmmemWSL プロセスの Working Set 合計（WSL 非使用時は 0）
     // 使用率履歴（%）：警告音の平均判定専用（描画は瞬間値の横バーのみで履歴を使わない）
     // update() から push される。起動時の初回取得を除き TIMER_SLOW（2.0 秒）間隔のため、
     // N サンプルは概ね N × 2 秒の窓に相当する

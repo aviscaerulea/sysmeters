@@ -984,6 +984,9 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
     }
 
     if (!fetching_.load()) {
+        // fetching_ は do_fetch 終端でスレッド終了より一足先に false になるため、
+        // この時点でスレッドが未終了のことがある。その場合はクローズと再起動を見送り、
+        // 次回タイマーで回収する。（実行中スレッドのハンドルを閉じないための意図的な遅延）
         if (fetch_thread_ && WaitForSingleObject(fetch_thread_, 0) == WAIT_OBJECT_0) {
             CloseHandle(fetch_thread_);
             fetch_thread_ = nullptr;
