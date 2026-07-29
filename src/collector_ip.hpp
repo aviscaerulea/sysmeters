@@ -29,7 +29,10 @@ public:
     // WM_IP_DONE 受信時にメインスレッドで呼ぶ
     void apply_result(NetMetrics& out);
 
-    void shutdown();
+    // 取得スレッドの終了を確認できたら true を返す。false のとき呼び出し側は delete しては
+    // ならない。（残存スレッドが解放済みメンバへ触れる use-after-free になるため、
+    // 意図的にリークさせる）
+    bool shutdown();
     ~IpCollector() { shutdown(); }
 
 private:

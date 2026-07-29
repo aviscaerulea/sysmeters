@@ -949,9 +949,9 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
     // ハング検知：fetching_ が true のまま FETCH_STALL_TIMEOUT_MS 以上経過している場合、
     // do_fetch スレッドが fetching_.store(false) に到達せず滞留したとみなす。
     // （WinHTTP 内部の無限待機など、http_get 側タイムアウトが効かないケースへの保険）
-    // 経過時間は GetTickCount64 の単調時計で計測し、NTP 補正等の壁掛け時計飛びに強くする。
-    // ハンドルは CloseHandle して閉じる。スレッド自体は生きている可能性があるが、
-    // fetch_gen_ を進めるため、遅延復帰した旧スレッドは終端で pending_ / fetching_ を触らない。
+    // 経過時間は GetTickCount64 の単調時計で計測し、NTP 補正等の時計飛びに強くする。
+    // スレッド自体は生きている可能性があるが、fetch_gen_ を進めるため、
+    // 遅延復帰した旧スレッドは終端で pending_ / fetching_ を触らない。
     // TerminateThread はロック未解放・リソースリークの危険があるため使わない
     if (fetching_.load()) {
         uint64_t elapsed_ms = GetTickCount64() - fetch_start_tick_.load();
@@ -959,7 +959,21 @@ void ClaudeCollector::update(ClaudeMetrics& out) {
             log_error("claude fetch stalled %llums (account=%d), resetting",
                       static_cast<unsigned long long>(elapsed_ms), account_index_);
             if (fetch_thread_) {
-                CloseHandle(fetch_thread_);
+                // 終了済みの放棄ハンドルを先に刈り取る。放置すると WaitForMultipleObjects の
+                // 上限（64 本）へ到達し、wait_shutdown() が常に失敗するため
+                for (auto it = abandoned_threads_.begin(); it != abandoned_threads_.end();) {
+                    if (WaitForSingleObject(*it, 0) == WAIT_OBJECT_0) {
+                        CloseHandle(*it);
+                        it = abandoned_threads_.erase(it);
+                    }
+                    else {
+                        ++it;
+                    }
+                }
+                // ハンドルは閉じずに放棄リストへ退避する。閉じてしまうと wait_shutdown() が
+                // このスレッドの終了を待てず、本体解放後に生き残ったスレッドが解放済み
+                // メンバへ触れる use-after-free 経路になるため
+                abandoned_threads_.push_back(fetch_thread_);
                 fetch_thread_ = nullptr;
             }
             fetch_gen_.fetch_add(1);  // 旧スレッドを非現世代に格下げ
@@ -1071,14 +1085,27 @@ void ClaudeCollector::request_shutdown() {
 // スレッドの完了を待つ
 // 各 WinHTTP 呼び出しは 1500ms タイムアウトで有界、読み取りループは周回ごとに shutdown
 // フラグを確認するため、残存時間は「ブロック中の 1 操作のタイムアウト＋α」に収まる。
-// 15 秒はその十分な余裕。万一タイムアウトしてもハンドルへの介入はせずログのみとする
-void ClaudeCollector::wait_shutdown() {
+// 15 秒はその十分な余裕。現行スレッドと watchdog で放棄した旧スレッドをまとめて待ち、
+// 全て終了を確認できたら true を返す。タイムアウト時は false を返し、呼び出し側に
+// 「delete せず意図的にリークさせる」判断を委ねる。（残存スレッドの use-after-free 防止）
+// false のときハンドルは閉じずに保持し直す。（生存中の可能性があるため。本体ごとリークする）
+bool ClaudeCollector::wait_shutdown() {
+    std::vector<HANDLE> hs = std::move(abandoned_threads_);
+    abandoned_threads_.clear();
     if (fetch_thread_) {
-        DWORD wr = WaitForSingleObject(fetch_thread_, 15000);
-        if (wr != WAIT_OBJECT_0) {
-            log_error("ClaudeCollector::shutdown fetch_thread did not exit (wait=%lu)", wr);
-        }
-        CloseHandle(fetch_thread_);
+        hs.push_back(fetch_thread_);
         fetch_thread_ = nullptr;
     }
+    if (hs.empty()) return true;
+
+    DWORD wr = WaitForMultipleObjects(static_cast<DWORD>(hs.size()), hs.data(), TRUE, 15000);
+    bool ok = (wr != WAIT_TIMEOUT && wr != WAIT_FAILED);
+    if (ok) {
+        for (HANDLE h : hs) CloseHandle(h);
+    }
+    else {
+        log_error("ClaudeCollector::shutdown fetch thread(s) did not exit (wait=%lu)", wr);
+        abandoned_threads_ = std::move(hs);
+    }
+    return ok;
 }

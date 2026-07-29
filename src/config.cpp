@@ -26,6 +26,19 @@ static void merge_overrides(toml::value& base, const toml::value& over) {
     }
 }
 
+// UTF-8 のパス文字列を std::filesystem::path へ変換する
+// std::ifstream の narrow パスは ACP（日本語環境では CP932）解釈のため、
+// 日本語ユーザ名等の非 ASCII パスで open が沈黙的に失敗する。
+// fs::path（wide）経由で開くことでエンコーディング差を吸収する。変換失敗時は空 path
+static std::filesystem::path utf8_to_path(const std::string& s) {
+    if (s.empty()) return {};
+    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    if (len <= 0) return {};
+    std::wstring ws(static_cast<size_t>(len) - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, ws.data(), len);
+    return std::filesystem::path(ws);
+}
+
 AppConfig load_config(const std::string& path) {
     AppConfig cfg;
 
@@ -36,7 +49,7 @@ AppConfig load_config(const std::string& path) {
     // バイナリモードで開く
     // toml11 の istream 版がテキストモードの CRLF 変換でバッファ末尾に NUL を埋め込むバグへの回避策。
     // バイナリモードのまま toml11 に渡しても CRLF は許容される。
-    std::ifstream ifs(path, std::ios::binary);
+    std::ifstream ifs(utf8_to_path(path), std::ios::binary);
     if (!ifs.is_open()) return cfg;  // ファイルなし → デフォルト値で返す
     cfg.base_path_loaded = true;
 
@@ -56,7 +69,7 @@ AppConfig load_config(const std::string& path) {
             // 試行した local パスを起動時ログ用に保持。ファイル不在でも記録する
             cfg.local_path_used = local_path;
 
-            std::ifstream lifs(local_path, std::ios::binary);
+            std::ifstream lifs(utf8_to_path(local_path), std::ios::binary);
             if (lifs.is_open()) {
                 cfg.local_path_loaded = true;
                 try {

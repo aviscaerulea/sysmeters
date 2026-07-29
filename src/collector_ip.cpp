@@ -148,7 +148,7 @@ void IpCollector::apply_result(NetMetrics& out) {
     out.ip_avail = pending_avail_;
 }
 
-void IpCollector::shutdown() {
+bool IpCollector::shutdown() {
     // 取得スレッドの読み取りループを早期中断させる
     shutting_down_.store(true);
 
@@ -165,12 +165,15 @@ void IpCollector::shutdown() {
     // スレッドの完了を待つ
     // shutting_down_ により読み取りループはブロッキング呼び出し 1 回分（最大 3000ms）で
     // 中断するため、接続系フェーズ 3000ms × 4 + 余裕の 15 秒で十分
+    bool ok = true;
     if (fetch_thread_) {
         DWORD wr = WaitForSingleObject(fetch_thread_, 15000);
         if (wr != WAIT_OBJECT_0) {
             log_error("IpCollector::shutdown fetch_thread did not exit (wait=%lu)", wr);
+            ok = false;
         }
         CloseHandle(fetch_thread_);
         fetch_thread_ = nullptr;
     }
+    return ok;
 }

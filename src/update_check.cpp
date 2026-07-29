@@ -84,9 +84,11 @@ static std::string github_get() {
         else {
             // レスポンスボディ取得（1MB 上限）
             // 受信タイムアウトは部分受信 1 回ごとに適用され合計時間に上限がないため、
-            // 終了処理の join がハングしないよう総時間デッドラインを設ける
+            // 終了処理の join がハングしないよう総時間デッドラインを設ける。
+            // 起動時 1 回のリリース情報取得（数十 KB）に長い猶予は不要で、
+            // 終了処理の直列待機時間（多重起動排他の待ち幅にも影響）を抑えるため 5 秒とする
             static constexpr size_t MAX_RESP_BYTES = 1 * 1024 * 1024;
-            const ULONGLONG deadline = GetTickCount64() + 30000;
+            const ULONGLONG deadline = GetTickCount64() + 5000;
             DWORD size = 0;
             do {
                 if (GetTickCount64() > deadline) {

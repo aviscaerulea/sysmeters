@@ -14,6 +14,18 @@ namespace fs = std::filesystem;
 #define APP_VERSION "dev"
 #endif
 
+// wide 文字列を UTF-8 の std::string へ変換する
+// ログ出力・設定パスの受け渡しは UTF-8 に統一する。（logger はバイト列をそのまま書き出す）
+// 変換失敗時は空文字列を返す
+static std::string to_utf8(const std::wstring& ws) {
+    if (ws.empty()) return {};
+    int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return {};
+    std::string out(len - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, out.data(), len, nullptr, nullptr);
+    return out;
+}
+
 // 実行ファイルと同じディレクトリの設定ファイルパスを返す（UTF-8 エンコード）
 static std::string get_config_path() {
     wchar_t exe_path[MAX_PATH] = {};
@@ -21,25 +33,30 @@ static std::string get_config_path() {
     // 取得失敗または切り詰め時はカレントディレクトリ基準の相対パスへフォールバック
     if (exe_len == 0 || exe_len >= MAX_PATH) return "sysmeters.toml";
 
-    std::wstring ws = (fs::path(exe_path).parent_path() / L"sysmeters.toml").wstring();
-    int len = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (len <= 0) return "sysmeters.toml";
-    std::string out(len - 1, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, out.data(), len, nullptr, nullptr);
-    return out;
+    std::string out = to_utf8((fs::path(exe_path).parent_path() / L"sysmeters.toml").wstring());
+    return out.empty() ? "sysmeters.toml" : out;
 }
 
 int main() {
+    // nudge の CreateProcessW は相対名（例：claude.exe）をコマンドラインで受けるため、
+    // 実行ファイル検索順からカレントディレクトリを除外し、CWD に置かれた
+    // 偽実行ファイルの起動を防ぐ。この変数は nudge で起動する子プロセスにも継承されるが、
+    // 効果は「CWD の実行ファイルを拾わない」という安全側のみのため許容する
+    SetEnvironmentVariableW(L"NoDefaultCurrentDirectoryInExePath", L"1");
+
     // 多重起動排他（Named Mutex）
     // 排他の根拠はミューテックスの所有権獲得とする。既存インスタンスに WM_CLOSE を送り、
-    // 旧プロセスの解放を最大 20 秒待つ。獲得できなければ多重起動と判断して自分が終了する。
-    // 待ち時間は旧プロセスの終了処理（更新確認スレッド join、Claude API フェッチ完了待ち、
-    // Direct2D リソース解放、ログシャットダウン等）が最悪ケースでも収まる幅を確保する
+    // 旧プロセスの解放を最大 90 秒待つ。獲得できなければ多重起動と判断して自分が終了する。
+    // 待ち時間は旧プロセスの終了処理の直列待機の最悪合計に余裕を加えた幅とする。
+    // （更新確認スレッド join 約 11 秒 + 警告音 5 秒 + Claude フェッチ 15 秒 × 2 アカウント
+    // + IP フェッチ 15 秒 ≒ 61 秒。Claude の 2 本は中断フラグへ応答しない真のハング時に
+    // 待ちが直列化するため 2 本分を見込む）各コレクタの停止タイムアウトを変更した際は
+    // ここも見直すこと
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"sysmeters-mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND prev = FindWindowW(L"SystemMetersWnd", nullptr);
         if (prev) PostMessage(prev, WM_CLOSE, 0, 0);
-        DWORD wait = WaitForSingleObject(mutex, 20000);
+        DWORD wait = WaitForSingleObject(mutex, 90000);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
             CloseHandle(mutex);
             return 0;
@@ -73,16 +90,18 @@ int main() {
 
     // Claude アカウント設定の認識結果を起動時にダンプする。
     // サブが無効化された場合、その理由は cfg.config_error として既に上で出力済み。
-    // config_dir は wide 文字列のため %ls で出力する（MSVC vsnprintf 拡張）
-    log_info("claude main: enable=%s name='%ls' nudge_enable=%s",
+    // wide 文字列は %ls で渡さず UTF-8 へ変換して %s で出力する。
+    // narrow vsnprintf の %ls は "C" ロケール下で非 ASCII 文字の変換に失敗し、
+    // その時点でログ行が切れて以降のフィールドが欠落するため
+    log_info("claude main: enable=%s name='%s' nudge_enable=%s",
              cfg.claude_main.enable ? "true" : "false",
-             cfg.claude_main.name.c_str(),
+             to_utf8(cfg.claude_main.name).c_str(),
              cfg.claude_main.nudge_enable ? "true" : "false");
-    log_info("claude sub : enable=%s name='%ls' nudge_enable=%s config_dir='%ls'",
+    log_info("claude sub : enable=%s name='%s' nudge_enable=%s config_dir='%s'",
              cfg.claude_sub.enable ? "true" : "false",
-             cfg.claude_sub.name.c_str(),
+             to_utf8(cfg.claude_sub.name).c_str(),
              cfg.claude_sub.nudge_enable ? "true" : "false",
-             cfg.claude_sub.config_dir.c_str());
+             to_utf8(cfg.claude_sub.config_dir).c_str());
 
     HINSTANCE hinst = GetModuleHandleW(nullptr);
     AppWindow window;
