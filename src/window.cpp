@@ -1156,12 +1156,14 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         // トッププロセス表示トグル：フラグ反転 → 永続化 → 収集状態を即時反映 → 再描画。
         // update() の enabled=false 側が表示クリアと内部状態解放を行うため OFF にした瞬間に文字が消える。
+        // renderer 側の残像状態も消去する。（トグルはデータ由来でない消失のため残像を出さない）
         // ON にした場合はここで差分の基準を取り、次 tick から値が出る。
         // セクション高さは変わらないため relayout_window() は不要
         case IDM_TOP_PROC:
             top_proc_ = !top_proc_;
             save_top_proc();
             col_topproc_->update(metrics_->cpu, metrics_->gpu, top_proc_);
+            renderer_->reset_topproc();
             InvalidateRect(hwnd, nullptr, FALSE);
             break;
         // 常に警告通知トグル：フラグ反転 → 永続化（再描画・リサイズは不要）
