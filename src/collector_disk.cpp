@@ -181,7 +181,7 @@ void DiskCollector::update(std::vector<DiskMetrics>& disks) {
 void DiskCollector::update_space(std::vector<DiskMetrics>& disks) {
     if (!impl_) return;
 
-    // GetDiskFreeSpaceExW: 第3引数=総容量、第4引数=ドライブ全体の空き容量
+    // GetDiskFreeSpaceExW の第 3 引数が総容量、第 4 引数がドライブ全体の空き容量
     auto fetch = [](char drive, DiskMetrics& dm) {
         wchar_t path[4] = {static_cast<wchar_t>(drive), L':', L'\\', L'\0'};
         ULARGE_INTEGER free_bytes{}, total_bytes{};

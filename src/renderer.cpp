@@ -25,7 +25,7 @@ static constexpr uint32_t COL_WSL_MEM      = 0xC06040;  // WSL メモリオー�
 static constexpr uint32_t COL_PACE_IDEAL   = 0x2E7D32;  // 均等消費ペースマーカー（緑）
 static constexpr uint32_t COL_CLAUDE_GRID  = 0xFFFFFF;  // Claude バー内グリッド線（白・半透明で使用）
 
-// 整数値を3桁区切りカンマ付きワイド文字列に変換する
+// 整数値を 3 桁区切りカンマ付きワイド文字列に変換する
 static std::wstring fmt_comma(int v)
 {
     std::wstring s = std::to_wstring(v);
@@ -44,7 +44,7 @@ static constexpr float GRAPH_H    = 54.f;   // 面グラフ高さ（Disk/Net）�
 static constexpr float GRAPH_H_LG = 86.f;  // CPU/GPU 面グラフ高さ
 static constexpr float BAR_H      = 16.f;   // 横バー高さ（20 * 0.8）
 static constexpr float CORE_BAR_H = 40.f;   // コア縦バー高さ
-static constexpr float LINE_H     = 30.f;   // 1行テキスト高さ（22pt 対応）
+static constexpr float LINE_H     = 30.f;   // 1 行テキスト高さ（22pt 対応）
 static constexpr float GAP        = 6.f;    // 要素間ギャップ
 static constexpr float SECTION_GAP = 2.f;  // セクション間の追加スペース
 static constexpr float TOTAL_W    = 50.f;   // RAM/VRAM 総量テキスト幅（"64GB" 相当）
@@ -1104,7 +1104,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // reset:            リセット時刻文字列（avail=false のとき nullptr 可）
     // avail:            データ取得済みなら true（false のときグレー表示）
     // expected_pct:     均等消費ペースの理想位置（%）。0 のとき計算不可
-    // tick_count:       ペースマーカーの縦線本数（0 のとき縦線なし）
+    // tick_count:       バーの分割数。等分位置に縦線を tick_count - 1 本引く。（0 のとき縦線なし）
     // warn_pct:         理想ペースからの超過率の警告閾値（%）
     // underuse:         使い切り不能検知の発火フラグ（判定は呼び出し側で行う。7d バー専用、5h は常に false）。
     //                   true のときバー未使用部分の背景を暗青（col_claude_underuse_bg）で塗る

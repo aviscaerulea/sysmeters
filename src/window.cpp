@@ -870,6 +870,11 @@ void AppWindow::apply_topmost() {
 }
 
 
+// ウィンドウの隠蔽率（0〜100%）を推定する
+// ウィンドウ矩形（GetWindowRect、枠・タイトルバー含む）をグリッドサンプリングし、
+// 他ウィンドウに覆われている点の割合を返す。
+// 最小化・非可視・クローク・オフスクリーンは 100（完全隠蔽）を返す。
+// プロセス優先度の自動制御（update_process_priority）の入力に使う
 int AppWindow::compute_occlusion_percent() {
     RECT rc;
     if (!hwnd_ || IsIconic(hwnd_) || !IsWindowVisible(hwnd_) || !GetWindowRect(hwnd_, &rc))
@@ -913,6 +918,10 @@ int AppWindow::compute_occlusion_percent() {
     return (GRID * GRID - visible) * 100 / (GRID * GRID);
 }
 
+// 隠蔽率に応じて自プロセスの優先度クラスを段階制御する
+// よく見えている間は ABOVE_NORMAL（描画の滑らかさ優先）、ほぼ隠れている間は
+// BELOW_NORMAL（他アプリへ CPU を譲る）、中間は NORMAL とする。閾値は設定値。
+// 変更が不要なら何もしない。設定失敗時はキャッシュを更新せず次周期で再試行する
 void AppWindow::update_process_priority() {
     const int hidden = compute_occlusion_percent();
     DWORD target;
@@ -928,6 +937,8 @@ void AppWindow::update_process_priority() {
     current_priority_class_ = target;
 }
 
+// プロセス優先度を NORMAL へ戻す
+// 終了処理から呼び、自動制御で下げた/上げた優先度を既定へ復元する
 void AppWindow::restore_process_priority() {
     if (current_priority_class_ == NORMAL_PRIORITY_CLASS) return;
     SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
@@ -1002,11 +1013,17 @@ void AppWindow::destroy() {
     delete cfg_;      cfg_     = nullptr;
 }
 
+// ウィンドウプロシージャ（静的トランポリン）
+// グローバルのインスタンスポインタ経由で handle_message へ委譲する。
+// インスタンス破棄後（destroy で nullptr 化）に届いた遅延メッセージは既定処理へ流す
 LRESULT CALLBACK AppWindow::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (g_window) return g_window->handle_message(hwnd, msg, wp, lp);
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+// 全ウィンドウメッセージの処理本体
+// タイマー駆動のメトリクス収集、トレイ・メニュー操作、描画、終了処理を振り分ける。
+// 未処理のメッセージは DefWindowProcW へ委譲する
 LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // Explorer 再起動後のトレイ復帰（動的メッセージはcase に書けないため先行チェック）
     if (WM_TASKBAR_CREATED_ && msg == WM_TASKBAR_CREATED_) {

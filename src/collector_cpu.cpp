@@ -339,7 +339,14 @@ bool CpuCollector::init() {
     }
     else {
         // AMD: SMN 読み取りの PCI アクセス排他ミューテックスを作成/取得（LibreHardwareMonitor 互換）
+        // 作成失敗（管理者権限の他監視ツールが先に作成済みでアクセス拒否になる等）でも
+        // 温度取得は排他なしで継続する。他ツールと PCI アクセスが競合する理論リスクより
+        // 温度表示の維持を優先する意図的な縮退で、警告ログのみ残す
         impl_->hmutex_pci  = CreateMutexW(nullptr, FALSE, L"Global\\Access_PCI");
+        if (!impl_->hmutex_pci) {
+            log_error("PawnIO: Access_PCI mutex creation failed (err=%lu), continuing without lock",
+                      GetLastError());
+        }
         impl_->pawnio_avail = true;
         log_info("PawnIO: CPU temp init OK (AMD SMN)");
     }
