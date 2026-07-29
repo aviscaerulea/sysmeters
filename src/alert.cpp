@@ -449,12 +449,16 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
     }
     // Claude Main：閾値は両アカウント共通（cfg.warn_claude_*）
     if (m.claude_main.account_enabled && m.claude_main.avail) {
-        // expected_pct が 0 のとき（タイミング不明）は超過率を計算できないため判定しない
-        if (m.claude_main.five_h_expected_pct > 0.f)
-            check_item(CLAUDE_MAIN_5H, m.claude_main.five_h_pct - m.claude_main.five_h_expected_pct,
+        // 均等消費ペースは描画側と同じ claude_expected_pct で現在時刻基準に算出し、
+        // 警告音と画面の警告色の判定を一致させる。
+        // 0 のとき（リセット時刻未取得＝タイミング不明）は超過率を計算できないため判定しない
+        float exp5 = claude_expected_pct(m.claude_main.five_h_resets_ts, CLAUDE_WIN_5H_SECS);
+        float exp7 = claude_expected_pct(m.claude_main.seven_d_resets_ts, CLAUDE_WIN_7D_SECS);
+        if (exp5 > 0.f)
+            check_item(CLAUDE_MAIN_5H, m.claude_main.five_h_pct - exp5,
                        cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
-        if (m.claude_main.seven_d_expected_pct > 0.f)
-            check_item(CLAUDE_MAIN_7D, m.claude_main.seven_d_pct - m.claude_main.seven_d_expected_pct,
+        if (exp7 > 0.f)
+            check_item(CLAUDE_MAIN_7D, m.claude_main.seven_d_pct - exp7,
                        cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
         // extra_enabled が無効になっても fired_[CLAUDE_MAIN_OVER] は保持される（check_once はリセットなし）
         if (m.claude_main.extra_enabled)
@@ -466,11 +470,13 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
     }
     // Claude Sub：account_enabled で TOML サブ機能 ON 時のみ判定
     if (m.claude_sub.account_enabled && m.claude_sub.avail) {
-        if (m.claude_sub.five_h_expected_pct > 0.f)
-            check_item(CLAUDE_SUB_5H, m.claude_sub.five_h_pct - m.claude_sub.five_h_expected_pct,
+        float exp5 = claude_expected_pct(m.claude_sub.five_h_resets_ts, CLAUDE_WIN_5H_SECS);
+        float exp7 = claude_expected_pct(m.claude_sub.seven_d_resets_ts, CLAUDE_WIN_7D_SECS);
+        if (exp5 > 0.f)
+            check_item(CLAUDE_SUB_5H, m.claude_sub.five_h_pct - exp5,
                        cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
-        if (m.claude_sub.seven_d_expected_pct > 0.f)
-            check_item(CLAUDE_SUB_7D, m.claude_sub.seven_d_pct - m.claude_sub.seven_d_expected_pct,
+        if (exp7 > 0.f)
+            check_item(CLAUDE_SUB_7D, m.claude_sub.seven_d_pct - exp7,
                        cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
         if (m.claude_sub.extra_enabled)
             check_once(CLAUDE_SUB_OVER, m.claude_sub.extra_used_dollars, cfg.warn_claude_over);

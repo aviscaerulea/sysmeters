@@ -125,6 +125,24 @@ struct ClaudeHistorySample {
     float  pct = 0.f;
 };
 
+// Claude レートリミットウィンドウ幅（秒）
+constexpr double CLAUDE_WIN_5H_SECS = 5.0 * 3600;
+constexpr double CLAUDE_WIN_7D_SECS = 7.0 * 24 * 3600;
+
+// 均等消費ペースの理想位置（%）を現在時刻基準で算出する
+// resets_ts（UTC）までの残り時間から経過割合を 0〜100 で返す。
+// 未取得（resets_ts <= 0）、またはリセット時刻がウィンドウ幅より先（ウィンドウ外）の
+// ときは 0 を返し、呼び出し側は 0 を「ペース不定＝判定しない」として扱う契約。
+// 警告音判定（alert）と描画（警告色・緑線）が本関数を共用し、判定の乖離を防ぐ
+inline float claude_expected_pct(time_t resets_ts, double window_secs) {
+    if (resets_ts <= 0) return 0.f;  // 未取得（-1）または epoch（0）は無効
+    double remaining = static_cast<double>(resets_ts) - static_cast<double>(time(nullptr));
+    if (remaining < 0.0) remaining = 0.0;
+    if (remaining > window_secs) return 0.f;
+    float expected = static_cast<float>((window_secs - remaining) / window_secs * 100.0);
+    return expected < 0.f ? 0.f : (expected > 100.f ? 100.f : expected);
+}
+
 // Claude Code：レートリミット + セッション数
 // アカウント別（メイン/サブ）にインスタンスを持つ。account_label は描画ヘッダの表示名
 struct ClaudeMetrics {
@@ -132,8 +150,6 @@ struct ClaudeMetrics {
     float seven_d_pct   = 0.f;
     wchar_t five_h_reset[20]  = {};      // L"HH:MM" 形式
     wchar_t seven_d_reset[32] = {};      // L"M/D 曜 HH:MM" 形式
-    float five_h_expected_pct  = 0.f;   // 5h ウィンドウの均等消費ペース（%）
-    float seven_d_expected_pct = 0.f;   // 7d ウィンドウの均等消費ペース（%）
     time_t five_h_resets_ts  = -1;     // 5h ウィンドウの resets_at（UTC time_t、未取得時 -1）
     time_t seven_d_resets_ts = -1;     // 7d ウィンドウの resets_at（UTC time_t、未取得時 -1）
     char  plan_label[16]    = {};       // "Max5", "Pro" 等

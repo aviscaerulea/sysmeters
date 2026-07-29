@@ -201,24 +201,6 @@ static void format_reset_time(const std::string& iso, bool include_date, wchar_t
     }
 }
 
-// 均等消費ペースの算出（resets_at ISO 文字列とウィンドウ秒数から計算）
-//
-// 現在時刻からリセット時刻までの残り秒数を求め、
-// 経過割合（elapsed / window_secs）を 0〜100 にクランプして返す。
-// パース失敗または残り時間がウィンドウを超える場合は 0 を返す（赤色表示しない安全側）。
-static float calc_expected_pct(const std::string& iso, double window_secs) {
-    time_t resets_ts = parse_iso8601_utc(iso);
-    if (resets_ts == -1) return 0.f;
-
-    double remaining = static_cast<double>(resets_ts) - now_ts();
-    if (remaining < 0.0) remaining = 0.0;
-    if (remaining > window_secs) return 0.f;  // ウィンドウ外はペース不定
-
-    double elapsed = window_secs - remaining;
-    float expected = static_cast<float>(elapsed / window_secs * 100.0);
-    return std::clamp(expected, 0.f, 100.f);
-}
-
 // TTL 無視で前回キャッシュの内容を返す
 //
 // 起動直後の API 取得完了までの空白を埋めるため、期限切れキャッシュからでも
@@ -354,8 +336,6 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         std::string sd_resets_at = json_str(sd, "resets_at");
         format_reset_time(fh_resets_at, false, result.five_h_reset, _countof(result.five_h_reset));
         format_reset_time(sd_resets_at, true,  result.seven_d_reset, _countof(result.seven_d_reset));
-        result.five_h_expected_pct  = calc_expected_pct(fh_resets_at, 5.0 * 3600);
-        result.seven_d_expected_pct = calc_expected_pct(sd_resets_at, 7.0 * 24 * 3600);
         result.five_h_resets_ts  = parse_iso8601_utc(fh_resets_at);
         result.seven_d_resets_ts = parse_iso8601_utc(sd_resets_at);
         result.avail = true;
