@@ -64,12 +64,11 @@ static constexpr int   TOPPROC_MAX_COLS = 18;  // 表示桁数の上限（" NN%"
                                                // 帯幅いっぱい（デフォルト幅で約 24 桁）では長すぎるため、
                                                // 実用上の視認性から名前部 14 桁前後に抑える（実画面評価による）
 
-// セクションごとの縦幅ヘルパー
+// セクションごとの縦幅ヘルパー（セクション総縦幅の単一の真実源）
 //
-// compute_preferred_height() が paint() を実行せず縦幅を見積るために使う。
-// paint() 側は draw_*() の戻り値で y を累積する設計を維持しており、
-// 各式は対応する draw_*() 内の y 累積と数値上一致させる必要がある。
-// レイアウト定数（SECTION_H 等）を変更した場合は両側を必ず揃える。
+// compute_preferred_height() の見積りと、各 draw_*() の戻り値（開始 y + 本ヘルパ）の
+// 両方がここを参照する。draw_*() 内部の y 累積は部品配置専用で、セクション総高さには
+// 関与しない。（内部レイアウトを変えて総高さが変わるときは本ヘルパだけを直す）
 // 高さの加算は全て論理座標系（コンパクト縮小前）で行い、scale の適用は
 // preferred 高さを物理 px 化する最終段のみとする。
 namespace {
@@ -81,7 +80,9 @@ inline float section_h_mem()            { return (LINE_H - 1.f) + BAR_H + GAP; }
 inline float section_h_vram(bool avail) { return avail ? ((LINE_H - 1.f) + BAR_H + GAP)
                                                        : (LINE_H + GAP); }
 inline float section_h_disk(int n)      { return (LINE_H + GRAPH_H + GAP) * static_cast<float>(n); }
-inline float section_h_net()            { return LINE_H + LINE_H + GRAPH_H + GAP; }
+// ヘッダ 1 行（タイトル + DL/UL + IP 同一行）+ グラフ。旧 ▼/▲ 専用行の廃止後も
+// 見積り側だけ 2 行分残っていた過大見積りを実描画に合わせて是正した
+inline float section_h_net()            { return LINE_H + GRAPH_H + GAP; }
 inline float section_h_claude()         { return (LINE_H - 3.f) + SECTION_H * 2.f + GAP; }
 }
 
@@ -222,6 +223,21 @@ void Renderer::shutdown() {
 // 指定色でブラシを使い回す（毎回 SetColor する）
 static void set_brush_color(ID2D1SolidColorBrush* b, uint32_t rgb, float alpha = 1.f) {
     b->SetColor(from_rgb(rgb, alpha));
+}
+
+// 整列指定付きテキスト描画
+// フォントの整列状態を一時変更して text を 1 回描画し、既定（LEADING / NEAR）へ戻す。
+// IDWriteTextFormat の整列は共有可変状態のため、呼び出し側の手動復元（戻し忘れで
+// 以降の描画全体が崩れる事故の温床）を排除する目的で変更と復元をここへ閉じ込める。
+// 既定が NEAR でないフォント（font_xlarge_ は CENTER）には使わないこと
+void Renderer::draw_text_aligned(const wchar_t* text, IDWriteTextFormat* font,
+                                 const D2D1_RECT_F& rect, ID2D1SolidColorBrush* brush,
+                                 DWRITE_TEXT_ALIGNMENT ta, DWRITE_PARAGRAPH_ALIGNMENT pa) {
+    font->SetTextAlignment(ta);
+    if (pa != DWRITE_PARAGRAPH_ALIGNMENT_NEAR) font->SetParagraphAlignment(pa);
+    render_target_->DrawText(text, static_cast<UINT32>(wcslen(text)), font, rect, brush);
+    font->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    if (pa != DWRITE_PARAGRAPH_ALIGNMENT_NEAR) font->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
 }
 
 void Renderer::draw_section_label_with_model(float x, float y, float ww,
@@ -490,16 +506,15 @@ float Renderer::draw_os(const OsMetrics& m, const AppConfig& cfg, float y) {
 
         uint32_t uptime_col = (secs > static_cast<ULONGLONG>(cfg.warn_uptime_days) * 86400) ? COL_WARN_RED : cfg.col_text;
         set_brush_color(brush_text_, uptime_col, 0.6f);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-        render_target_->DrawText(ubuf, static_cast<UINT32>(wcslen(ubuf)), font_small_,
-            D2D1::RectF(x, y, x + ww, y + SECTION_H), brush_text_);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text_aligned(ubuf, font_small_, D2D1::RectF(x, y, x + ww, y + SECTION_H),
+                          brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 
-    return y + SECTION_H;
+    return y + section_h_os();
 }
 
 float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppConfig& cfg, float y) {
+    const float y0 = y;  // 戻り値は内部累積でなく縦幅ヘルパから導出する（高さの単一ソース）
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
@@ -534,9 +549,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
             swprintf_s(tbuf, L"--\u2103");
             set_brush_color(brush_text_, COL_TEMP_UNAVAIL, 0.9f);
         }
-        font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-        render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
-        font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text_aligned(tbuf, font_large_, ol, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 
     // ハードフォールト値（温度直下、右寄せ、目立たないグレー）
@@ -547,10 +560,7 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
         swprintf_s(hf_buf, L"HF:%4d", static_cast<int>(latest));
         set_brush_color(brush_text_, COL_SUBDUED);
         D2D1_RECT_F hf_rect = D2D1::RectF(ol.left, ol.top + 26.f, ol.right, ol.bottom);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-        render_target_->DrawText(hf_buf, static_cast<UINT32>(wcslen(hf_buf)), font_small_,
-            hf_rect, brush_text_);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text_aligned(hf_buf, font_small_, hf_rect, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 
     y += GRAPH_H_LG + GAP;
@@ -616,10 +626,11 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
         y += SECTION_H;
     }
 
-    return y;
+    return y0 + section_h_cpu();
 }
 
 float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
+    const float y0 = y;  // 戻り値は縦幅ヘルパから導出する（高さの単一ソース）
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
@@ -632,7 +643,7 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
         render_target_->DrawText(L"N/A", 3, font_normal_, r, brush_text_);
         // N/A 中はトッププロセスも描かないため、ヒステリシス状態を「表示していない」に揃える
         topproc_shown_gpu_ = false;
-        return y + LINE_H + GAP;
+        return y0 + section_h_gpu(false);
     }
 
     // 使用率 面グラフ（全幅）+ オーバーレイテキスト
@@ -655,24 +666,28 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
     wchar_t tbuf[16];
     swprintf_s(tbuf, L"%3.0f\u2103", m.temp_celsius);
     set_brush_color(brush_text_, temp_color(m.temp_celsius, cfg.warn_temp_caution, cfg.warn_temp_critical), 0.9f);
-    font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
-    font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    draw_text_aligned(tbuf, font_large_, ol, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    y += GRAPH_H_LG + GAP;
-
-    return y;
+    return y0 + section_h_gpu(true);
 }
 
-float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
+// RAM / VRAM 共通のメモリ系セクション描画
+// ヘッダ行（ラベル + 使用率% 左寄せ、使用 GB 右寄せ）と使用率横バー、バー右の総量
+// テキストを描画する。label は 6 桁左詰めで使用率の前に置く。
+// wsl_gb > 0 のときのみ WSL 使用量テキストとバー上の濃色オーバーレイを重ねる。
+// （WSL は RAM 専用の概念のため VRAM 側は 0 を渡す）戻り値は次の描画 y
+float Renderer::draw_mem_bar_section(const wchar_t* label, float usage_pct, float used_gb,
+                                     float total_gb, float wsl_gb,
+                                     const AppConfig& cfg, float y) {
+    const float y0 = y;  // 戻り値は縦幅ヘルパから導出する（高さの単一ソース）
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
-    // RAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
-    uint32_t ram_col = (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_text;
+    // ヘッダ行（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
+    uint32_t col = (usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_text;
     wchar_t buf[64];
-    swprintf_s(buf, L"RAM   %5.1f%%", m.usage_pct);
-    set_brush_color(brush_text_, ram_col);
+    swprintf_s(buf, L"%-6s%5.1f%%", label, usage_pct);
+    set_brush_color(brush_text_, col);
     D2D1_RECT_F tr = D2D1::RectF(x, y, x + ww, y + LINE_H);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_normal_, tr, brush_text_);
 
@@ -680,34 +695,31 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
     // font_normal_（22pt、使用率%）と font_small_（18pt）はフォントサイズ差でベースラインが
     // 揃わないため、Claude ヘッダ（プラン名テキスト）と同じ +4px 補正でベースラインを揃える
     wchar_t gbuf[16];
-    swprintf_s(gbuf, L"%5.1fGB", m.used_gb);
-    set_brush_color(brush_text_, ram_col, 0.8f);
+    swprintf_s(gbuf, L"%5.1fGB", used_gb);
+    set_brush_color(brush_text_, col, 0.8f);
     D2D1_RECT_F gb_r = D2D1::RectF(x, y + 4.f, x + ww, y + LINE_H + 4.f);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_small_, gb_r, brush_text_);
+    draw_text_aligned(gbuf, font_small_, gb_r, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    // WSL 使用量（RAM GB 表示と重ならないよう右端 80px を除いた矩形で右寄せ）
-    if (m.wsl_gb > 0.f) {
+    // WSL 使用量（GB 表示と重ならないよう右端 80px を除いた矩形で右寄せ）
+    if (wsl_gb > 0.f) {
         wchar_t wslbuf[24];
-        swprintf_s(wslbuf, L"WSL %4.1fGB", m.wsl_gb);
+        swprintf_s(wslbuf, L"WSL %4.1fGB", wsl_gb);
         D2D1_RECT_F wsl_r = D2D1::RectF(x, y + 4.f, x + ww - 80.f, y + LINE_H + 4.f);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-        render_target_->DrawText(wslbuf, static_cast<UINT32>(wcslen(wslbuf)), font_small_, wsl_r, brush_text_);
+        draw_text_aligned(wslbuf, font_small_, wsl_r, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-    // ヘッダ行テキストのベースラインから RAM バーまでの余白を詰めるため、
+    // ヘッダ行テキストのベースラインからバーまでの余白を詰めるため、
     // 行送りを LINE_H + 2.f より 3px 減らす
     y += LINE_H - 1.f;
 
-    // RAM バー：全体使用量を通常色で描画し、WSL 分を同系色の濃いオーバーレイで重ねる
+    // バー：全体使用量を通常色で描画し、WSL 分を同系色の濃いオーバーレイで重ねる
     D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
-    uint32_t bar_col = (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_graph_fill;
-    draw_hbar(m.usage_pct, 100.f, br, bar_col);
+    uint32_t bar_col = (usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_graph_fill;
+    draw_hbar(usage_pct, 100.f, br, bar_col);
 
-    if (m.wsl_gb > 0.f && m.total_gb > 0.f) {
+    if (wsl_gb > 0.f && total_gb > 0.f) {
         float bar_w    = br.right - br.left;
-        float wsl_fill = min(m.wsl_gb / m.total_gb, 1.f) * bar_w;
+        float wsl_fill = min(wsl_gb / total_gb, 1.f) * bar_w;
         if (wsl_fill > 0.f) {
             D2D1_RECT_F wr = D2D1::RectF(br.left, br.top, br.left + wsl_fill, br.bottom);
             set_brush_color(brush_fill_, COL_WSL_MEM, 0.9f);
@@ -720,74 +732,33 @@ float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
     // Consolas のディセントの分だけ視覚的文字底辺はラインボックス下端より
     // 上にずれるため、矩形下端を BAR_H + 3px（視覚調整値）に拡張してベースラインをバー下端に合わせる。
     wchar_t totbuf[16];
-    swprintf_s(totbuf, L"%2.0fGB", m.total_gb);
+    swprintf_s(totbuf, L"%2.0fGB", total_gb);
     set_brush_color(brush_text_, cfg.col_text);
     D2D1_RECT_F tr2 = D2D1::RectF(x + ww - TOTAL_W, y, x + ww, y + BAR_H + 3.f);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
-    render_target_->DrawText(totbuf, static_cast<UINT32>(wcslen(totbuf)), font_small_, tr2, brush_text_);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    draw_text_aligned(totbuf, font_small_, tr2, brush_text_,
+                      DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_FAR);
 
-    y += BAR_H + GAP;
+    return y0 + section_h_mem();
+}
 
-    return y;
+float Renderer::draw_mem(const MemMetrics& m, const AppConfig& cfg, float y) {
+    return draw_mem_bar_section(L"RAM", m.usage_pct, m.used_gb, m.total_gb, m.wsl_gb, cfg, y);
 }
 
 float Renderer::draw_vram(const VramMetrics& m, const AppConfig& cfg, float y) {
-    float x  = PAD;
-    float ww = static_cast<float>(cfg.win_width) - PAD * 2;
-
     if (!m.avail) {
+        float x  = PAD;
+        float ww = static_cast<float>(cfg.win_width) - PAD * 2;
         set_brush_color(brush_text_, COL_TEMP_NORMAL);
         D2D1_RECT_F r = D2D1::RectF(x, y, x + ww, y + LINE_H);
         render_target_->DrawText(L"VRAM  N/A", 9, font_normal_, r, brush_text_);
-        return y + LINE_H + GAP;
+        return y + section_h_vram(false);
     }
-
-    // VRAM テキスト（使用率は font_normal_ 左寄せ、GB は font_small_ 右寄せ）
-    uint32_t vram_col = (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_text;
-    wchar_t buf[64];
-    swprintf_s(buf, L"VRAM  %5.1f%%", m.usage_pct);
-    set_brush_color(brush_text_, vram_col);
-    D2D1_RECT_F tr = D2D1::RectF(x, y, x + ww, y + LINE_H);
-    render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_normal_, tr, brush_text_);
-
-    // GB 表示（右寄せ、font_small_）
-    // font_normal_（22pt、使用率%）と font_small_（18pt）はフォントサイズ差でベースラインが
-    // 揃わないため、Claude ヘッダ（プラン名テキスト）と同じ +4px 補正でベースラインを揃える
-    wchar_t gbuf[16];
-    swprintf_s(gbuf, L"%5.1fGB", m.used_gb);
-    set_brush_color(brush_text_, vram_col, 0.8f);
-    D2D1_RECT_F gb_r = D2D1::RectF(x, y + 4.f, x + ww, y + LINE_H + 4.f);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_small_, gb_r, brush_text_);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-
-    // ヘッダ行テキストのベースラインから VRAM バーまでの余白を詰めるため、
-    // 行送りを LINE_H + 2.f より 3px 減らす
-    y += LINE_H - 1.f;
-
-    D2D1_RECT_F br = D2D1::RectF(x, y, x + ww - TOTAL_W - 4.f, y + BAR_H);
-    draw_hbar(m.usage_pct, 100.f, br, (m.usage_pct > cfg.warn_mem_pct) ? COL_WARN_RED : cfg.col_graph_fill);
-
-    // 総量テキストをバー右側に表示。
-    // DirectWrite の PARAGRAPH_ALIGNMENT_FAR はラインボックス下端を矩形下端に揃える。
-    // Consolas のディセントの分だけ視覚的文字底辺はラインボックス下端より
-    // 上にずれるため、矩形下端を BAR_H + 3px（視覚調整値）に拡張してベースラインをバー下端に合わせる。
-    wchar_t totbuf[16];
-    swprintf_s(totbuf, L"%2.0fGB", m.total_gb);
-    set_brush_color(brush_text_, cfg.col_text);
-    D2D1_RECT_F tr2 = D2D1::RectF(x + ww - TOTAL_W, y, x + ww, y + BAR_H + 3.f);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
-    render_target_->DrawText(totbuf, static_cast<UINT32>(wcslen(totbuf)), font_small_, tr2, brush_text_);
-    font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-    font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-
-    y += BAR_H + GAP;
-
-    return y;
+    // 高さは VRAM 自身のヘルパ（section_h_vram(true)）から導出する。
+    // 共通描画ヘルパの戻り値（section_h_mem 由来）を使うと、将来 VRAM だけ縦幅を
+    // 変えたときに compute_preferred_height 側と静かに乖離するため
+    draw_mem_bar_section(L"VRAM", m.usage_pct, m.used_gb, m.total_gb, 0.f, cfg, y);
+    return y + section_h_vram(true);
 }
 
 float Renderer::draw_disk(const std::vector<DiskMetrics>& disks, const Visibility& vis,
@@ -831,10 +802,8 @@ float Renderer::draw_disk(const std::vector<DiskMetrics>& disks, const Visibilit
             wchar_t tbuf[16];
             swprintf_s(tbuf, L"%3.0f\u2103", dm.smart_temp_celsius);
             set_brush_color(brush_text_, temp_color(dm.smart_temp_celsius, cfg.warn_temp_caution, cfg.warn_temp_critical), 0.9f);
-            font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + LINE_H + 4.f, x + gw - 4.f, y + LINE_H + GRAPH_H - 4.f);
-            render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_large_, ol, brush_text_);
-            font_large_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            draw_text_aligned(tbuf, font_large_, ol, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
         }
 
         // --- 右 1/3：Space（テキスト + バー + 容量テキスト縦積み）---
@@ -849,15 +818,11 @@ float Renderer::draw_disk(const std::vector<DiskMetrics>& disks, const Visibilit
         D2D1_RECT_F str = D2D1::RectF(sx, y + DISK_TEXT_DROP, sx + sw, y + LINE_H + DISK_TEXT_DROP);
         D2D1_RECT_F lbr = D2D1::RectF(sx, y + DISK_TEXT_DROP + 2.f, sx + sw - PCT_RESERVE_W, y + LINE_H + DISK_TEXT_DROP + 2.f);
         set_brush_color(brush_text_, cfg.col_text, 0.6f);
-        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-        render_target_->DrawText(L"Used:", 5, font_tiny_, lbr, brush_text_);
-        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text_aligned(L"Used:", font_tiny_, lbr, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
         wchar_t sbuf[16];
         swprintf_s(sbuf, L"%5.1f%%", dm.used_pct);
         set_brush_color(brush_text_, sp_col);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-        render_target_->DrawText(sbuf, static_cast<UINT32>(wcslen(sbuf)), font_small_, str, brush_text_);
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text_aligned(sbuf, font_small_, str, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
 
         // バー（LINE_H の下から BAR_H 分）
         uint32_t bar_col = (dm.used_pct > cfg.warn_disk_space_pct) ? COL_WARN_RED : cfg.col_graph_fill;
@@ -874,12 +839,10 @@ float Renderer::draw_disk(const std::vector<DiskMetrics>& disks, const Visibilit
         }
         // 容量テキストと GB/h 行は補助情報のため、font_small_ よりひと回り小さい font_tiny_ で控えめに
         set_brush_color(brush_text_, cfg.col_text, 0.5f);
-        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         float gt = y + LINE_H + 2.f + BAR_H;
         // 容量テキストはフォント縮小に合わせてベースラインを 2px 下げる（GB/h 行は gt 基準のまま据え置き）
         D2D1_RECT_F gbr = D2D1::RectF(sx, gt + 2.f, sx + sw, gt + 2.f + INFO_LINE_H);
-        render_target_->DrawText(gbuf, static_cast<UINT32>(wcslen(gbuf)), font_tiny_, gbr, brush_text_);
-        font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        draw_text_aligned(gbuf, font_tiny_, gbr, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
 
         // GB/h 行（容量テキストの下、同一物理ドライブの後続は省略）
         if (show_smart) {
@@ -887,30 +850,32 @@ float Renderer::draw_disk(const std::vector<DiskMetrics>& disks, const Visibilit
             swprintf_s(smuf, L"%.1f GB/h", dm.smart_write_gbh);
             uint32_t gbh_col = (dm.smart_write_gbh > cfg.warn_disk_gbh) ? COL_WARN_RED : cfg.col_text;
             set_brush_color(brush_text_, gbh_col, 0.45f);
-            font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
             float st = gt + INFO_LINE_H - 6.f;
             D2D1_RECT_F smr = D2D1::RectF(sx, st, sx + sw, st + INFO_LINE_H);
-            render_target_->DrawText(smuf, static_cast<UINT32>(wcslen(smuf)), font_tiny_, smr, brush_text_);
-            font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            draw_text_aligned(smuf, font_tiny_, smr, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
         }
     };
 
     // GB/h を描画済みの物理ドライブ番号。同一物理ドライブを共有する後続の可視ドライブは
     // GB/h を省略する（「描画済み基準」。先行ドライブが非表示なら後続の可視ドライブ側に出る）
     std::vector<int> gbh_drawn;
+    const float y0 = y;  // 戻り値は縦幅ヘルパから導出する（高さの単一ソース）
+    int visible_n = 0;
     for (const auto& dm : disks) {
         if (!vis.disk_drive[dm.drive - 'A']) continue;
         const bool show_smart = dm.smart_avail
             && std::find(gbh_drawn.begin(), gbh_drawn.end(), dm.phys_drive) == gbh_drawn.end();
         draw_drive(dm, show_smart);
         if (show_smart) gbh_drawn.push_back(dm.phys_drive);
-        y += LINE_H + GRAPH_H + GAP;
+        y += section_h_disk(1);  // 次ドライブの描画開始位置（部品配置用）
+        ++visible_n;
     }
 
-    return y;
+    return y0 + section_h_disk(visible_n);
 }
 
 float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
+    const float y0 = y;  // 戻り値は縦幅ヘルパから導出する（高さの単一ソース）
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
@@ -942,11 +907,10 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
 
     // グローバル IP は行末右寄せ、フォントとトーンは Handle: 等の補助情報と同じ font_tiny_ + アルファ 0.6
     set_brush_color(brush_text_, cfg.col_text, 0.6f);
-    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
     const wchar_t* ip_txt = m.ip_avail ? m.global_ip : L"NO INTERNET\U0001F4F5";
-    render_target_->DrawText(ip_txt, static_cast<UINT32>(wcslen(ip_txt)), font_tiny_,
-        D2D1::RectF(x + NET_LBL_W, y + NET_TEXT_DROP, x + ww, y + LINE_H + NET_TEXT_DROP), brush_text_);
-    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    draw_text_aligned(ip_txt, font_tiny_,
+        D2D1::RectF(x + NET_LBL_W, y + NET_TEXT_DROP, x + ww, y + LINE_H + NET_TEXT_DROP),
+        brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
     y += LINE_H;
 
     // グラフ
@@ -955,12 +919,12 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
     draw_area_graph(m.recv_history, max_val, gr, cfg.col_net_recv);
     draw_area_graph(m.send_history, max_val, gr, cfg.col_net_send, false);
 
-    y += GRAPH_H + GAP;
-    return y;
+    return y0 + section_h_net();
 }
 
 
 float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float y) {
+    const float y0 = y;  // 戻り値は縦幅ヘルパから導出する（高さの単一ソース）
     float x  = PAD;
     float ww = static_cast<float>(cfg.win_width) - PAD * 2;
 
@@ -1020,9 +984,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // プラン名 etc とフォントサイズが違うため、ベースラインを揃えるために専用矩形を 4px 下げる
     D2D1_RECT_F ssr = D2D1::RectF(hsr.left, hsr.top + 4.f, hsr.right, hsr.bottom + 4.f);
     set_brush_color(brush_text_, cfg.col_text, 0.6f);
-    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-    render_target_->DrawText(sess_buf, static_cast<UINT32>(wcslen(sess_buf)), font_tiny_, ssr, brush_text_);
-    font_tiny_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    draw_text_aligned(sess_buf, font_tiny_, ssr, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
     // ヘッダ行テキスト（"Claude"/プラン名/取得時刻・Sessions）のベースラインから
     // 5h バーまでの余白を詰めるため、行送りを LINE_H より 3px 減らす
     y += LINE_H - 3.f;
@@ -1031,14 +993,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // テキストは Disk I/O と同じ font_small_（18pt）
     static constexpr float LBL_W   = 72.f;   // "5h 100%" が収まる幅（font_small_）
     static constexpr float RESET_W = 138.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
-    // 現在時刻からリアルタイムに均等消費ペースを算出
-    auto calc_expected_now = [](time_t resets_ts, double window_secs) -> float {
-        if (resets_ts <= 0) return 0.f;  // 未取得（-1）または epoch（0）は無効
-        double remaining = static_cast<double>(resets_ts) - static_cast<double>(time(nullptr));
-        if (remaining < 0.0) remaining = 0.0;
-        if (remaining > window_secs) return 0.f;
-        return std::clamp(static_cast<float>((window_secs - remaining) / window_secs * 100.0), 0.f, 100.f);
-    };
+    // 均等消費ペースは metrics.hpp の claude_expected_pct（警告音判定と共用）で都度算出する
 
     // 追い上げ可能な最大到達率（%）を実測ペースから外挿する
     // rate は 7d 履歴の端点差分から算出した平均消費レート（%/秒、calc_hist_rate が算出）。
@@ -1124,10 +1079,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         static constexpr float CLAUDE_BAR_H = BAR_H;  // VRAM 等と同じバー高さに揃える
 
         // ラベル（"5h"/"7d"）は常に通常色で左寄せ、パーセンテージは条件付き色・フォントで右寄せ
-        font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        // 行内テキスト（ラベル・%・リセット時刻・残ターン数）はすべて段落中央揃えで縦位置を揃える
         D2D1_RECT_F lr = D2D1::RectF(x, y, x + LBL_W, y + SECTION_H);
         set_brush_color(brush_text_, avail ? cfg.col_text : COL_TEMP_NORMAL);
-        render_target_->DrawText(lbl, static_cast<UINT32>(wcslen(lbl)), font_small_, lr, brush_text_);
+        draw_text_aligned(lbl, font_small_, lr, brush_text_,
+                          DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
         // パーセンテージ：100% 到達、または理想ペース超過が閾値以上→赤、ペースマーカー超→黄、それ以外→通常色
         // 他の警告項目（CPU/GPU/RAM 等）と同じ慣例で太字にせず色のみで警告する。
@@ -1153,10 +1109,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                 pct_col = cfg.col_text;
             }
             set_brush_color(brush_text_, pct_col);
-            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-            render_target_->DrawText(pct_buf, static_cast<UINT32>(wcslen(pct_buf)), font_small_, lr, brush_text_);
-            font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            draw_text_aligned(pct_buf, font_small_, lr, brush_text_,
+                              DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
 
         // バー（ラベル右端からリセット時刻左端まで）
@@ -1244,12 +1198,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             }
             float remain_text_w = remain_tm.widthIncludingTrailingWhitespace;
             if (fill_w >= 3.f + remain_text_w + 2.f) {
-                font_pace_remain_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 set_brush_color(brush_text_, 0x000000);
                 // 見た目の微調整として基準位置から左に 1px、上に 1px ずらす
-                render_target_->DrawText(remain_buf, static_cast<UINT32>(wcslen(remain_buf)), font_pace_remain_,
-                    D2D1::RectF(br.left + 3.f, y - 1.f, br.right, y + SECTION_H - 1.f), brush_text_);
-                font_pace_remain_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+                draw_text_aligned(remain_buf, font_pace_remain_,
+                    D2D1::RectF(br.left + 3.f, y - 1.f, br.right, y + SECTION_H - 1.f),
+                    brush_text_, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             }
         }
 
@@ -1259,7 +1212,11 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         static constexpr float TIME_W = 54.f;  // "HH:MM" 描画幅
         static constexpr float DAY_W  = 22.f;  // 曜日文字（全角 1 文字）描画幅
         static constexpr float DAY_GAP = 4.f;  // 曜日前後ギャップ（通常スペースの 70%）
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        // 右寄せ + 段落中央揃えの短縮形（この行内テキスト共通の整列）
+        auto draw_right = [&](const wchar_t* text, const D2D1_RECT_F& r) {
+            draw_text_aligned(text, font_small_, r, brush_text_,
+                              DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        };
         if (avail) {
             wchar_t rtbuf[40];
             swprintf_s(rtbuf, L"%.38s", reset);
@@ -1273,26 +1230,21 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             if (p0 && p1 && p2) {
                 // 右から：時刻 → 曜日 → 日付 の順に描画
                 float rx = x + ww;
-                render_target_->DrawText(p2, static_cast<UINT32>(wcslen(p2)), font_small_,
-                    D2D1::RectF(rx - TIME_W, y, rx, y + SECTION_H), brush_text_);
+                draw_right(p2, D2D1::RectF(rx - TIME_W, y, rx, y + SECTION_H));
                 rx -= TIME_W + DAY_GAP;
-                render_target_->DrawText(p1, static_cast<UINT32>(wcslen(p1)), font_small_,
-                    D2D1::RectF(rx - DAY_W, y, rx, y + SECTION_H), brush_text_);
+                draw_right(p1, D2D1::RectF(rx - DAY_W, y, rx, y + SECTION_H));
                 rx -= DAY_W + DAY_GAP;
-                render_target_->DrawText(p0, static_cast<UINT32>(wcslen(p0)), font_small_,
-                    D2D1::RectF(x + ww - RESET_W, y, rx, y + SECTION_H), brush_text_);
+                draw_right(p0, D2D1::RectF(x + ww - RESET_W, y, rx, y + SECTION_H));
             }
             else {
                 // 5h 形式（"HH:MM"）：通常描画
-                render_target_->DrawText(rtbuf, static_cast<UINT32>(wcslen(rtbuf)), font_small_,
-                    D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H), brush_text_);
+                draw_right(rtbuf, D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H));
             }
         }
         else {
             // 未取得時のプレースホルダ（API 取得完了で本来の時刻に置き換わる）
             set_brush_color(brush_text_, COL_TEMP_NORMAL, 1.0f);
-            render_target_->DrawText(L"--:--", 5, font_small_,
-                D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H), brush_text_);
+            draw_right(L"--:--", D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H));
         }
         // 5h 残ターン数（リセット時刻と同色・同フォント）
         // 7d 行のリセット日時 "M/D 曜 HH:MM" の月数字と桁を揃えて右詰めで描画する。
@@ -1306,14 +1258,10 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             wchar_t tbuf[8];
             swprintf_s(tbuf, L"%d", turns_left);
             set_brush_color(brush_text_, cfg.col_text);
-            render_target_->DrawText(tbuf, static_cast<UINT32>(wcslen(tbuf)), font_small_,
-                D2D1::RectF(bar_right + 4.f, y,
+            draw_right(tbuf, D2D1::RectF(bar_right + 4.f, y,
                             x + ww - TIME_W - DAY_GAP - DAY_W - DAY_GAP - DATE_DAY_W,
-                            y + SECTION_H), brush_text_);
+                            y + SECTION_H));
         }
-        font_small_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        // 段落整列の復元はリセット時刻描画後に行う（途中で戻すと警告状態で縦位置が変動する）
-        font_small_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         // 5h と 7d の行送りは SECTION_H のみ。視覚的な隙間を詰めるため GAP を含めない。
         // セクション末尾のギャップは draw_bar 呼び出し後に 1 度だけ加算する。
         y += SECTION_H;
@@ -1330,9 +1278,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 保持期間切れの破棄と、アンカーのウィンドウ開始チェック（collector 側）で基準にならない
     bool underuse_7d = false;
     if (m.avail && cfg.claude_underuse_enable && m.seven_d_resets_ts > 0) {
-        constexpr double WIN_7D_SECS = 7.0 * 24 * 3600;
-        double elapsed = WIN_7D_SECS - (static_cast<double>(m.seven_d_resets_ts)
-                                        - static_cast<double>(time(nullptr)));
+        double elapsed = CLAUDE_WIN_7D_SECS - (static_cast<double>(m.seven_d_resets_ts)
+                                               - static_cast<double>(time(nullptr)));
         float rate  = calc_hist_rate(m.seven_d_history, cfg.claude_delta_window_7d_min, m.seven_d_pct);
         float reach = calc_reach_pct(m.seven_d_resets_ts, m.seven_d_pct, rate);
         underuse_7d = elapsed >= static_cast<double>(cfg.claude_underuse_grace_hours) * 3600.0
@@ -1346,7 +1293,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 残数が turns_show_from を超える間、未取得、機能無効（0）の間は非表示（-1）
     int turns_left = -1;
     if (m.avail && cfg.claude_turns_show_from > 0 && m.seven_d_resets_ts > 0) {
-        constexpr double FIVE_H_SECS = 5.0 * 3600.0;
         time_t now = time(nullptr);
         if (m.seven_d_resets_ts <= now) {
             turns_left = 0;
@@ -1354,18 +1300,18 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         else {
             double cur_end = (m.five_h_resets_ts > now)
                            ? static_cast<double>(m.five_h_resets_ts)
-                           : static_cast<double>(now) + FIVE_H_SECS;
+                           : static_cast<double>(now) + CLAUDE_WIN_5H_SECS;
             double after = static_cast<double>(m.seven_d_resets_ts) - cur_end;
-            turns_left = 1 + (after > 0.0 ? static_cast<int>(std::ceil(after / FIVE_H_SECS)) : 0);
+            turns_left = 1 + (after > 0.0 ? static_cast<int>(std::ceil(after / CLAUDE_WIN_5H_SECS)) : 0);
         }
         if (turns_left > cfg.claude_turns_show_from) turns_left = -1;
     }
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
-             calc_expected_now(m.five_h_resets_ts,  5.0 * 3600), 5, cfg.warn_claude_5h_pct,
+             claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS), 5, cfg.warn_claude_5h_pct,
              false, five_h_delta_start, 0.0, turns_left);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
-             calc_expected_now(m.seven_d_resets_ts, 7.0 * 24 * 3600), 7, cfg.warn_claude_7d_pct,
-             underuse_7d, seven_d_delta_start, 7.0 * 24 * 3600);
+             claude_expected_pct(m.seven_d_resets_ts, CLAUDE_WIN_7D_SECS), 7, cfg.warn_claude_7d_pct,
+             underuse_7d, seven_d_delta_start, CLAUDE_WIN_7D_SECS);
     // モデルスコープ（Fable 等）7d 専用ミニバー
     // 7d バー下端に隙間なく密着する塗り矩形のみ（縦幅は cfg.claude_scoped_bar_px、0 = 非表示）。
     // バー全幅 = スコープ枠の 100%。
@@ -1389,9 +1335,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                             top + static_cast<float>(cfg.claude_scoped_bar_px)), brush_fill_);
         }
     }
-    y += GAP;  // セクション末尾の通常ギャップ（後続セクションとの間隔を維持）
-
-    return y;
+    return y0 + section_h_claude();  // セクション末尾の通常ギャップ（GAP）はヘルパに含まれる
 }
 
 // ---- メイン描画 ----

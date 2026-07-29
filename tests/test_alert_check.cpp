@@ -85,7 +85,7 @@ TEST_CASE("AlertManager::check: GPU 不可なら GPU 系項目は発火しない
     CHECK((r & bit(AlertManager::TEMP_GPU)) == 0);
 }
 
-TEST_CASE("AlertManager::check: Claude Main expected_pct=0 のとき判定をスキップ") {
+TEST_CASE("AlertManager::check: Claude Main リセット時刻未取得のとき判定をスキップ") {
     AlertManager mgr;
     AppConfig cfg;
     AllMetrics m;
@@ -93,7 +93,7 @@ TEST_CASE("AlertManager::check: Claude Main expected_pct=0 のとき判定をス
     m.claude_main.account_enabled    = true;
     m.claude_main.avail              = true;
     m.claude_main.five_h_pct         = 99.f;
-    m.claude_main.five_h_expected_pct = 0.f;  // タイミング不明（リセット時刻未取得）
+    m.claude_main.five_h_resets_ts   = -1;  // タイミング不明（リセット時刻未取得）→ ペース 0 扱い
     uint32_t r = mgr.check(m, cfg, true);
     CHECK((r & bit(AlertManager::CLAUDE_MAIN_5H)) == 0);
 }
@@ -107,13 +107,16 @@ TEST_CASE("AlertManager::check: Claude Sub の発火は Main と独立") {
 
     m.claude_main.account_enabled    = true;
     m.claude_main.avail              = true;
-    m.claude_main.five_h_pct         = 30.f;
-    m.claude_main.five_h_expected_pct = 25.f;  // 差 5 → 閾値未満
+    // 均等消費ペースは resets_ts から claude_expected_pct が現在時刻基準で算出する。
+    // 経過 25%（5h 窓の残り 75% = 13500 秒）となるリセット時刻を与える
+    const time_t resets_25pct = time(nullptr) + 13500;
+    m.claude_main.five_h_pct       = 30.f;
+    m.claude_main.five_h_resets_ts = resets_25pct;  // ペース約 25% → 差約 5 → 閾値未満
 
-    m.claude_sub.account_enabled    = true;
-    m.claude_sub.avail              = true;
-    m.claude_sub.five_h_pct         = 90.f;
-    m.claude_sub.five_h_expected_pct = 25.f;   // 差 65 → 閾値超過
+    m.claude_sub.account_enabled  = true;
+    m.claude_sub.avail            = true;
+    m.claude_sub.five_h_pct       = 90.f;
+    m.claude_sub.five_h_resets_ts = resets_25pct;   // ペース約 25% → 差約 65 → 閾値超過
 
     uint32_t r = mgr.check(m, cfg, true);
     CHECK((r & bit(AlertManager::CLAUDE_MAIN_5H)) == 0);
@@ -128,8 +131,8 @@ TEST_CASE("AlertManager::check: Claude Sub 無効時はサブ系項目を発火�
 
     m.claude_sub.account_enabled    = false;   // TOML サブ機能 OFF を再現
     m.claude_sub.avail              = true;
-    m.claude_sub.five_h_pct         = 99.f;
-    m.claude_sub.five_h_expected_pct = 1.f;
+    m.claude_sub.five_h_pct       = 99.f;
+    m.claude_sub.five_h_resets_ts = time(nullptr) + 17800;  // 開始直後相当（ペース約 1%）
 
     uint32_t r = mgr.check(m, cfg, true);
     CHECK((r & bit(AlertManager::CLAUDE_SUB_5H))  == 0);

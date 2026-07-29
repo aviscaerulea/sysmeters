@@ -147,6 +147,19 @@ private:
     float draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y);
     float draw_mem(const MemMetrics& m,  const AppConfig& cfg, float y);
     float draw_vram(const VramMetrics& m, const AppConfig& cfg, float y);
+    // RAM / VRAM 共通のヘッダ行 + 使用率横バー描画（wsl_gb > 0 で WSL オーバーレイ付き）
+    float draw_mem_bar_section(const wchar_t* label, float usage_pct, float used_gb,
+                               float total_gb, float wsl_gb, const AppConfig& cfg, float y);
+
+    // 整列指定付きテキスト描画
+    // フォントの整列状態を一時変更して text を 1 回描画し、既定（LEADING / NEAR）へ戻す。
+    // IDWriteTextFormat の整列は共有可変状態のため、呼び出し側の手動復元（戻し忘れで
+    // 以降の描画全体が崩れる事故の温床）を排除する目的で変更と復元をここへ閉じ込める。
+    // 既定が NEAR でないフォント（font_xlarge_ は CENTER）には使わないこと
+    void draw_text_aligned(const wchar_t* text, IDWriteTextFormat* font,
+                           const D2D1_RECT_F& rect, ID2D1SolidColorBrush* brush,
+                           DWRITE_TEXT_ALIGNMENT ta,
+                           DWRITE_PARAGRAPH_ALIGNMENT pa = DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     float draw_disk(const std::vector<DiskMetrics>& disks, const Visibility& vis,
                     const AppConfig& cfg, float y);
     float draw_net(const NetMetrics& m,  const AppConfig& cfg, float y);
