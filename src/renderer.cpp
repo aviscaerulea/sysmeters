@@ -63,6 +63,8 @@ static constexpr float TOPPROC_COL_W = 8.8f;   // font_tiny_（Consolas 16pt）�
 static constexpr int   TOPPROC_MAX_COLS = 18;  // 表示桁数の上限（" NN%" を含む総桁数）
                                                // 帯幅いっぱい（デフォルト幅で約 24 桁）では長すぎるため、
                                                // 実用上の視認性から名前部 14 桁前後に抑える（実画面評価による）
+static constexpr float TOPPROC_ALPHA          = 0.6f;   // 通常表示の不透明度（大パーセンテージの 0.9 より一段落とす）
+static constexpr float TOPPROC_RESIDUAL_ALPHA = 0.35f;  // 残像表示の不透明度（凍結値だと直感できる薄さ）
 
 // セクションごとの縦幅ヘルパー（セクション総縦幅の単一の真実源）
 //
@@ -276,7 +278,43 @@ static bool topproc_visible(const wchar_t* name, float top_pct, float overall_pc
     return shown;
 }
 
-void Renderer::draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, const AppConfig& cfg) {
+// トッププロセスの表示判定と残像（linger）管理（契約はヘッダ参照）
+// 残像期限は「最後に表示条件を満たして描画した時刻（seen_ms）」から数える。
+// 喪失を検知した paint 時刻を基準にすると、スリープ・ロック等で paint が長時間
+// 止まった後の最初の paint で期限が起算され、何時間も前の凍結値が残像として
+// 復活するため。（GetTickCount64 は停止中も進む単調時計）
+// paint はアニメーション中 30fps で呼ばれ得るため、tick 数でなく実時間で判定する。
+// 残像の % は凍結値のため、負荷急落直後は現在の大パーセンテージより高い値が並ぶが、
+// 薄表示で「直前の記録」と区別する意図的な仕様。（超過表示の欠陥ではない）
+bool Renderer::topproc_display(const wchar_t* name, float pct, float overall_pct,
+                               const AppConfig& cfg, TopProcState& st,
+                               const wchar_t*& out_name, float& out_pct, bool& residual) {
+    const ULONGLONG now = GetTickCount64();
+    if (topproc_visible(name, pct, overall_pct, cfg, st.shown)) {
+        // 表示条件成立：実測値を凍結値として更新し、鮮度時刻を刻む。
+        // 残像中に別プロセスが条件を満たした場合もここで即置換される
+        wcsncpy_s(st.name, name, _TRUNCATE);
+        st.pct     = pct;
+        st.seen_ms = now;
+        out_name = st.name;
+        out_pct  = st.pct;
+        residual = false;
+        return true;
+    }
+    // 条件喪失：凍結値が新鮮な間（最終表示から linger_sec 秒以内）だけ残像を出す
+    if (st.name[0] != L'\0' && cfg.topproc_linger_sec > 0
+        && now - st.seen_ms < static_cast<ULONGLONG>(cfg.topproc_linger_sec) * 1000ULL) {
+        out_name = st.name;
+        out_pct  = st.pct;
+        residual = true;
+        return true;
+    }
+    st = {};
+    return false;
+}
+
+void Renderer::draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, const AppConfig& cfg,
+                             float alpha) {
     const float band_w = (ol.right - TOPPROC_R) - (ol.left + TOPPROC_X);
     const int   cols   = min(static_cast<int>(band_w / TOPPROC_COL_W), TOPPROC_MAX_COLS);
     if (cols < 6) return;  // win_width を極端に狭めた設定では表示を諦める
@@ -310,8 +348,7 @@ void Renderer::draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, con
     }
     shown += pct_buf;
 
-    // 大パーセンテージ（alpha 0.9）より一段落として副情報であることを示す
-    set_brush_color(brush_text_, cfg.col_text, 0.6f);
+    set_brush_color(brush_text_, cfg.col_text, alpha);
     D2D1_RECT_F r = D2D1::RectF(ol.left + TOPPROC_X, ol.top + TOPPROC_Y,
                                 ol.right - TOPPROC_R, ol.bottom);
     render_target_->DrawText(shown.c_str(), static_cast<UINT32>(shown.size()),
@@ -534,9 +571,14 @@ float Renderer::draw_cpu(const CpuMetrics& m, const MemMetrics& mem, const AppCo
     D2D1_RECT_F ol = D2D1::RectF(x + 4.f, y + 4.f, x + ww - 4.f, y + GRAPH_H_LG - 4.f);
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
-    // トッププロセス名（大パーセンテージの右）。表示条件は topproc_visible を参照
-    if (topproc_visible(m.top_proc_name, m.top_proc_pct, m.total_pct, cfg, topproc_shown_cpu_))
-        draw_top_proc(m.top_proc_name, m.top_proc_pct, ol, cfg);
+    // トッププロセス名（大パーセンテージの右）。表示条件と残像は topproc_display を参照
+    {
+        const wchar_t* tp_name; float tp_pct; bool tp_residual;
+        if (topproc_display(m.top_proc_name, m.top_proc_pct, m.total_pct, cfg, topproc_cpu_,
+                            tp_name, tp_pct, tp_residual))
+            draw_top_proc(tp_name, tp_pct, ol, cfg,
+                          tp_residual ? TOPPROC_RESIDUAL_ALPHA : TOPPROC_ALPHA);
+    }
 
     // 温度（右寄せ、3 段階色。取得不可時は "--℃"）
     {
@@ -641,8 +683,9 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
         set_brush_color(brush_text_, COL_TEMP_NORMAL);
         D2D1_RECT_F r = D2D1::RectF(x, y, x + ww, y + LINE_H);
         render_target_->DrawText(L"N/A", 3, font_normal_, r, brush_text_);
-        // N/A 中はトッププロセスも描かないため、ヒステリシス状態を「表示していない」に揃える
-        topproc_shown_gpu_ = false;
+        // N/A 中はトッププロセスも描かない。データ由来でない消失のため
+        // 残像も含めて状態を全消去する
+        topproc_gpu_ = {};
         return y0 + section_h_gpu(false);
     }
 
@@ -659,8 +702,13 @@ float Renderer::draw_gpu(const GpuMetrics& m, const AppConfig& cfg, float y) {
     render_target_->DrawText(buf, static_cast<UINT32>(wcslen(buf)), font_xlarge_, ol, brush_text_);
 
     // トッププロセス名（CPU セクションと同一レイアウト・同一表示条件。GPU 側は HF 表示がないぶん余裕がある）
-    if (topproc_visible(m.top_proc_name, m.top_proc_pct, m.usage_pct, cfg, topproc_shown_gpu_))
-        draw_top_proc(m.top_proc_name, m.top_proc_pct, ol, cfg);
+    {
+        const wchar_t* tp_name; float tp_pct; bool tp_residual;
+        if (topproc_display(m.top_proc_name, m.top_proc_pct, m.usage_pct, cfg, topproc_gpu_,
+                            tp_name, tp_pct, tp_residual))
+            draw_top_proc(tp_name, tp_pct, ol, cfg,
+                          tp_residual ? TOPPROC_RESIDUAL_ALPHA : TOPPROC_ALPHA);
+    }
 
     // 温度（右寄せ、3 段階色）
     wchar_t tbuf[16];
@@ -1353,10 +1401,10 @@ void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility
     float y = PAD;
     y = draw_os(m.os, cfg, y);                            y += SECTION_GAP;
     if (vis.cpu)    { y = draw_cpu(m.cpu, m.mem, cfg, y); y += SECTION_GAP; }
-    else            { topproc_shown_cpu_ = false; }  // 非表示中は「表示していない」に揃え、再表示時に緩和閾値で始まるのを防ぐ
+    else            { topproc_cpu_ = {}; }  // セクション非表示はデータ由来でない消失のため、残像含め状態を全消去する
     if (vis.gpu)    { y = draw_gpu(m.gpu, cfg, y);        y += SECTION_GAP;
                       y = draw_vram(m.vram, cfg, y);      y += SECTION_GAP; }
-    else            { topproc_shown_gpu_ = false; }  // 同上（GPU 側）
+    else            { topproc_gpu_ = {}; }  // 同上（GPU 側）
     if (vis.mem)    { y = draw_mem(m.mem, cfg, y);        y += SECTION_GAP; }
     if (visible_disk_count(m.disks, vis) > 0) { y = draw_disk(m.disks, vis, cfg, y); y += SECTION_GAP; }
     if (vis.net)    { y = draw_net(m.net, cfg, y);        y += SECTION_GAP; }

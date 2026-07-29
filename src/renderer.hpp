@@ -70,6 +70,11 @@ public:
     void shutdown();
     ~Renderer() { shutdown(); }
 
+    // トッププロセスの表示・残像状態を全消去する
+    // データ由来でない消失（トレイメニューのトグル OFF 等）で残像を出さないために
+    // window 側から呼ぶ。（データ由来の消失は topproc_display が残像として扱う）
+    void reset_topproc() { topproc_cpu_ = {}; topproc_gpu_ = {}; }
+
     // ウィンドウ全体の高さ（コンテンツに合わせて計算する。scale 適用後の物理 px）
     int preferred_height() const { return preferred_h_; }
 
@@ -102,11 +107,20 @@ private:
     // コアバーのアニメーション補間用表示値（update_core_animation で更新）
     std::vector<float> core_disp_;
 
-    // トッププロセス表示のヒステリシス状態（前回判定で表示していたか。CPU/GPU 別）
-    // 表示中は閾値を緩めて判定し、境界付近の点滅を防ぐ。
-    // （描画側の topproc_visible が更新し、セクション非表示中は paint がリセットする）
-    bool topproc_shown_cpu_ = false;
-    bool topproc_shown_gpu_ = false;
+    // トッププロセス表示の状態（CPU/GPU 別）
+    // shown は既存ヒステリシス用の前回表示状態。（表示中は閾値を 0.8 倍に緩めて点滅を防ぐ）
+    // name / pct は最後に表示した凍結値、seen_ms は最後に表示条件を満たして描画した時刻。
+    // （GetTickCount64 の単調時計、0 = 表示実績なし）条件喪失後も seen_ms から
+    // linger_sec 秒以内は凍結値を薄く残像表示し、一瞬のスパイクで表示を見逃すのを防ぐ。
+    // データ由来でない消失（トグル OFF・セクション非表示・GPU N/A）では全体を
+    // 既定値へ戻して残像を出さない
+    struct TopProcState {
+        bool      shown    = false;
+        wchar_t   name[64] = {};
+        float     pct      = 0.f;
+        ULONGLONG seen_ms  = 0;
+    };
+    TopProcState topproc_cpu_, topproc_gpu_;
 
     void create_device_resources(const AppConfig& cfg);
     void release_device_resources();
@@ -138,8 +152,20 @@ private:
     // 面グラフ内のトッププロセス表示（CPU/GPU 共通）
     // ol は大パーセンテージの描画に使うオーバーレイ矩形。その左端から TOPPROC_X 右に寄せ、
     // 右端の温度・HF 表示に届かないよう TOPPROC_R の余白を残した帯に "名前 NN%" を描く。
+    // alpha はテキストの不透明度。（通常表示 0.6、残像表示はさらに落とす）
     // name が空文字のときは呼び出さないこと（収集 OFF・値未確定を表す）
-    void draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, const AppConfig& cfg);
+    void draw_top_proc(const wchar_t* name, float pct, D2D1_RECT_F ol, const AppConfig& cfg,
+                       float alpha);
+
+    // トッププロセスの表示判定と残像（linger）管理（CPU/GPU 共通）
+    // 表示条件を満たす間は実測値を out_* へ返して凍結値を更新し、残像を解除する。
+    // 条件を失ったら喪失時刻を記録し、linger_sec 秒以内は凍結値を out_* へ返す。
+    // （residual = true。呼び出し側は薄い alpha で描画する）表示実績が無いまま・
+    // linger_sec = 0・残像期限切れでは false を返し、凍結値を消去する。
+    // 戻り値は描画の要否
+    bool topproc_display(const wchar_t* name, float pct, float overall_pct,
+                         const AppConfig& cfg, TopProcState& st,
+                         const wchar_t*& out_name, float& out_pct, bool& residual);
 
     // メーター各セクションの描画
     float draw_os(const OsMetrics& m, const AppConfig& cfg, float y);
