@@ -336,9 +336,12 @@ void AppWindow::apply_window_height(int target_client_h) {
     GetWindowRect(hwnd_, &rc);
     // コンパクト切替では高さが MIN_CLIENT_H クランプで一致し得るため、幅の差分も見る
     if ((rc.bottom - rc.top) != full_h || (rc.right - rc.left) != (adj.right - adj.left)) {
+        // 描画ターゲットのリサイズは SetWindowPos が同期送出する WM_SIZE ハンドラに任せる。
+        // ここで明示 resize すると、モニタ作業領域クランプで実クライアント高が要求値
+        // （client_h）より縮んだとき、WM_SIZE の正しいサイズをクランプ前の値で上書きして
+        // 実クライアントとずれ、下端が切れる
         SetWindowPos(hwnd_, nullptr, 0, 0, adj.right - adj.left, full_h,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        renderer_->resize(client_width(), client_h);
     }
 }
 
@@ -974,12 +977,25 @@ void AppWindow::destroy() {
     destroy_obj(col_topproc_);
     // Claude コレクタは 2 本を並行停止する。
     // 順次 shutdown() を呼ぶと wait の 15 秒 * 2 が直列化するため、
-    // 先に両方の request_shutdown を立ててから個別 destroy_obj に進む
+    // 先に両方の request_shutdown を立ててから個別の停止待ちへ進む。
+    // Claude / IP は停止待ちがタイムアウトした場合、残存取得スレッドが解放済みメンバへ
+    // 触れる use-after-free を避けるため delete せず意図的にリークさせる。
+    // （プロセス終了直前のため実害はない）
     if (col_claude_main_) col_claude_main_->request_shutdown();
     if (col_claude_sub_)  col_claude_sub_->request_shutdown();
-    destroy_obj(col_claude_main_);
-    destroy_obj(col_claude_sub_);
-    destroy_obj(col_ip_);
+    auto destroy_claude = [](ClaudeCollector*& p) {
+        if (!p) return;
+        if (p->wait_shutdown()) delete p;
+        else log_error("claude collector leaked intentionally (fetch thread still running)");
+        p = nullptr;
+    };
+    destroy_claude(col_claude_main_);
+    destroy_claude(col_claude_sub_);
+    if (col_ip_) {
+        if (col_ip_->shutdown()) delete col_ip_;
+        else log_error("ip collector leaked intentionally (fetch thread still running)");
+        col_ip_ = nullptr;
+    }
     destroy_obj(col_mem_);
     destroy_obj(renderer_);
     delete metrics_;  metrics_ = nullptr;

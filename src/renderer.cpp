@@ -923,7 +923,10 @@ float Renderer::draw_net(const NetMetrics& m, const AppConfig& cfg, float y) {
         D2D1::RectF(x, y, x + NET_LBL_W, y + LINE_H), brush_text_);
 
     // 3 桁左スペースパディングで表示のガタつきを防ぐ
+    // PDH のカウンタラップ等で異常巨大値・非有限値が来てもバッファ不足で
+    // invalid parameter handler（プロセス即終了）にならないよう、値をクランプする
     auto fmt_kbps = [](float kbps, wchar_t* buf, int len) {
+        kbps = std::isfinite(kbps) ? std::clamp(kbps, 0.f, 1.0e9f) : 0.f;
         if (kbps >= 1024.f) swprintf_s(buf, len, L"%5.1f MB/s", kbps / 1024.f);
         else                swprintf_s(buf, len, L"%3.0f KB/s", kbps);
     };

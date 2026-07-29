@@ -124,7 +124,10 @@ bool DiskCollector::init(const std::vector<char>& drives) {
     impl_ = new Impl();
     impl_->drives = drives;
     impl_->counters.resize(drives.size());
-    impl_->phys_drives.resize(drives.size());
+    // -1（未解決）で初期化する。PDH 初期化失敗で下の解決ループへ到達しない場合に
+    // 全ドライブが 0 番扱いとなり、先頭物理ディスクの S.M.A.R.T. 値が全ドライブへ
+    // 波及する誤表示を防ぐ。（query_nvme_smart は負値で早期 return する契約）
+    impl_->phys_drives.assign(drives.size(), -1);
 
     if (PdhOpenQuery(nullptr, 0, &impl_->query) != ERROR_SUCCESS) {
         log_error("Disk PDH init failed");

@@ -52,10 +52,13 @@ public:
 
     // 2 段階終了：複数コレクタを並行停止できるよう、フラグ立てと join 待ちを分離
     // 両方のコレクタに request_shutdown() を先に呼んでから wait_shutdown() を順に呼ぶことで、
-    // 順次 shutdown() 呼び出しの 15 秒 * 2 待機を並列化して合計 15 秒に抑える
+    // 順次 shutdown() 呼び出しの 15 秒 * 2 待機を並列化して合計 15 秒に抑える。
+    // wait_shutdown は全取得スレッド（watchdog で放棄した旧スレッド含む）の終了を確認できたら
+    // true を返す。false のとき呼び出し側は delete してはならない。
+    // （残存スレッドが解放済みメンバへ触れる use-after-free になるため、意図的にリークさせる）
     void request_shutdown();
-    void wait_shutdown();
-    void shutdown() { request_shutdown(); wait_shutdown(); }
+    bool wait_shutdown();
+    bool shutdown() { request_shutdown(); return wait_shutdown(); }
     ~ClaudeCollector() { shutdown(); }
 
 private:
@@ -84,10 +87,14 @@ private:
     // 新世代の状態を破壊するのを防ぐ
     std::atomic<uint32_t> fetch_gen_ = 0;
     // 直近 fetch スレッド起動時刻（GetTickCount64 の ms、単調時計）。update() のハング検知に使う。
-    // system_clock を避けるのは NTP 補正等の壁掛け時計飛びで誤発火や見逃しが起きるため
+    // system_clock を避けるのは NTP 補正等のシステム時刻の飛びで誤発火や見逃しが起きるため
     std::atomic<uint64_t> fetch_start_tick_ = 0;
     std::atomic<bool>  shutdown_   = false;    // shutdown 要求フラグ（fetch スレッドの早期中断用）
     HANDLE             fetch_thread_ = nullptr;
+    // watchdog（update のハング検知）が放棄した旧スレッドのハンドル。
+    // 生存中の可能性があるため閉じずに退避し、wait_shutdown() でまとめて終了を待つ。
+    // update() と wait_shutdown() はともにメインスレッドから呼ばれるため排他は不要
+    std::vector<HANDLE> abandoned_threads_;
     std::mutex         result_mutex_;
     bool               first_fetch_ = true;   // 初回フェッチフラグ（ネガティブキャッシュ無視に使用）
 
