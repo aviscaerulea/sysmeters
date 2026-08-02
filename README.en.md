@@ -39,6 +39,7 @@ A Toast notification appears the moment any warning threshold is exceeded. Notif
 - Claude Code: Displays 5h / 7d rate limit usage, reset times, and session counts (main and sub accounts can be displayed simultaneously)
 - Claude Code nudge: Detects the gap after a rate limit reset where consumption has not yet started, and automatically launches `claude.exe`
 - Top process display: Shows the name and usage of the top process inside the CPU / GPU area charts
+- Display item toggles: Turns each section — CPU, GPU, memory, disk, network, and Claude — on and off individually (disks can also be toggled per drive)
 - Compact mode: Scales the entire display, including charts and fonts, down to 3/5
 - Update check: Checks for the latest GitHub release at startup and announces new versions via Toast notification and the tray menu
 - Alert sound: Plays `alert.wav` when a monitored item exceeds its warning threshold
@@ -151,6 +152,8 @@ scoop bucket add aviscaerulea https://github.com/aviscaerulea/scoop-bucket
 scoop install sysmeters
 ```
 
+Without Scoop, download the zip from the [releases page](https://github.com/aviscaerulea/sysmeters/releases/latest) and extract it into any directory.
+
 Uninstalling leaves the following registry settings behind. Remove them manually if you no longer need them.
 
 - `HKEY_CURRENT_USER\Software\sysmeters` (display settings toggled from the tray menu)
@@ -158,9 +161,9 @@ Uninstalling leaves the following registry settings behind. Remove them manually
 
 ## Usage
 
-```
-out\sysmeters.exe
-```
+When installed via Scoop, it starts as soon as installation completes. After that, the `sysmeters` command also launches it.
+
+When extracted from the zip, run `sysmeters.exe` in the extraction directory. The configuration file and the alert sound are read from the directory containing the executable, so keep the extracted files together.
 
 An icon appears in the system tray (notification area). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
 
@@ -216,4 +219,4 @@ task build
 task release
 ```
 
-Building requires MSVC cl.exe (Visual Studio 2022 or Build Tools 2022).
+Building requires MSVC cl.exe (Visual Studio 2022 or Build Tools 2022). The build output is written to `out\sysmeters.exe`.

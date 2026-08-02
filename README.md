@@ -39,6 +39,7 @@ Claude Code のレートリミット使用状況をコンパクトなオーバ�
 - Claude Code：5h / 7d レートリミット使用率とリセット時刻、セッション数を表示（メイン / サブの 2 アカウントを同時表示できる）
 - Claude Code nudge：レートリミットのリセット後に消費が始まっていない間隙を検知して `claude.exe` を自動起動
 - トッププロセス表示：CPU / GPU の面グラフ内に、使用率トップのプロセス名と使用率を表示
+- 表示項目の切り替え：CPU、GPU、メモリ、ディスク、ネットワーク、Claude の各セクションを個別に ON/OFF（ディスクはドライブ単位でも切り替え可能）
 - コンパクト表示：グラフ・フォントを含む全体を 3/5 に縮小表示
 - 更新確認：起動時に GitHub の最新リリースを確認し、新版があれば Toast 通知とタスクトレイメニューで通知
 - 警告音：監視項目が警告閾値を超えると `alert.wav` を再生
@@ -151,6 +152,8 @@ scoop bucket add aviscaerulea https://github.com/aviscaerulea/scoop-bucket
 scoop install sysmeters
 ```
 
+Scoop を使わない場合は、[リリースページ](https://github.com/aviscaerulea/sysmeters/releases/latest)の zip をダウンロードし、任意のディレクトリへ展開します。
+
 アンインストールしても、次のレジストリ設定は残ります。不要であれば手動で削除してください。
 
 - `HKEY_CURRENT_USER\Software\sysmeters`（タスクトレイメニューで切り替えた表示設定）
@@ -158,9 +161,9 @@ scoop install sysmeters
 
 ## 使い方
 
-```
-out\sysmeters.exe
-```
+Scoop でインストールした場合は、完了と同時に起動します。以降は `sysmeters` コマンドでも起動できます。
+
+zip を展開した場合は、展開先の `sysmeters.exe` を実行します。設定ファイルと警告音は実行ファイルと同じディレクトリから読み込むため、展開したファイルは分けずにまとめて置いてください。
 
 タスクトレイ（通知領域）にアイコンが表示されます。右クリックメニューでは、常に最前面に表示、コンパクト表示、トッププロセス表示、Toast 通知、Windows スタートアップ登録の切り替えと、表示項目の選択、設定ファイルとログファイルを開く操作、終了ができます。メニュー先頭にはバージョンを表示し、新しい版があればクリックで配布ページを開けます。
 
@@ -216,4 +219,4 @@ task build
 task release
 ```
 
-ビルドには MSVC cl.exe（Visual Studio 2022 または Build Tools 2022）が必要です。
+ビルドには MSVC cl.exe（Visual Studio 2022 または Build Tools 2022）が必要です。ビルド結果は `out\sysmeters.exe` に出力されます。
