@@ -43,7 +43,7 @@ WM_TIMER (1s) → Collectors → Metrics → Renderer → Direct2D → Window
 - **描画**：Direct2D + DirectWrite
 - **CPU/Disk/Net**：PDH（Performance Data Helper）
 - **GPU/VRAM**：NVML を `LoadLibrary` で動的ロード（GPU なしでも動作）
-- **CPU 温度**：WMI `root\WMI` `MSAcpi_ThermalZoneTemperature`（管理者権限必須）
+- **CPU 温度**：PawnIO ドライバ（`\\.\PawnIO`）経由の直接読み取り（Intel は MSR、AMD は SMN。管理者権限不要）
 - **Claude API**：WinHTTP + OAuth トークン（`~/.claude/.credentials.json`）
 - **設定**：TOML（toml11 シングルヘッダ）
 - **JSON**：nlohmann/json シングルヘッダ
