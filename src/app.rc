@@ -1,4 +1,44 @@
 // vim: set ft=rc fenc=utf-8 ff=unix :
+#include <winver.h>
 #include "resource.h"
 
 IDI_APP_ICON ICON "app.ico"
+
+// バージョン情報リソース
+// FileDescription と ProductName が空だと、Windows の各種アプリ一覧 UI（音量ミキサー、
+// ファイアウォールの許可アプリ等）がアプリ名のフォールバックとして exe の親フォルダ名を採用する。
+// Scoop 配置は `apps\sysmeters\<version>\sysmeters.exe` のため、名称がバージョン番号に見えてしまう。
+// この誤認を防ぐ目的で埋め込む。
+// APP_VERSION_NUM（カンマ区切り 4 数値）と APP_VERSION_STR（表示用文字列）は
+// build.ps1 が out\version.rc.h へ生成する。rc.exe は /I out 付きで呼ぶ必要がある。
+#include "version.rc.h"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    APP_VERSION_NUM
+PRODUCTVERSION APP_VERSION_NUM
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS      0x0L
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // 0409 = 米国英語、04B0 = Unicode。日本語環境でも文字化けせず読める組み合わせである
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "aviscaerulea"
+            VALUE "FileDescription",  "sysmeters"
+            VALUE "FileVersion",      APP_VERSION_STR
+            VALUE "InternalName",     "sysmeters"
+            VALUE "LegalCopyright",   "Copyright (c) 2026 aviscaerulea"
+            VALUE "OriginalFilename", "sysmeters.exe"
+            VALUE "ProductName",      "sysmeters"
+            VALUE "ProductVersion",   APP_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 0x04B0
+    END
+END
