@@ -2,7 +2,6 @@
 
 [![日本語](https://img.shields.io/badge/lang-日本語-red)](README.md)
 [![English](https://img.shields.io/badge/lang-English-blue)](README.en.md)
-
 [![Release](https://img.shields.io/github/v/release/aviscaerulea/sysmeters)](https://github.com/aviscaerulea/sysmeters/releases/latest)
 [![License](https://img.shields.io/github/license/aviscaerulea/sysmeters)](LICENSE)
 [![Build](https://github.com/aviscaerulea/sysmeters/actions/workflows/release.yml/badge.svg)](https://github.com/aviscaerulea/sysmeters/actions/workflows/release.yml)
