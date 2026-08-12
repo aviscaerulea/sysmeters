@@ -144,6 +144,12 @@ The 7d history is saved to a file in the temporary directory and, with the last 
 
 ### Steps
 
+#### From the release ZIP
+
+Download the zip from the [releases page](https://github.com/aviscaerulea/sysmeters/releases/latest) and extract it into any directory.
+
+#### From Scoop
+
 Install via [Scoop](https://scoop.sh/).
 
 ```powershell
@@ -151,7 +157,7 @@ scoop bucket add aviscaerulea https://github.com/aviscaerulea/scoop-bucket
 scoop install sysmeters
 ```
 
-Without Scoop, download the zip from the [releases page](https://github.com/aviscaerulea/sysmeters/releases/latest) and extract it into any directory.
+#### Uninstall
 
 Uninstalling leaves the following registry settings behind. Remove them manually if you no longer need them.
 
@@ -204,18 +210,3 @@ config_dir = "C:\\Users\\xxx\\.claude-sub"
 - Displaying CPU temperature requires the PawnIO driver; no temperature is shown until it is installed
 - Disk I/O display covers up to 8 fixed drives
 - The Claude Code section requires being logged in via `claude login`, and `Logout` is displayed while logged out
-
-## Build
-
-```powershell
-# Fetch dependencies (first time only)
-pwsh.exe scripts/fetch-deps.ps1
-
-# Build
-task build
-
-# Release build (zip packaging)
-task release
-```
-
-Building requires MSVC cl.exe (Visual Studio 2022 or Build Tools 2022). The build output is written to `out\sysmeters.exe`.
