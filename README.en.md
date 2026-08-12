@@ -164,7 +164,7 @@ When installed via Scoop, it starts as soon as installation completes. After tha
 
 When extracted from the zip, run `sysmeters.exe` in the extraction directory. The configuration file and the alert sound are read from the directory containing the executable, so keep the extracted files together.
 
-An icon appears in the system tray (notification area). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
+An icon appears in the system tray (notification area). Left-clicking the icon restores the window from the minimized state and brings it to the front once (without taking focus). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
 
 ## Configuration
 
