@@ -1119,8 +1119,21 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // タスクトレイイベント
     case WM_TRAY: {
         const UINT notif = LOWORD(lp);
-        if (notif == WM_LBUTTONUP || notif == WM_RBUTTONUP) SetForegroundWindow(hwnd_);
-        if (notif == WM_RBUTTONUP) show_context_menu();
+        if (notif == WM_LBUTTONUP) {
+            // 左クリック：最小化からの復元と、その場一度だけの前面化。
+            // 全ウィンドウ最小化ツール等に SW_MINIMIZE された HUD を自力で戻す導線。
+            // sysmeters は見るだけの HUD のため、作業中アプリのフォーカスは奪わない。
+            // （SW_SHOWNOACTIVATE + SWP_NOACTIVATE）
+            // HWND_TOP は Z 順の先頭へ一度出すだけで、「常に最前面」設定（topmost_）には影響しない
+            if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+            SetWindowPos(hwnd_, HWND_TOP, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+        if (notif == WM_RBUTTONUP) {
+            // 前面化しないとメニュー外クリックで TrackPopupMenu が閉じない（KB135788）
+            SetForegroundWindow(hwnd_);
+            show_context_menu();
+        }
         return 0;
     }
 
