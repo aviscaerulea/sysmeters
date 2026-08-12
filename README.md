@@ -144,6 +144,12 @@ Claude Code セクションは条件が多いため、色ごとに分けて整�
 
 ### 手順
 
+#### リリースの ZIP から
+
+[リリースページ](https://github.com/aviscaerulea/sysmeters/releases/latest)の zip をダウンロードし、任意のディレクトリへ展開します。
+
+#### Scoop から
+
 [Scoop](https://scoop.sh/) でインストールできます。
 
 ```powershell
@@ -151,7 +157,7 @@ scoop bucket add aviscaerulea https://github.com/aviscaerulea/scoop-bucket
 scoop install sysmeters
 ```
 
-Scoop を使わない場合は、[リリースページ](https://github.com/aviscaerulea/sysmeters/releases/latest)の zip をダウンロードし、任意のディレクトリへ展開します。
+#### アンインストール
 
 アンインストールしても、次のレジストリ設定は残ります。不要であれば手動で削除してください。
 
@@ -160,9 +166,9 @@ Scoop を使わない場合は、[リリースページ](https://github.com/avis
 
 ## 使い方
 
-Scoop でインストールした場合は、完了と同時に起動します。以降は `sysmeters` コマンドでも起動できます。
+Scoop でインストールしたときは、完了と同時に起動します。以降は `sysmeters` コマンドでも起動できます。
 
-zip を展開した場合は、展開先の `sysmeters.exe` を実行します。設定ファイルと警告音は実行ファイルと同じディレクトリから読み込むため、展開したファイルは分けずにまとめて置いてください。
+zip を展開したときは、展開先の `sysmeters.exe` を実行します。設定ファイルと警告音は実行ファイルと同じディレクトリから読み込むため、展開したファイルは分けずにまとめて置いてください。
 
 タスクトレイ（通知領域）にアイコンが表示されます。アイコンを左クリックすると、最小化中のウィンドウを復元して一時的に最前面へ表示します。（フォーカスは移しません）右クリックメニューでは、常に最前面に表示、コンパクト表示、トッププロセス表示、Toast 通知、Windows スタートアップ登録の切り替えと、表示項目の選択、設定ファイルとログファイルを開く操作、終了ができます。メニュー先頭にはバージョンを表示し、新しい版があればクリックで配布ページを開けます。
 
@@ -204,18 +210,3 @@ config_dir = "C:\\Users\\xxx\\.claude-sub"
 - CPU 温度の表示には PawnIO ドライバが必要で、未導入の間は温度を表示しない
 - Disk I/O の表示は固定ドライブ最大 8 台まで
 - Claude Code セクションは `claude login` によるログイン済みが前提で、未ログインの間は `Logout` を表示
-
-## ビルド
-
-```powershell
-# 依存ライブラリの取得（初回のみ）
-pwsh.exe scripts/fetch-deps.ps1
-
-# ビルド
-task build
-
-# リリースビルド（zip パッケージング）
-task release
-```
-
-ビルドには MSVC cl.exe（Visual Studio 2022 または Build Tools 2022）が必要です。ビルド結果は `out\sysmeters.exe` に出力されます。
