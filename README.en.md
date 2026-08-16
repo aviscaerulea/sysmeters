@@ -125,8 +125,9 @@ For accounts billed for usage beyond the plan limit, `over $X.X` is shown on the
 
 #### Bar Background Color (Underuse Detection)
 
-A display specific to the 7d bar. When it determines that the recent average consumption pace will not reach the target usage — that recovery is no longer possible — the background of the unused portion of the 7d bar turns dark blue. This is display only; no alert sound or Toast is raised. It occurs only when both of the following hold.
+A display specific to the 7d bar. When it determines that the recent average consumption pace will not reach the target usage — that recovery is no longer possible — the background of the unused portion of the 7d bar turns dark blue. This is display only; no alert sound or Toast is raised. It occurs only when all of the following hold.
 
+- The current usage rate is at or below the even-pace marker (green line); not shown while the pace is exceeded
 - The grace period (default 48 hours) has elapsed since the 7d window started (reset)
 - Even if consumption continues at the measured recent average pace for the remaining time, the projected final usage will not reach the target (default 98%)
 

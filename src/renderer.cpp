@@ -1317,15 +1317,21 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
     float five_h_delta_start  = calc_delta_start_pct(m.five_h_history,  cfg.claude_delta_window_min);
     float seven_d_delta_start = calc_delta_start_pct(m.seven_d_history, cfg.claude_delta_window_7d_min);
-    // 7d 使い切り不能検知：条件は次の 2 つのみ。（5h には検知を行わない）
+    // 7d 均等消費ペース位置（緑線）。使い切り不能検知の抑止判定と 7d バー描画で共用する
+    float seven_d_expected = claude_expected_pct(m.seven_d_resets_ts, CLAUDE_WIN_7D_SECS);
+    // 7d 使い切り不能検知：条件は次の 3 つすべて。（5h には検知を行わない）
     // (1) ウィンドウ開始（リセット）から underuse_grace_hours 時間以上経過している
-    // (2) 直近の実質平均消費ペース（calc_hist_rate。停止期間も分母に含む正味レート）で
+    // (2) 現在の使用率が均等消費ペース位置（緑線）以下＝ペースに追いついていない。
+    //     ペース超過中は「使い過ぎ」の警告色と「余らせる」の暗青背景が同居して状態を
+    //     判断できなくなるため抑止する。判定式は draw_bar の pace_warning と同形
+    // (3) 直近の実質平均消費ペース（calc_hist_rate。停止期間も分母に含む正味レート）で
     //     残り時間を外挿した予測到達率が underuse_warn_pct 未満
     //     （レート推定不可のときは reach_pct が -1 になり判定しない）
     // リセット直後は (1) が 48h（デフォルト）の間判定を止める。旧ウィンドウのサンプルは
     // 保持期間切れの破棄と、アンカーのウィンドウ開始チェック（collector 側）で基準にならない
     bool underuse_7d = false;
-    if (m.avail && cfg.claude_underuse_enable && m.seven_d_resets_ts > 0) {
+    bool pace_over_7d = seven_d_expected > 0.f && m.seven_d_pct > seven_d_expected;
+    if (m.avail && cfg.claude_underuse_enable && m.seven_d_resets_ts > 0 && !pace_over_7d) {
         double elapsed = CLAUDE_WIN_7D_SECS - (static_cast<double>(m.seven_d_resets_ts)
                                                - static_cast<double>(time(nullptr)));
         float rate  = calc_hist_rate(m.seven_d_history, cfg.claude_delta_window_7d_min, m.seven_d_pct);
@@ -1358,7 +1364,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
              claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS), 5, cfg.warn_claude_5h_pct,
              false, five_h_delta_start, 0.0, turns_left);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
-             claude_expected_pct(m.seven_d_resets_ts, CLAUDE_WIN_7D_SECS), 7, cfg.warn_claude_7d_pct,
+             seven_d_expected, 7, cfg.warn_claude_7d_pct,
              underuse_7d, seven_d_delta_start, CLAUDE_WIN_7D_SECS);
     // モデルスコープ（Fable 等）7d 専用ミニバー
     // 7d バー下端に隙間なく密着する塗り矩形のみ（縦幅は cfg.claude_scoped_bar_px、0 = 非表示）。
