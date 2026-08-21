@@ -54,6 +54,25 @@ static constexpr double NEGATIVE_TTL = 60.0;
 // 有界のため、90 秒を超える継続は WinHTTP 内部ハング等の異常とみなす
 static constexpr uint64_t FETCH_STALL_TIMEOUT_MS = 90000;
 
+// 同一間隙における nudge の最大発火回数（初回を含む）
+// 起動した claude.exe が消費に至らず間隙が続くときの救済に使う。上限を設ける理由は、
+// claude.exe 側の恒久的な失敗（認証切れ、CLI 未インストール等）で間隙が解消しないとき、
+// プロセス起動を無制限に繰り返さないため
+static constexpr int NUDGE_MAX_ATTEMPTS = 3;
+
+// nudge を再発火するまでの最小間隔（ms）。間隙キーの異同に依らない大域下限。
+// claude.exe の起動から消費が Usage API へ反映されるまでの遅延（数分）を十分に超える値とする。
+// 短すぎると成功した nudge を空振りと誤認して重複起動する。
+// キーが変わった場合にも適用する理由：API 応答形式の揺れ（resets_at の null 形式と過去値形式）で
+// キーが交互に変化すると、キー一致のみの抑止ではフェッチ周期（60 秒）ごとの連続起動になり得るため
+static constexpr uint64_t NUDGE_RETRY_INTERVAL_MS = 30 * 60 * 1000;
+
+// 発火回数の再武装間隔（ms）。前回発火からこの時間が経過したら新しい間隙とみなし、
+// 発火回数を数え直す。5h ウィンドウ長に合わせた値。
+// 再武装が無いと、一時要因（ネットワーク断、スリープ、認証切れ）で NUDGE_MAX_ATTEMPTS 回を
+// 使い切った間隙は要因解消後も発火せず、アプリ再起動まで nudge が止まる構造が残るため
+static constexpr uint64_t NUDGE_REARM_INTERVAL_MS = 5ULL * 60 * 60 * 1000;
+
 // キャッシュ JSON を読む。TTL 内なら内容を返す。期限切れなら null。
 // エラーキャッシュ（"error" フィールドあり）は NEGATIVE_TTL で判定する。
 static json read_cache(const fs::path& path, double ttl) {
@@ -435,6 +454,74 @@ static void clear_negative_cache(const fs::path& path) {
     catch (...) {}
 }
 
+// 間隙 key に対する nudge 発火権の要求
+//
+// 発火してよいなら true を返し、発火状態（キー・回数・時刻）を更新する。
+// key はその間隙を識別する 5h resets_ts（終了ウィンドウが不明な間隙では番兵 1）。
+//
+// 判定は次の順で行う。
+// - 大域下限：前回発火から NUDGE_RETRY_INTERVAL_MS 未満は、キーの異同に依らず拒否する
+// - 再武装：前回発火から NUDGE_REARM_INTERVAL_MS 以上経過していたら新しい間隙とみなす
+// - 新しい間隙（キー変化または再武装）：許可し、発火回数を 1 から数え直す
+// - 同じ間隙の継続：NUDGE_MAX_ATTEMPTS 回まで再発火を許可する
+//
+// 再試行を設けた背景：nudge が成功すれば新しい 5h ウィンドウが始まり、呼び出し元が
+// 監視対象を更新して間隙が解消する。しかし claude.exe の起動が空振りすると呼び出し元は
+// 監視対象を更新せず key が変化しないため、キー一致のみで抑止すると以後アプリ再起動まで
+// 二度と発火しない状態に陥る。実際にサブアカウントで 2 日以上発火が止まる事象が起きた。
+// 再武装を設けた背景：resets_at が常に null のアカウントではキーが番兵 1 に固定され、
+// キー変化による数え直しが起きない。回数上限だけでは使い切り後に恒久停止するため、
+// 時間経過でも数え直す。
+bool ClaudeCollector::claim_nudge(time_t key) {
+    uint64_t tick = GetTickCount64();
+
+    // 大域下限（初回発火は last_nudge_tick_ == 0 なので通す）
+    if (last_nudge_tick_ != 0 && tick - last_nudge_tick_ < NUDGE_RETRY_INTERVAL_MS) return false;
+
+    bool rearm = (last_nudge_tick_ != 0 && tick - last_nudge_tick_ >= NUDGE_REARM_INTERVAL_MS);
+    if (key != last_nudge_resets_ts_ || rearm) {
+        last_nudge_resets_ts_ = key;
+        nudge_attempts_       = 1;
+        last_nudge_tick_      = tick;
+        return true;
+    }
+
+    if (nudge_attempts_ >= NUDGE_MAX_ATTEMPTS) return false;
+
+    ++nudge_attempts_;
+    last_nudge_tick_ = tick;
+    return true;
+}
+
+// 直近 nudge プロセスの終了確認と終了コードの記録
+//
+// ノンブロッキングでポーリングする。終了していれば終了コードをログへ残し、ハンドルを解放する。
+// 未終了なら何もせず次回の呼び出しへ持ち越す。ノンブロッキングなのはフェッチスレッドを
+// 待たせないため。claude.exe の所要（数秒〜数十秒）はフェッチ周期（60 秒）内に収まるため、
+// 実用上 1 周期で回収できる。
+//
+// 終了コードは空振りの診断材料として記録する。非 0 は起動失敗が確定するが、0 でも消費に
+// 至ったとは限らない（Usage API への反映は別途 5h 使用率で確認する）。
+// 終了コードの取得に失敗したときは、根拠のない値を残さないよう取得不能である旨をログする。
+void ClaudeCollector::reap_nudge() {
+    if (!nudge_proc_) return;
+    if (WaitForSingleObject(nudge_proc_, 0) != WAIT_OBJECT_0) return;
+
+    DWORD code = 0;
+    if (!GetExitCodeProcess(nudge_proc_, &code)) {
+        log_error("claude nudge: exited but GetExitCodeProcess failed (err=%lu, account=%d)",
+                  GetLastError(), account_index_);
+    }
+    else if (code != 0) {
+        log_error("claude nudge: exited with code %lu (account=%d)", code, account_index_);
+    }
+    else {
+        log_info("claude nudge: exited with code %lu (account=%d)", code, account_index_);
+    }
+    CloseHandle(nudge_proc_);
+    nudge_proc_ = nullptr;
+}
+
 // 5h リセット通過後の未消費間隙 nudge：claude.exe を環境変数で構成して起動する
 //
 // presumed = false はフェッチ成功データで間隙を確認した通常発火、true はフェッチ失敗（ERR）中に
@@ -445,10 +532,23 @@ static void clear_negative_cache(const fs::path& path) {
 // 起動する。Claude CLI には --config-dir コマンドオプションが存在せず、設定ディレクトリの上書きは
 // CLAUDE_CONFIG_DIR 環境変数経由でのみ可能なため。sysmeters 自身のプロセス親環境は変更せず、
 // CreateProcess の lpEnvironment で子プロセスにだけ設定する。
+//
+// 起動したプロセスのハンドルは終了コード回収のため nudge_proc_ に保持する。
+// 前回起動分が未終了のまま残っていれば監視を諦め、ハンドルだけ手放してプロセス自体は放置する。
+// claim_nudge の大域下限により発火間隔はフェッチ周期の数十倍が保証されるため、
+// ここに来る時点で前回は異常な長時間実行だと判断できる。
 void ClaudeCollector::run_nudge(bool presumed) {
-    log_info("claude nudge: 5h window gap %s, running (account=%d): %s",
+    log_info("claude nudge: 5h window gap %s, running (account=%d, attempt=%d/%d): %s",
              presumed ? "presumed (usage fetch failing)" : "detected",
-             account_index_, nudge_cmd_.c_str());
+             account_index_, nudge_attempts_, NUDGE_MAX_ATTEMPTS, nudge_cmd_.c_str());
+
+    reap_nudge();
+    if (nudge_proc_) {
+        log_error("claude nudge: previous process still running, stop tracking it (account=%d)",
+                  account_index_);
+        CloseHandle(nudge_proc_);
+        nudge_proc_ = nullptr;
+    }
 
     // nudge_cmd_（UTF-8）を Wide へ変換する。CreateProcessW の第 2 引数は書き換え可能バッファ
     int wlen = MultiByteToWideChar(CP_UTF8, 0, nudge_cmd_.c_str(), -1, nullptr, 0);
@@ -499,7 +599,7 @@ void ClaudeCollector::run_nudge(bool presumed) {
     if (CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE,
                        flags, lp_env, nullptr, &si, &pi)) {
         CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
+        nudge_proc_ = pi.hProcess;
     }
     else {
         log_error("claude nudge: CreateProcess failed (err=%lu)", GetLastError());
@@ -512,6 +612,11 @@ void ClaudeCollector::do_fetch() {
     // 終端で pending_ 更新・WM_CLAUDE_DONE 通知・fetching_ 復帰をスキップし、遅延復帰した
     // 旧スレッドが新世代の状態を破壊しないようにする
     uint32_t my_gen = fetch_gen_.load();
+
+    // 前回 nudge プロセスの終了コードをフェッチ周期のポーリングとして回収する。
+    // 世代ガード：watchdog に放棄された旧スレッドが nudge 状態（nudge_proc_ 等）へ触れると、
+    // 新スレッドと排他なしで競合し二重 CloseHandle になり得るため、自世代のときのみ回収する
+    if (my_gen == fetch_gen_.load()) reap_nudge();
 
     // 初回フェッチ時はネガティブキャッシュを削除して必ず API を叩く
     if (first_fetch_) {
@@ -564,41 +669,45 @@ void ClaudeCollector::do_fetch() {
     // --- 5h リセット通過の nudge（claude.exe 起動による次ウィンドウの消費促進）---
     // アクティブな 5h ウィンドウ（未来の resets_ts）を監視対象として記憶し、
     // 「監視対象が過去 かつ 現在アクティブウィンドウが無い」＝リセット通過後に消費が
-    // 始まっていない間隙を検知したら、そのウィンドウにつき 1 回 nudge_cmd を起動する。
+    // 始まっていない間隙を検知したら nudge_cmd を起動する。原則は間隙につき 1 回で、
+    // 空振りして間隙が続くときのみ claim_nudge が NUDGE_MAX_ATTEMPTS 回まで再試行を許可する。
     // 間隙は API の応答形式 2 通りで現れる：resets_at が null になる形式（rts = -1）と、
     // 過去の resets_at を返し続ける形式（rts が過去値）。
     // 監視対象は init 時のキャッシュ復元値でも種付けされるため、起動直後の間隙でも発火する。
     // nudge が機能して新ウィンドウが始まれば監視対象の更新側へ入るため、重複発火しない。
     // フェッチ失敗（ERR）中も、把握済み監視対象のリセット時刻通過は時計だけで確定できるため
     // 推定発火する（下の else if）。新ウィンドウが既に始まっているかは確認できないが、
-    // 誤発火コストは極小（デフォルト cmd は haiku への極小プロンプト 1 回）で、重複はキー記録で
-    // 抑止される。401 認証切れ由来の ERR では claude.exe 起動がトークンを更新し ERR 自体を
-    // 治癒する副次効果もある。監視対象が未観測（-1）の間は根拠が無いため発火しない。
-    if (usage_j != nullptr && result.avail) {
-        time_t now = static_cast<time_t>(now_ts());
-        time_t rts = result.five_h_resets_ts;   // -1 = アクティブウィンドウ無し（API null 応答）
-        if (rts > now) {
-            watched_5h_resets_ts_ = rts;
-        }
-        else if (nudge_enable_) {
-            // 終了したウィンドウの識別子が不明なケース（null 形式の間隙中に起動し、キャッシュにも
-            // resets_at が残っていない）は固定キー 1 で 1 回だけ発火させる。間隙の存在自体は
-            // フェッチ成功データで確認できているため発火が正しく、重複はキーの記録で抑止できる
-            time_t ended = (rts > 0) ? rts
-                         : (watched_5h_resets_ts_ > 0) ? watched_5h_resets_ts_ : 1;
-            if (ended <= now && ended != last_nudge_resets_ts_) {
-                last_nudge_resets_ts_ = ended;
-                run_nudge(false);
+    // 誤発火コストは極小（デフォルト cmd は haiku への極小プロンプト 1 回）で、重複は
+    // claim_nudge が抑止する。401 認証切れ由来の ERR では claude.exe 起動がトークンを更新し
+    // ERR 自体を治癒する副次効果もある。監視対象が未観測（-1）の間は根拠が無いため発火しない。
+    // 世代ガード：nudge 状態（監視対象・発火記録・nudge_proc_）は排他なしの単一スレッド前提の
+    // ため、watchdog に放棄された旧スレッドは触れない（reap_nudge のガードと同じ理由）
+    if (my_gen == fetch_gen_.load()) {
+        if (usage_j != nullptr && result.avail) {
+            time_t now = static_cast<time_t>(now_ts());
+            time_t rts = result.five_h_resets_ts;   // -1 = アクティブウィンドウ無し（API null 応答）
+            if (rts > now) {
+                watched_5h_resets_ts_ = rts;
+                nudge_attempts_ = 0;   // 間隙が解消した＝再試行の必要が無くなった
+            }
+            else if (nudge_enable_) {
+                // 終了したウィンドウの識別子が不明なケース（null 形式の間隙中に起動し、キャッシュにも
+                // resets_at が残っていない）は固定キー 1 で発火させる。間隙の存在自体は
+                // フェッチ成功データで確認できているため発火が正しく、重複は claim_nudge が抑止できる
+                time_t ended = (rts > 0) ? rts
+                             : (watched_5h_resets_ts_ > 0) ? watched_5h_resets_ts_ : 1;
+                if (ended <= now && claim_nudge(ended)) {
+                    run_nudge(false);
+                }
             }
         }
-    }
-    else if (usage_j == nullptr && nudge_enable_ && watched_5h_resets_ts_ > 0) {
-        // ERR 経路：監視対象の時計通過のみを根拠に推定発火する。キーに watched 値を記録する
-        // ため、ERR 復旧後の成功フェッチが同じ間隙を検知しても再発火しない
-        time_t now = static_cast<time_t>(now_ts());
-        if (watched_5h_resets_ts_ <= now && watched_5h_resets_ts_ != last_nudge_resets_ts_) {
-            last_nudge_resets_ts_ = watched_5h_resets_ts_;
-            run_nudge(true);
+        else if (usage_j == nullptr && nudge_enable_ && watched_5h_resets_ts_ > 0) {
+            // ERR 経路：監視対象の時計通過のみを根拠に推定発火する。キーに watched 値を記録する
+            // ため、ERR 復旧後の成功フェッチが同じ間隙を検知しても即座には再発火しない
+            time_t now = static_cast<time_t>(now_ts());
+            if (watched_5h_resets_ts_ <= now && claim_nudge(watched_5h_resets_ts_)) {
+                run_nudge(true);
+            }
         }
     }
 
@@ -1079,12 +1188,18 @@ bool ClaudeCollector::wait_shutdown() {
         hs.push_back(fetch_thread_);
         fetch_thread_ = nullptr;
     }
-    if (hs.empty()) return true;
-
-    DWORD wr = WaitForMultipleObjects(static_cast<DWORD>(hs.size()), hs.data(), TRUE, 15000);
+    DWORD wr = hs.empty() ? WAIT_OBJECT_0
+             : WaitForMultipleObjects(static_cast<DWORD>(hs.size()), hs.data(), TRUE, 15000);
     bool ok = (wr != WAIT_TIMEOUT && wr != WAIT_FAILED);
     if (ok) {
         for (HANDLE h : hs) CloseHandle(h);
+        // nudge プロセスハンドルは fetch スレッド専用のため、その終了確認後にのみ解放できる。
+        // 待機対象スレッドが 1 本も無いときも安全に解放できるため、この成功経路に含める。
+        // 起動した claude.exe 自体は終了させず放置する（プロンプト実行を完遂させる）
+        if (nudge_proc_) {
+            CloseHandle(nudge_proc_);
+            nudge_proc_ = nullptr;
+        }
     }
     else {
         log_error("ClaudeCollector::shutdown fetch thread(s) did not exit (wait=%lu)", wr);
