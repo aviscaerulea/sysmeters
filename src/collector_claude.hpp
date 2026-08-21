@@ -80,6 +80,18 @@ private:
     // nudge 発火済みウィンドウの resets_ts（重複抑制キー）。
     // 値 1 は「終了ウィンドウの識別子が不明な間隙で発火済み」を示す番兵
     time_t             last_nudge_resets_ts_ = -1;
+    // 同一間隙での nudge 発火回数。間隙が解消（アクティブウィンドウを観測）した時点で 0 に戻す。
+    // 起動した claude.exe が消費に至らなかったときの再試行上限に使う。
+    // claim_nudge の再武装（一定時間経過で新しい間隙とみなす）でも 1 から数え直す
+    int                nudge_attempts_ = 0;
+    // 直近 nudge 発火時刻（GetTickCount64 の ms、単調時計）。0 = 未発火。
+    // system_clock を避けるのは NTP 補正等のシステム時刻の飛びで再試行間隔が壊れるため
+    uint64_t           last_nudge_tick_ = 0;
+    // 直近 nudge で起動した claude.exe のプロセスハンドル（nullptr = 監視対象なし）。
+    // 終了コードを次回フェッチ時にポーリング回収するため保持する。
+    // 現行世代の fetch スレッド専用（watchdog に放棄された旧スレッドは世代ガードで触れない）。
+    // 解放は fetch スレッドの終了確認後に wait_shutdown も行う
+    HANDLE             nudge_proc_ = nullptr;
     std::atomic<bool>  fetching_   = false;
     // fetch スレッドの世代番号。update() が新スレッド起動または watchdog リセットを行うたびに
     // インクリメントする。do_fetch は起動時に自世代を捕獲し、終端で「自世代のときのみ
@@ -120,8 +132,13 @@ private:
 
     static DWORD WINAPI fetch_thread(LPVOID param);
     void do_fetch();
+    // 間隙 key に対する nudge 発火権を要求する。発火してよいなら true を返し、発火状態を更新する。
+    // key は間隙を識別する resets_ts（不明時は番兵 1）。詳細は実装側コメント参照
+    bool claim_nudge(time_t key);
     // presumed = true は ERR 経路（フェッチ失敗中の時計ベース推定発火）を示し、ログ文言を区別する
     void run_nudge(bool presumed);
+    // 直近 nudge プロセスの終了をノンブロッキングで確認し、終了していれば終了コードをログへ残す
+    void reap_nudge();
     std::string get_token();
 };
 
