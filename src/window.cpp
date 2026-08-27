@@ -567,12 +567,19 @@ void AppWindow::open_config_file() {
 // log_get_dir() で解決済みのログディレクトリを取得し、
 // 当日の sysmeters_YYYYMMDD.log を ShellExecuteW で開く。
 // ファイルが存在しない場合（まだ何も記録されていない等）はディレクトリを開く。
+// 連結後のパスが MAX_PATH を超える場合も同様にディレクトリを開く（logger.cpp と同じ防御）。
 void AppWindow::open_log_file() {
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t path[MAX_PATH];
-    swprintf_s(path, L"%s\\sysmeters_%04d%02d%02d.log",
-               log_get_dir(), st.wYear, st.wMonth, st.wDay);
+    // パスが上限長を超えると swprintf_s は invalid parameter handler を起動してプロセスを落とす。
+    // log_get_dir() は [log] dir の指定次第で 259 文字まで伸びるため、切り捨て検知型で連結し、
+    // 溢れた場合は切り捨てたパスを評価せずディレクトリを開く方へ倒す（logger.cpp:31-34 と同じ方針）
+    if (_snwprintf_s(path, _TRUNCATE, L"%s\\sysmeters_%04d%02d%02d.log",
+                     log_get_dir(), st.wYear, st.wMonth, st.wDay) < 0) {
+        ShellExecuteW(nullptr, L"open", log_get_dir(), nullptr, nullptr, SW_SHOW);
+        return;
+    }
 
     // ファイルが存在しない場合はディレクトリを開く
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
