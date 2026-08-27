@@ -54,7 +54,7 @@ cpu_pct = 80.5
 }
 
 TEST_CASE("load_config: 警告音リセット閾値も整数リテラルで読み込まれる") {
-    // 同梱 sysmeters.toml の reset_mem_pct = 70 等が反映される経路を検証する。
+    // 警告音リセット閾値は整数リテラルで記述され得るため、その読み取り経路を検証する。
     auto path = write_temp_toml(R"(
 [threshold]
 mem_pct       = 80
