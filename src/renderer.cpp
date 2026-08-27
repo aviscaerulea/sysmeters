@@ -860,7 +860,7 @@ float Renderer::draw_disk(const std::vector<DiskMetrics>& disks, const Visibilit
 
         // テキスト行（"Used:" は font_tiny_・補助情報トーン・右寄せ、パーセンテージは font_small_・条件付き色・右寄せ）
         // "Used:" は Sessions: 行とフォントサイズ・色を揃え、"100.0%" 分のスペースを空けて右に詰める
-        // IO 行と同様に、font_normal_ プレフィックス（Disk[X]）とベースラインを揃えるため DISK_TEXT_DROP 分下げる
+        // IO 行と同様に、font_normal_ プレフィックス（Disk:X）とベースラインを揃えるため DISK_TEXT_DROP 分下げる
         // さらに font_small_ (18pt) と font_tiny_ (16pt) のベースライン差を相殺するためラベル矩形を 2px 追加で下げる
         static constexpr float PCT_RESERVE_W = 62.f;  // "100.0%" が font_small_ で占める想定幅
         D2D1_RECT_F str = D2D1::RectF(sx, y + DISK_TEXT_DROP, sx + sw, y + LINE_H + DISK_TEXT_DROP);
