@@ -55,7 +55,9 @@ $amdDest = Join-Path $dataDir "AMDFamily17.bin"
 if (-not (Test-Path $msrDest) -or -not (Test-Path $amdDest)) {
     Write-Host "Downloading PawnIO.Modules..."
     $zipUrl = "https://github.com/namazso/PawnIO.Modules/releases/download/0.2.4/release_0_2_4.zip"
-    $zipTemp = [System.IO.Path]::GetTempFileName() + ".zip"
+    # GetTempFileName は 0 バイトの .tmp を実際に作るため、末尾に .zip を足すと元の .tmp が残留する。
+    # ファイルを作らないパス生成に統一し、末尾の Remove-Item で後始末を完結させる
+    $zipTemp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName() + ".zip")
     Invoke-WebRequest -Uri $zipUrl -OutFile $zipTemp
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead($zipTemp)
