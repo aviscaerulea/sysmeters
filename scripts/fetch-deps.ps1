@@ -1,7 +1,9 @@
 # vim: set ft=ps1 fenc=utf-8 ff=unix sw=4 ts=4 et :
 # ==================================================
-# 依存ヘッダオンリーライブラリの取得スクリプト
-# toml11 と nlohmann/json を include/ に配置する
+# ビルド依存物の取得と生成スクリプト
+# 1. include/ へ toml11・nlohmann/json・doctest のシングルヘッダを配置する
+# 2. data/ へ PawnIO.Modules の IntelMSR.bin と AMDFamily17.bin を展開する
+# 3. src/pawnio_hashes.hpp を上記バイナリの SHA-256 から自動生成する
 # ==================================================
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
