@@ -77,7 +77,7 @@ Displays 5h / 7d rate limit usage (horizontal bars), reset times, and session co
 
 ### Claude Code Nudge
 
-A feature that automatically launches `claude.exe` at the moment it detects the gap after a 5h window reset where rate limit consumption has not yet started (including immediately after startup, once per gap), encouraging consumption in the next window. Default is off.
+A feature that automatically launches `claude.exe` at the moment it detects the gap after a 5h window reset where rate limit consumption has not yet started (including immediately after startup, normally once per gap), encouraging consumption in the next window. Default is off.
 
 If the launched `claude.exe` does not lead to consumption and the gap persists, it launches up to 3 times including the first, at 30-minute intervals. Without retries, a single miss would prevent the nudge from firing again until sysmeters is restarted. If the gap still persists after all 3 attempts, the 3-attempt budget is rearmed every 5 hours after the last launch. The exit code of the launched `claude.exe` is recorded in the log.
 
