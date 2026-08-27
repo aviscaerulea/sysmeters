@@ -332,7 +332,7 @@ static bool json_bool(const nlohmann::json& j, const char* key, bool def) {
 // usage_j が null の場合は何もしない。成功時のみ result.avail を true にし、
 // キャッシュ JSON に付与された "_ts"（do_fetch がキャッシュ保存時に付与、新規取得・
 // キャッシュヒット・起動時復元のいずれでも保持）を result.fetched_ts に生値のまま格納し、
-// あわせてローカル時刻 "HH:MM" に整形して result.fetched_at へ格納する。
+// あわせてローカル時刻 "H:MM"（時はゼロ埋めなし）に整形して result.fetched_at へ格納する。
 // （fetched_at は画面表示用の取得時刻鮮度インジケータ、fetched_ts はペース追跡のサンプル時刻）
 static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
     if (usage_j == nullptr) return;

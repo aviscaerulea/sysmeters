@@ -168,7 +168,7 @@ struct ClaudeMetrics {
     float seven_d_scoped_pct = -1.f;
     wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
-    wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、未取得時は空文字）
+    wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "H:MM"、時はゼロ埋めなし。未取得時は空文字）
     time_t fetched_ts = 0;            // Usage API 実フェッチ時刻（UTC time_t、fetched_at の元値。未取得時 0）
     // 5h / 7d 使用率の時系列（各 delta ウィンドウの N+1 分を保持）
     // apply_result 呼び出し時に push し、保持期間外を先頭から破棄する。
