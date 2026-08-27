@@ -405,8 +405,8 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
     }
     if (n == 0) return;
 
-    // ラベル最大長は AlertManager::label の最長文字列で約 17 wchar、
-    // 4 行で 70 wchar 程度と szInfo 容量（256 wchar）に十分収まる
+    // ラベル最大長は AlertManager::label の最長文字列（Claude Main 上位モデル 7d レートリミット）で 28 wchar、
+    // 本文は最大 3 行のため全角スペースと改行込みで 90 wchar 程度と szInfo 容量（256 wchar）に十分収まる
     // ※ Win11 新通知 UI（XAML）では szInfo 先頭の改行がトリムされる OS バージョンがある
     const size_t cap  = std::size(nid.szInfo);
     // 表示行数の調整：4 件以上は先頭 2 件 + 「ほか N 件」にまとめる
