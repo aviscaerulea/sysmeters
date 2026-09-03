@@ -368,6 +368,11 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         }
 
         // 超過料金情報（extra_usage）
+        // 呼び出し元は前回値を引き継いだ result を渡すため、判定前に必ず未提供既定値へ
+        // リセットする。レスポンスから extra_usage が消えた（欠落・null）場合に
+        // 古い超過額と over 表示が残り続けるのを防ぐ（seven_d_scoped_pct と同じ契約）
+        result.extra_enabled      = false;
+        result.extra_used_dollars = 0.f;
         if (usage_j.contains("extra_usage") && usage_j.at("extra_usage").is_object()) {
             const json& eu = usage_j.at("extra_usage");
             result.extra_enabled      = json_bool(eu, "is_enabled", false);
