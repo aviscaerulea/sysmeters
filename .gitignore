@@ -1,18 +1,39 @@
-out/
-build.txt
+# デフォルト全除外
+*
+
+# 管理対象ファイル
+!/.gitignore
+!/CLAUDE.md
+!/LICENSE
+!/README.md
+!/README.en.md
+!/Taskfile.yml
+!/build.ps1
+!/build-tests.ps1
+!/sysmeters.toml
+
+# 管理対象ディレクトリ
+!/.github/
+!/.github/**
+!/data/
+!/data/**
+!/docs/
+!/docs/**
+!/scripts/
+!/scripts/**
+!/src/
+!/src/**
+!/tests/
+!/tests/**
+
+# 管理対象内の除外
+*.local.*
+**/.env
+# fetch-deps.ps1 が PawnIO モジュールのハッシュから生成する
+/src/pawnio_hashes.hpp
+# ビルド中間物は out/ 配下に出るが、手動コンパイル等での混入に備えて拡張子でも除外する
 *.obj
 *.pdb
 *.ilk
 *.exp
 *.lib
-*.local.*
-include/toml.hpp
-include/json.hpp
-include/doctest.h
-src/pawnio_hashes.hpp
-.clasp.json
-**/.env
-.serena/
-.task/
-# Added by code-review-graph
-.code-review-graph/
