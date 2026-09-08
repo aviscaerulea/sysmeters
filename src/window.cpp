@@ -1090,8 +1090,14 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         else if (wp == TIMER_ANIM) {
-            // コアバー補間アニメーション（30fps）：変化があれば再描画。警告チェック・ウィンドウリサイズは不要
-            if (renderer_->update_core_animation(metrics_->cpu))
+            // コアバー補間アニメーション（30fps）：変化があれば再描画。警告チェック・ウィンドウリサイズは不要。
+            // Claude ヘッダの直近使用ドットが明滅中は補間が収束していても再描画を続けるが、
+            // 明滅だけのための全画面再描画は 4 tick に 1 回（約 7.5fps）に間引く。
+            // 周期 2 秒の正弦波には十分な滑らかさで、CPU アイドル時の再描画負荷を 1/4 に抑える
+            static unsigned anim_tick = 0;
+            ++anim_tick;
+            const bool dot_frame = renderer_->recent_dot_active() && (anim_tick % 4 == 0);
+            if (renderer_->update_core_animation(metrics_->cpu) || dot_frame)
                 InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }

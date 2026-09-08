@@ -63,6 +63,10 @@ public:
     // true の場合は呼び出し元が InvalidateRect を行う。
     bool update_core_animation(const CpuMetrics& m);
 
+    // 直前の paint で Claude ヘッダの直近使用ドット（明滅）を描いたら true。
+    // TIMER_ANIM がコアバー補間の停止中でも再描画を継続するための判定に使う
+    bool recent_dot_active() const { return recent_dot_drawn_; }
+
     // WM_SIZE 時にレンダーターゲットのサイズを変更する。
     // デバイスロスト時のリソース再作成は paint() 側（EndDraw の D2DERR_RECREATE_TARGET 検知）が担う。
     void resize(UINT w, UINT h);
@@ -106,6 +110,8 @@ private:
 
     // コアバーのアニメーション補間用表示値（update_core_animation で更新）
     std::vector<float> core_disp_;
+    // 直前の paint で直近使用ドットを描いたか（paint 冒頭でクリア、描画時にセット）
+    bool recent_dot_drawn_ = false;
 
     // トッププロセス表示の状態（CPU/GPU 別）
     // shown は既存ヒステリシス用の前回表示状態。（表示中は閾値を 0.8 倍に緩めて点滅を防ぐ）

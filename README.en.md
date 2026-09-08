@@ -67,11 +67,12 @@ Displays 5h / 7d rate limit usage (horizontal bars), reset times, and session co
 - The green vertical line on the horizontal bar is the even-pace marker (the ideal consumption position if usage were spread evenly over the time remaining until reset)
 - To the right of the 5h bar (aligned with the month digits of the 7d reset timestamp) is the number of 5h turns remaining before the 7d reset, including the turn in progress
 - The 5h / 7d bars overlay the usage increase over the last N minutes in a darker shade (the same color as the RAM WSL overlay) to visualize the consumption pace
+- To the left of the fetch time in the header, a dot in the same darker shade pulses only while there has been consumption recently (within the last 5 minutes by default)
 - Directly below the 7d bar, a gray mini bar shows consumption of the dedicated 7d quota for higher-tier models such as Fable (only for accounts whose Usage API returns a dedicated quota)
 - When the dedicated quota reaches 100%, the mini bar changes to the warning color and raises a per-account alert sound and Toast notification (reset once it falls back below 100%)
 - The latest data is force-fetched at the top of every hour
 - Session counts are determined from each `claude.exe` process's `CLAUDE_CONFIG_DIR` environment variable and tallied separately per account
-- To the left of the Sessions label, the timestamp of the most recent Usage API fetch (`H:MM` format) is displayed in the same color and size, so data freshness can be confirmed
+- To the left of the Sessions label, the timestamp of the most recent Usage API fetch (`HH:MM` format, hour without zero padding) is displayed in the same color and size, so data freshness can be confirmed
 - While the Usage API cannot be fetched, `Err` is displayed in red to the right of the plan name
 - While logged out (no OAuth token), `Logout` is displayed regardless of fetch success, and re-authentication via `claude login` is required
 
@@ -123,7 +124,7 @@ While the 7d bar is in a warning state, the time remaining until the warning cle
 
 #### Overage Charge Text
 
-For accounts billed for usage beyond the plan limit, `over $X.X` is shown on the header row. The text turns red once the overage exceeds the threshold.
+For accounts billed for usage beyond the plan limit, the overage amount `$X.X` is shown on the header row. The text turns red once the overage exceeds the threshold.
 
 #### Bar Background Color (Underuse Detection)
 

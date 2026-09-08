@@ -1010,14 +1010,14 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         text_cursor = static_cast<int>(wcslen(err_buf));
     }
 
-    // 超過料金テキスト（閾値超で赤）
+    // 超過料金テキスト（閾値超で赤）。"over" は付けず金額のみ（ヘッダ行の横幅節約）
     // Consolas はモノスペースのためプラン名文字数分スペースを先頭に積むことで横位置を合わせる
     if (m.extra_enabled) {
         wchar_t over_buf[80];
         int pad = text_cursor;
         wmemset(over_buf, L' ', pad);
         // _countof は size_t なので int 演算のため明示キャスト。pad は wcslen 起源で常に _countof 以下
-        swprintf_s(over_buf + pad, static_cast<int>(_countof(over_buf)) - pad, L"  over $%.1f", m.extra_used_dollars);
+        swprintf_s(over_buf + pad, static_cast<int>(_countof(over_buf)) - pad, L"  $%.1f", m.extra_used_dollars);
         uint32_t over_col = (m.extra_used_dollars > cfg.warn_claude_over) ? COL_WARN_RED : cfg.col_text;
         set_brush_color(brush_text_, over_col);
         render_target_->DrawText(over_buf, static_cast<UINT32>(wcslen(over_buf)), font_small_, hsr, brush_text_);
@@ -1028,7 +1028,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     else
         swprintf_s(sess_buf, L"Sessions:%3d", m.session_count);
     // CPU セクションの Proc/Thread/Handle 行と同じ補助情報トーン（16pt、アルファ 0.6）に揃え、視覚的な主張を抑える
-    // 先頭の H:MM（時はゼロ埋めなし）は Usage API の直近取得時刻。（鮮度インジケータ）未取得時は空文字で Sessions のみ表示
+    // 先頭の HH:MM（時はゼロ埋めなしの 2 桁右寄せ）は Usage API の直近取得時刻。（鮮度インジケータ）未取得時は空文字で Sessions のみ表示
     // プラン名 etc とフォントサイズが違うため、ベースラインを揃えるために専用矩形を 4px 下げる
     D2D1_RECT_F ssr = D2D1::RectF(hsr.left, hsr.top + 4.f, hsr.right, hsr.bottom + 4.f);
     set_brush_color(brush_text_, cfg.col_text, 0.6f);
@@ -1317,6 +1317,32 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
     float five_h_delta_start  = calc_delta_start_pct(m.five_h_history,  cfg.claude_delta_window_min);
     float seven_d_delta_start = calc_delta_start_pct(m.seven_d_history, cfg.claude_delta_window_7d_min);
+
+    // 直近使用ドット：ヘッダ行右側の取得時刻・Sessions テキストの直前に ● を置き、
+    // 直近 delta_window_min 分以内に 5h 使用率が増えている間だけ明滅させる。
+    // 表示条件は 5h 濃色オーバーレイと同一（1 対 1）。量はバーの濃色、鮮度はこのドットが担う。
+    // 濃色自体を明滅させると「増加分が無い」と誤認するため、鮮度は独立した要素で表す。
+    // 色は濃色と同じ COL_WSL_MEM で「直近消費」の意味を揃え、アルファを 0.25〜1.0 の
+    // 正弦波（周期 2 秒）で明滅させる。位相は GetTickCount64 から都度算出し状態を持たない。
+    // 横位置は sess_buf の最大文字数（"HH:MM  Sessions:NNN" = 19、font_tiny_ の Consolas 等幅）
+    // × TOPPROC_COL_W で右端から逆算し、半文字分の間隔を空けて右詰めする（DirectWrite の実測はしない）。
+    // ● グリフは送り幅より細く左右に余白があるため、半文字分で見た目は約 1 文字分空く。
+    // 実文字数ではなく最大値で固定するのは、時が 1 桁のときや取得時刻が空のときにドットが動かず、
+    // マルチアカウントで上下のドットが同じ横位置に揃うようにするため
+    // ● は取得時刻と同じ font_tiny_・同じ行ボックス（ssr）で描き、縦位置はグリフ設計に任せる
+    // （font_small_ では 1px ほど大きく見えた）
+    if (m.avail && five_h_delta_start > 0.f && m.five_h_pct > five_h_delta_start) {
+        constexpr ULONGLONG RECENT_DOT_PERIOD_MS = 2000;  // 明滅周期
+        float phase = static_cast<float>(GetTickCount64() % RECENT_DOT_PERIOD_MS)
+                    / static_cast<float>(RECENT_DOT_PERIOD_MS);
+        float alpha = 0.625f + 0.375f * std::sin(phase * 6.2831853f);
+        constexpr float SESS_MAX_CHARS = 19.f;  // "HH:MM  Sessions:NNN"
+        float dot_right = hsr.right - (SESS_MAX_CHARS + 0.5f) * TOPPROC_COL_W;
+        D2D1_RECT_F dot_r = D2D1::RectF(ssr.left, ssr.top, dot_right, ssr.bottom);
+        set_brush_color(brush_text_, COL_WSL_MEM, alpha);
+        draw_text_aligned(L"●", font_tiny_, dot_r, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
+        recent_dot_drawn_ = true;
+    }
     // 7d 均等消費ペース位置（緑線）。使い切り不能検知の抑止判定と 7d バー描画で共用する
     float seven_d_expected = claude_expected_pct(m.seven_d_resets_ts, CLAUDE_WIN_7D_SECS);
     // 7d 使い切り不能検知：条件は次の 3 つすべて。（5h には検知を行わない）
@@ -1395,6 +1421,9 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 // ---- メイン描画 ----
 
 void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis) {
+    // 早期 return より前でクリアする。デバイス生成失敗中に古い true が残ると
+    // TIMER_ANIM がドット明滅のための再描画要求を出し続けてしまう
+    recent_dot_drawn_ = false;  // 今回の paint で描けば draw_claude が立て直す
     if (!render_target_) create_device_resources(cfg);
     if (!render_target_) return;
 
