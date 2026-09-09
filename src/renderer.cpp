@@ -1119,13 +1119,15 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     //                    リセット時刻と同色・同フォントで右詰め描画する
     //                    （5h のみで使用、7d は -1 のまま非表示。判定・算出は呼び出し側で行う）
     // reach_line_pct:   7d 到達限界線の位置（%）。「今から 5h 枠を想定使用率で回し続けても 100% に
-    //                    届かなくなる」使用率で、0 より大きく 100 未満のときバー上下端に
-    //                    cfg.col_claude_reach_line の小さな三角（内向き）を置く
+    //                    届かなくなる」使用率で、0 より大きく 100 未満のときバー上端に
+    //                    cfg.col_claude_reach_line の小さな三角（下向き）を置く
     //                    （7d のみで使用、5h は -1 のまま非表示。算出は呼び出し側で行う）
-    // 到達限界マーカー（三角）の寸法（px）。底辺の幅と高さ。
+    // ペース線（緑）の太さ（px）。1px のグリッド線と見分けが付き、バー内で主張しすぎない値にする
+    static constexpr float PACE_LINE_W = 2.5f;
+    // 到達限界マーカー（二等辺三角）の寸法（px）。底辺の幅と高さ。底辺より高さを取り、やや尖らせる。
     // 高さはバー高 16px の中で塗りを横切らず、かつ 1px のグリッド線と見分けが付く程度にする
-    static constexpr float REACH_TRI_W = 7.f;
-    static constexpr float REACH_TRI_H = 4.f;
+    static constexpr float REACH_TRI_W = 6.f;
+    static constexpr float REACH_TRI_H = 6.f;
     // 三角形を 1 つ塗る（底辺の両端 2 点と頂点 1 点）。到達限界マーカー専用の小物
     auto fill_triangle = [&](D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F apex) {
         ID2D1PathGeometry* path = nullptr;
@@ -1230,8 +1232,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 
         // 7d 到達限界線（呼び出し側が算出。-1 のとき非表示）
         // 塗りがこの位置より左なら 100% 到達不能で、位置と塗りの距離が余裕を表す。
-        // バー上下端から内側を指す小さな三角で示す。全高の線は塗りのアンバーと同系の色では溶け、
-        // 異系の色ではパレットから浮いて見えたため、塗りを横切らない控えめな目印にした。
+        // バー上端から下向きの小さな三角で示す。全高の線は塗りのアンバーや直近増分の帯と
+        // 同系の色では溶け、異系の色ではパレットから浮いて見えたため、塗りを横切らない目印にした。
         // 緑線より先に描き、重なったときは緑線を優先して見せる
         // bar_w < REACH_TRI_W（win_width の下限 80 では負にもなる）だと後続クランプの
         // 下限が上限を超え std::clamp の事前条件違反（Debug は CRT アサート中断、
@@ -1244,8 +1246,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             set_brush_color(brush_fill_, cfg.col_claude_reach_line);
             fill_triangle(D2D1::Point2F(rx - hw, br.top), D2D1::Point2F(rx + hw, br.top),
                           D2D1::Point2F(rx, br.top + REACH_TRI_H));
-            fill_triangle(D2D1::Point2F(rx - hw, br.bottom), D2D1::Point2F(rx + hw, br.bottom),
-                          D2D1::Point2F(rx, br.bottom - REACH_TRI_H));
         }
 
         // 現在時刻の均等消費ペース線（緑）
@@ -1254,7 +1254,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             set_brush_color(brush_fill_, COL_PACE_IDEAL);
             render_target_->DrawLine(
                 D2D1::Point2F(ex, br.top), D2D1::Point2F(ex, br.bottom),
-                brush_fill_, 3.5f);
+                brush_fill_, PACE_LINE_W);
         }
 
         // 警告解除までの残り時間（黒字、バー左端＝塗り部分の上に描画する）

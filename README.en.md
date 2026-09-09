@@ -68,7 +68,7 @@ Displays 5h / 7d rate limit usage (horizontal bars), reset times, and session co
 - To the right of the 5h bar (aligned with the month digits of the 7d reset timestamp) is the number of 5h turns remaining before the 7d reset, including the turn in progress
 - The 5h / 7d bars overlay the usage increase over the last N minutes in a darker shade (the same color as the RAM WSL overlay) to visualize the consumption pace
 - To the left of the fetch time in the header, a dot in the same darker shade pulses only while there has been consumption recently (within the last 5 minutes by default)
-- The small triangles at the top and bottom edges of the 7d bar are the reach-limit marker (the approximate position beyond which 7d usage can no longer reach 100% even if 5h windows are run at 90% from now on; if the fill is left of the triangles, 100% is unreachable)
+- The small triangle at the top edge of the 7d bar is the reach-limit marker (the approximate position beyond which 7d usage can no longer reach 100% even if 5h windows are run at 90% from now on; if the fill is left of the triangle, 100% is unreachable)
 - The 5h-to-7d conversion ratio for the reach-limit marker is estimated automatically from the accumulated ratio of observed deltas (the marker is hidden until a fifth of a 5h window of consumption has been observed, and on accounts whose Usage API does not return reset times)
 - Directly below the 7d bar, a gray mini bar shows consumption of the dedicated 7d quota for higher-tier models such as Fable (only for accounts whose Usage API returns a dedicated quota)
 - When the dedicated quota reaches 100%, the mini bar changes to the warning color and raises a per-account alert sound and Toast notification (reset once it falls back below 100%)
