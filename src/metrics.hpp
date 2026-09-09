@@ -166,6 +166,10 @@ struct ClaudeMetrics {
     // Fable 等の上位モデル専用 7d 枠の消費率で、分母は専用枠の週次総容量（weekly_all とは別枠）。
     // API がエントリを返さない場合は -1（未提供 = ミニバー非表示）
     float seven_d_scoped_pct = -1.f;
+    // 5h ウィンドウ 100% 消費が 7d の何 % に相当するか（換算率、%）。collector が実測差分の
+    // 累積比から推定し apply_result ごとに設定する。累積不足で推定不可の間は -1。
+    // 描画側は 7d 到達限界線の位置算出に使う（-1 のとき非表示）
+    float five_h_as_7d_pct = -1.f;
     wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
     wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、時はゼロ埋めなしの 2 桁右寄せ。未取得時は空文字）

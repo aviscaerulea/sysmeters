@@ -267,38 +267,81 @@ static json hist_to_json_array(const std::vector<ClaudeHistorySample>& hist) {
     return arr;
 }
 
-// 5h/7d 履歴キャッシュ（{"five_h":[[ts,pct],...], "seven_d":[[ts,pct],...]}）を読み込む
+// 換算率推定状態を JSON オブジェクト（メンバ名をキーとする）へ変換する
+static json turn_ratio_to_json(const TurnRatioState& tr) {
+    return json{
+        {"win_rts",        static_cast<double>(tr.win_rts)},
+        {"cur_d5",         static_cast<double>(tr.cur_d5)},
+        {"cur_d7",         static_cast<double>(tr.cur_d7)},
+        {"prev_d5",        static_cast<double>(tr.prev_d5)},
+        {"prev_d7",        static_cast<double>(tr.prev_d7)},
+        {"last_five_pct",  static_cast<double>(tr.last_five_pct)},
+        {"last_seven_pct", static_cast<double>(tr.last_seven_pct)},
+        {"last_five_rts",  static_cast<double>(tr.last_five_rts)},
+        {"last_seven_rts", static_cast<double>(tr.last_seven_rts)},
+    };
+}
+
+// JSON オブジェクトから換算率推定状態を復元する
+// オブジェクトでない、またはキーが欠けている場合は該当メンバを既定値のままにする（旧キャッシュ互換）
+static TurnRatioState turn_ratio_from_json(const json& j) {
+    TurnRatioState tr;
+    if (!j.is_object()) return tr;
+    auto num = [&](const char* key, double def) -> double {
+        auto it = j.find(key);
+        return (it != j.end() && it->is_number()) ? it->get<double>() : def;
+    };
+    tr.win_rts        = static_cast<time_t>(num("win_rts", -1.0));
+    tr.cur_d5         = static_cast<float>(num("cur_d5", 0.0));
+    tr.cur_d7         = static_cast<float>(num("cur_d7", 0.0));
+    tr.prev_d5        = static_cast<float>(num("prev_d5", 0.0));
+    tr.prev_d7        = static_cast<float>(num("prev_d7", 0.0));
+    tr.last_five_pct  = static_cast<float>(num("last_five_pct", -1.0));
+    tr.last_seven_pct = static_cast<float>(num("last_seven_pct", -1.0));
+    tr.last_five_rts  = static_cast<time_t>(num("last_five_rts", -1.0));
+    tr.last_seven_rts = static_cast<time_t>(num("last_seven_rts", -1.0));
+    return tr;
+}
+
+// 5h/7d 履歴キャッシュ（{"five_h":[[ts,pct],...], "seven_d":[[ts,pct],...], "turn_ratio":{...}}）を読み込む
 //
-// init() から一度だけ呼ばれ、起動直後の履歴（restored_hist5_ / restored_hist7_）の種にする。
+// init() から一度だけ呼ばれ、起動直後の履歴（restored_hist5_ / restored_hist7_）と
+// 換算率推定状態（turn_ratio_）の種にする。
 // read_cache_raw を再利用するため TTL 判定はなく、ファイル未存在・parse 失敗時は
-// out_five / out_seven を空のまま返す。（現状互換：履歴なしからスタートする挙動に退化する）
+// out_five / out_seven を空、out_ratio を既定値のまま返す（現状互換：履歴なしからスタートする挙動に退化する）。
+// "turn_ratio" キーが無い旧形式のファイルも履歴だけ復元し、換算率は既定値から累積を始める
 static void load_history_cache(const fs::path& path,
                                std::vector<ClaudeHistorySample>& out_five,
-                               std::vector<ClaudeHistorySample>& out_seven) {
+                               std::vector<ClaudeHistorySample>& out_seven,
+                               TurnRatioState& out_ratio) {
     out_five.clear();
     out_seven.clear();
+    out_ratio = TurnRatioState{};
     json j = read_cache_raw(path);
     if (j.is_null()) return;
     try {
         out_five  = parse_hist_array(j.value("five_h",  json::array()));
         out_seven = parse_hist_array(j.value("seven_d", json::array()));
+        out_ratio = turn_ratio_from_json(j.value("turn_ratio", json::object()));
     }
     catch (...) {}
 }
 
-// 5h/7d 履歴キャッシュを直接上書き保存する
+// 5h/7d 履歴キャッシュと換算率推定状態を直接上書き保存する
 //
 // apply_result が avail 時に毎回呼ぶ。既存の usage/plan キャッシュと同じ流儀で
 // テンポラリ→リネームは行わず ofstream で直接上書きする。（クラッシュ時は次回 parse 失敗となり
 // 復元なしに退化するだけで許容する）
 static void save_history_cache(const fs::path& path,
                                const std::vector<ClaudeHistorySample>& five,
-                               const std::vector<ClaudeHistorySample>& seven) {
+                               const std::vector<ClaudeHistorySample>& seven,
+                               const TurnRatioState& ratio) {
     if (path.empty()) return;
     try {
         json j;
-        j["five_h"]  = hist_to_json_array(five);
-        j["seven_d"] = hist_to_json_array(seven);
+        j["five_h"]     = hist_to_json_array(five);
+        j["seven_d"]    = hist_to_json_array(seven);
+        j["turn_ratio"] = turn_ratio_to_json(ratio);
         std::ofstream ofs(path);
         ofs << j.dump();
     }
@@ -855,7 +898,8 @@ void ClaudeCollector::init(HWND notify_wnd, int account_index,
 
     // 5h/7d 履歴キャッシュを読み込み、起動直後の apply_result 初回呼び出しで
     // out 側の履歴（空）へ一度だけ種付けする。（詳細は apply_result 宣言部のコメント参照）
-    load_history_cache(cache_hist_path_, restored_hist5_, restored_hist7_);
+    // 換算率推定状態は collector 所有のためメンバへ直接復元する
+    load_history_cache(cache_hist_path_, restored_hist5_, restored_hist7_, turn_ratio_);
 
     // 起動直後の間隙検知を可能にするため、復元したキャッシュの 5h resets_ts を監視対象として
     // 種付けする。過去値でも可：フェッチ成功時にアクティブウィンドウが無ければ即 nudge となる
@@ -1167,10 +1211,79 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min, int
         }
         push_and_trim(out.five_h_history,  out.five_h_pct,  delta_window_min, 0);
         push_and_trim(out.seven_d_history, out.seven_d_pct, delta_window_7d_min, anchor_floor);
+        update_turn_ratio(out);
         // 7d 保持上限は (delta_window_7d_min + 1) 分 ≒ 12h、取得サイクル ~60 秒で高々 750
         // サンプル前後・数十 KB のため、毎回書いても実害がない
-        save_history_cache(cache_hist_path_, out.five_h_history, out.seven_d_history);
+        save_history_cache(cache_hist_path_, out.five_h_history, out.seven_d_history, turn_ratio_);
     }
+}
+
+// 換算率（5h 100% 消費が 7d の何 % に相当するか）の推定状態を 1 サンプル分進め、
+// 推定値を out.five_h_as_7d_pct に設定する（構造と方針は TurnRatioState の宣言部コメント参照）
+//
+// apply_result の avail 時に呼ぶ。同一サンプルが繰り返し届く（キャッシュヒット・フェッチ失敗中の
+// 前回値保持）ケースは Δ=0 の加算になり無害。
+// Δ を累積に加える条件（すべて満たすとき。0 でも加算する）：
+// - 前回サンプルがある
+// - 5h/7d ともに resets_ts が有効で前回と一致する（同一ウィンドウ。リセット跨ぎを除外）
+// - 5h/7d ともに前回・今回が 100 未満（サーバ側の 100 丸めで Δ が欠落する区間を除外）
+// - Δ5h/Δ7d ともに 0 以上（減少はリセット跨ぎか異常応答）
+// 前回サンプル値は条件を満たさなくても常に今回値へ更新する。
+// 7d の resets_ts が変わったら現行→前回へローテートし、ログに直前ウィンドウまでの推定値を残す。
+// resets_ts の同一判定は分単位に丸めた値で行う。API の resets_at は小数秒が応答ごとに揺れ、
+// 整数秒が :59 と :00 の間で往復する（実測）。秒単位で比較すると同一ウィンドウを別物と誤認し、
+// 累積が一切進まないままローテートを繰り返すため
+void ClaudeCollector::update_turn_ratio(ClaudeMetrics& out) {
+    TurnRatioState& tr = turn_ratio_;
+    // 推定に必要な累積 Δ5h の下限（%）。5h の 1/5 ウィンドウ分。
+    // 整数丸めによる初期誤差より、学習前に線が出ない期間の短さを優先する（累積が増えれば自動で収束する）。
+    constexpr float TURN_RATIO_MIN_D5 = 20.f;
+    // resets_ts を最も近い分境界へ丸めたウィンドウ識別キーにする（無効値 -1 はそのまま）
+    auto minute_key = [](time_t rts) -> time_t {
+        return rts > 0 ? (rts + 30) / 60 * 60 : -1;
+    };
+    const time_t five_key  = minute_key(out.five_h_resets_ts);
+    const time_t seven_key = minute_key(out.seven_d_resets_ts);
+
+    if (seven_key > 0 && seven_key != tr.win_rts) {
+        if (tr.win_rts > 0) {
+            float d5 = tr.cur_d5 + tr.prev_d5;
+            if (d5 >= TURN_RATIO_MIN_D5) {
+                log_info("claude turn ratio: 5h100%% = %.1f%% of 7d (d5=%.0f d7=%.0f, account=%d)",
+                         (tr.cur_d7 + tr.prev_d7) / d5 * 100.f, d5, tr.cur_d7 + tr.prev_d7, account_index_);
+            }
+            else {
+                log_info("claude turn ratio: n/a (d5=%.0f d7=%.0f, account=%d)",
+                         d5, tr.cur_d7 + tr.prev_d7, account_index_);
+            }
+            tr.prev_d5 = tr.cur_d5;
+            tr.prev_d7 = tr.cur_d7;
+            tr.cur_d5  = 0.f;
+            tr.cur_d7  = 0.f;
+        }
+        tr.win_rts = seven_key;
+    }
+
+    float d5 = out.five_h_pct  - tr.last_five_pct;
+    float d7 = out.seven_d_pct - tr.last_seven_pct;
+    bool valid = tr.last_five_pct >= 0.f
+              && tr.last_five_rts  > 0 && five_key  == tr.last_five_rts
+              && tr.last_seven_rts > 0 && seven_key == tr.last_seven_rts
+              && tr.last_five_pct  < 100.f && out.five_h_pct  < 100.f
+              && tr.last_seven_pct < 100.f && out.seven_d_pct < 100.f
+              && d5 >= 0.f && d7 >= 0.f;
+    if (valid) {
+        tr.cur_d5 += d5;
+        tr.cur_d7 += d7;
+    }
+    tr.last_five_pct  = out.five_h_pct;
+    tr.last_seven_pct = out.seven_d_pct;
+    tr.last_five_rts  = five_key;
+    tr.last_seven_rts = seven_key;
+
+    float total_d5 = tr.cur_d5 + tr.prev_d5;
+    out.five_h_as_7d_pct = (total_d5 >= TURN_RATIO_MIN_D5)
+                         ? (tr.cur_d7 + tr.prev_d7) / total_d5 * 100.f : -1.f;
 }
 
 // 中断要求のみ。スレッドの完了は待たない

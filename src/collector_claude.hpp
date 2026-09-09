@@ -19,11 +19,30 @@
 //     アプリ再起動後も init() で読み込み、履歴を復元する。
 //     （保持期間は各 delta ウィンドウ幅に従う。7d はデフォルト 12h、5h は数分。
 //      7d は加えて停止明け判定用のアンカー 1 個を最大で窓幅 2 倍前まで残す）
+//   - 同じ履歴キャッシュに 5h→7d 換算率の推定状態（TurnRatioState）も保存し、再起動後も
+//     累積を引き継ぐ
 //
 // アカウントごとに 1 インスタンスを持つ。
 // - account_index：WM_CLAUDE_DONE の wParam として送る識別子（0=Main, 1=Sub）
 // - config_dir：空ならメイン（~/.claude）、非空ならサブの .claude ディレクトリ絶対パス
 // - cache_suffix：キャッシュファイル名末尾に付くサフィックス（メイン=""、サブ="-sub"）
+
+// 換算率（5h 100% 消費が 7d の何 % に相当するか）の推定状態
+// Usage API は整数 % しか返さないため、区間ごとの比ではなく累積比 ΣΔ7d / ΣΔ5h で求める。
+// 同一 5h/7d ウィンドウ内で連続する有効サンプル間の Δ を、0 を含めてそのまま加算する
+// （望遠鏡和。丸め誤差は有効区間の両端の ±1% に限られ、累積が増えるほど相対誤差が縮む）。
+// 7d リセットで現行→前回へローテートし、比は 2 世代の合算で求める（新ウィンドウ開始直後も
+// 前回分で推定を継続でき、プラン変更や運営側の枠変更への追従は最大 2 週間で完了する）。
+// resets_at を返さないアカウントでは同一ウィンドウの判定ができず、累積は進まない（推定不可のまま）。
+// ウィンドウ識別に使う resets_ts は分単位に丸めた値で保持する（API の resets_at は秒が揺れるため）
+struct TurnRatioState {
+    time_t win_rts = -1;                 // cur_* が属する 7d ウィンドウの resets_ts（分丸め、-1 = 未観測）
+    float  cur_d5 = 0.f, cur_d7 = 0.f;   // 現行 7d ウィンドウの ΣΔ5h / ΣΔ7d
+    float  prev_d5 = 0.f, prev_d7 = 0.f; // 前回 7d ウィンドウの ΣΔ5h / ΣΔ7d
+    float  last_five_pct = -1.f, last_seven_pct = -1.f;  // 前回サンプルの使用率（-1 = 無し）
+    time_t last_five_rts = -1, last_seven_rts = -1;      // 前回サンプルの resets_ts（分丸め、-1 = 無し）
+};
+
 class ClaudeCollector {
 public:
     // HWND はバックグラウンドスレッド完了時に WM_CLAUDE_DONE を投げる先
@@ -48,6 +67,7 @@ public:
     // （以後は通常の push_and_trim のみで運用する） avail 時は毎回 cache_hist_path_ へ
     // 直接上書き保存し、次回起動時の復元に備える。（クラッシュ耐性優先。テンポラリ→リネームの
     // 原子的更新はしない。保存に失敗しても現状同様、次回起動時は履歴なしからの復帰に退化する）
+    // avail 時は換算率の推定状態（turn_ratio_）も更新し、推定値を out.five_h_as_7d_pct に設定する
     void apply_result(ClaudeMetrics& out, int delta_window_min, int delta_window_7d_min);
 
     // 2 段階終了：複数コレクタを並行停止できるよう、フラグ立てと join 待ちを分離
@@ -129,9 +149,15 @@ private:
     // フェッチ結果 JSON には履歴フィールドが存在しないため、pending_ 経由だと復元値が消えるため
     std::vector<ClaudeHistorySample> restored_hist5_;
     std::vector<ClaudeHistorySample> restored_hist7_;
+    // 5h→7d 換算率の推定状態。init() で履歴キャッシュから復元し、apply_result が更新・保存する。
+    // collector が所有するため、pending_ の丸ごと上書きに影響されない。
+    // メインスレッド（init / apply_result）からのみ触るため排他は不要
+    TurnRatioState turn_ratio_;
 
     static DWORD WINAPI fetch_thread(LPVOID param);
     void do_fetch();
+    // 換算率推定状態を 1 サンプル分進め、out.five_h_as_7d_pct を設定する（apply_result の avail 時専用）
+    void update_turn_ratio(ClaudeMetrics& out);
     // 間隙 key に対する nudge 発火権を要求する。発火してよいなら true を返し、発火状態を更新する。
     // key は間隙を識別する resets_ts（不明時は番兵 1）。詳細は実装側コメント参照
     bool claim_nudge(time_t key);

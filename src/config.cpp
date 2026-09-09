@@ -140,6 +140,7 @@ AppConfig load_config(const std::string& path) {
         cfg.col_claude_scoped_bar = get_u32("color", "claude_scoped_bar", cfg.col_claude_scoped_bar);
         cfg.col_claude_scoped_bar_warn = get_u32("color", "claude_scoped_bar_warn", cfg.col_claude_scoped_bar_warn);
         cfg.col_claude_underuse_bg = get_u32("color", "claude_underuse_bg", cfg.col_claude_underuse_bg);
+        cfg.col_claude_reach_line = get_u32("color", "claude_reach_line", cfg.col_claude_reach_line);
         cfg.col_cpu_core   = get_u32("color", "cpu_core",   cfg.col_cpu_core);
 
         cfg.warn_cpu_pct       = get_float("threshold", "cpu_pct",       cfg.warn_cpu_pct);
@@ -194,6 +195,7 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_underuse_enable   = get_bool ("claude", "underuse_enable",   cfg.claude_underuse_enable);
         cfg.claude_underuse_grace_hours = get_int("claude", "underuse_grace_hours", cfg.claude_underuse_grace_hours);
         cfg.claude_underuse_warn_pct = get_float("claude", "underuse_warn_pct", cfg.claude_underuse_warn_pct);
+        cfg.claude_reach_line_5h_pct = get_int("claude", "reach_line_5h_pct", cfg.claude_reach_line_5h_pct);
 
         // メインアカウント設定（[claude] セクション）
         // メインは ~/.claude を固定使用するため config_dir は持たない。
@@ -264,6 +266,9 @@ AppConfig load_config(const std::string& path) {
     // 使い切り不能検知の発動猶予サニティチェック（0〜168 時間 = 7d 全長）
     // 7d ウィンドウ全長を超える猶予は判定機会が消滅するため上限とする。0 は猶予なし
     cfg.claude_underuse_grace_hours = std::clamp(cfg.claude_underuse_grace_hours, 0, 168);
+
+    // 7d 到達限界線の 5h 想定使用率サニティチェック（0〜100%）。0 は非表示
+    cfg.claude_reach_line_5h_pct = std::clamp(cfg.claude_reach_line_5h_pct, 0, 100);
 
     // ガードトーン長のサニティチェック（0〜10 秒）
     cfg.guard_tone_ms = std::clamp(cfg.guard_tone_ms, 0, 10000);
