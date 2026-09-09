@@ -40,8 +40,9 @@ struct AppConfig {
     // 通常のバー背景（0x2A2A2A）よりわずかに明るい寒色で、アンバー系の暖色塗りと対比させ
     // 「消費が足りない」ことを控えめに示す。
     uint32_t col_claude_underuse_bg = 0x243048;  // 淡い暗青
-    // 7d 到達限界線の色。使い切り不能背景と同じ寒色系で「余らせる側の境界」を表す
-    uint32_t col_claude_reach_line = 0x64B5F6;  // 明るい青
+    // 7d 到達限界線（バー上下端の小さな三角）の色。テキストと同じ中立色とする。
+    // 警告色を消費せず、パレットからも浮かない
+    uint32_t col_claude_reach_line = 0xD4D4D4;  // テキスト色と同値
     uint32_t col_cpu_core   = 0xCC923E;  // アンバー（同上）
 
     // 警告色の閾値
@@ -148,7 +149,7 @@ struct AppConfig {
     float claude_underuse_warn_pct = 98.f;
     // 7d 到達限界線が仮定する 5h ウィンドウあたりの使用率（%）。
     // 「今から 5h 枠をこの使用率で回し続けても 7d の 100% に届かなくなる」位置に
-    // 7d バー上へ縦線（col_claude_reach_line）を引く。5h→7d の換算率は collector が
+    // 7d バー上下端へ小さな三角（col_claude_reach_line）を置く。5h→7d の換算率は collector が
     // 実測差分の累積比から推定する（ClaudeMetrics::five_h_as_7d_pct、推定不可の間は非表示）。
     // メイン/サブ共通。0 = 非表示。サニティチェックで 0〜100 にクランプする
     int   claude_reach_line_5h_pct = 90;

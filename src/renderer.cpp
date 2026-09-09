@@ -1119,8 +1119,28 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     //                    リセット時刻と同色・同フォントで右詰め描画する
     //                    （5h のみで使用、7d は -1 のまま非表示。判定・算出は呼び出し側で行う）
     // reach_line_pct:   7d 到達限界線の位置（%）。「今から 5h 枠を想定使用率で回し続けても 100% に
-    //                    届かなくなる」使用率で、0 より大きく 100 未満のとき cfg.col_claude_reach_line の
-    //                    縦線を引く（7d のみで使用、5h は -1 のまま非表示。算出は呼び出し側で行う）
+    //                    届かなくなる」使用率で、0 より大きく 100 未満のときバー上下端に
+    //                    cfg.col_claude_reach_line の小さな三角（内向き）を置く
+    //                    （7d のみで使用、5h は -1 のまま非表示。算出は呼び出し側で行う）
+    // 到達限界マーカー（三角）の寸法（px）。底辺の幅と高さ。
+    // 高さはバー高 16px の中で塗りを横切らず、かつ 1px のグリッド線と見分けが付く程度にする
+    static constexpr float REACH_TRI_W = 7.f;
+    static constexpr float REACH_TRI_H = 4.f;
+    // 三角形を 1 つ塗る（底辺の両端 2 点と頂点 1 点）。到達限界マーカー専用の小物
+    auto fill_triangle = [&](D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F apex) {
+        ID2D1PathGeometry* path = nullptr;
+        if (FAILED(d2d_factory_->CreatePathGeometry(&path))) return;
+        ID2D1GeometrySink* sink = nullptr;
+        if (SUCCEEDED(path->Open(&sink))) {
+            sink->BeginFigure(a, D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(b);
+            sink->AddLine(apex);
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            if (SUCCEEDED(sink->Close())) render_target_->FillGeometry(path, brush_fill_);
+            sink->Release();
+        }
+        path->Release();
+    };
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
                          bool underuse = false,
@@ -1209,14 +1229,23 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         }
 
         // 7d 到達限界線（呼び出し側が算出。-1 のとき非表示）
-        // 塗りがこの線より左なら 100% 到達不能で、線と塗りの距離が余裕を表す。
-        // 緑線より先に描き、重なったときは緑線（均等消費ペース）を優先して見せる
-        if (avail && reach_line_pct > 0.f && reach_line_pct < 100.f) {
-            float rx = br.left + bar_w * (reach_line_pct / 100.f);
+        // 塗りがこの位置より左なら 100% 到達不能で、位置と塗りの距離が余裕を表す。
+        // バー上下端から内側を指す小さな三角で示す。全高の線は塗りのアンバーと同系の色では溶け、
+        // 異系の色ではパレットから浮いて見えたため、塗りを横切らない控えめな目印にした。
+        // 緑線より先に描き、重なったときは緑線を優先して見せる
+        // bar_w < REACH_TRI_W（win_width の下限 80 では負にもなる）だと後続クランプの
+        // 下限が上限を超え std::clamp の事前条件違反（Debug は CRT アサート中断、
+        // Release は位置不正）になるため、底辺が収まらない狭幅では三角を描かない
+        if (avail && reach_line_pct > 0.f && reach_line_pct < 100.f && bar_w >= REACH_TRI_W) {
+            float hw = REACH_TRI_W / 2.f;
+            // 底辺がバー矩形からはみ出さないよう、中心をバー端から半幅分内側にクランプする
+            // （リセット直前は位置が 100% へ連続的に近づき、右端の帯域を必ず通過するため）
+            float rx = std::clamp(br.left + bar_w * (reach_line_pct / 100.f), br.left + hw, br.right - hw);
             set_brush_color(brush_fill_, cfg.col_claude_reach_line);
-            render_target_->DrawLine(
-                D2D1::Point2F(rx, br.top), D2D1::Point2F(rx, br.bottom),
-                brush_fill_, 3.5f);
+            fill_triangle(D2D1::Point2F(rx - hw, br.top), D2D1::Point2F(rx + hw, br.top),
+                          D2D1::Point2F(rx, br.top + REACH_TRI_H));
+            fill_triangle(D2D1::Point2F(rx - hw, br.bottom), D2D1::Point2F(rx + hw, br.bottom),
+                          D2D1::Point2F(rx, br.bottom - REACH_TRI_H));
         }
 
         // 現在時刻の均等消費ペース線（緑）
