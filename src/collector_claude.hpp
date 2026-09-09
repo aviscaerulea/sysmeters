@@ -14,8 +14,8 @@
 // - レートリミット：WinHTTP でバックグラウンドスレッドから非同期取得
 //   - credentials.json から OAuth トークン取得
 //   - Anthropic Usage API / Account API を呼び出し
-//   - $TEMP に JSON キャッシュを保存（Usage: usage_interval_sec 秒、Plan: 3600 秒）
-//   - $TEMP に 5h/7d 使用率の時系列履歴を保存（TTL なし、apply_result 実行毎に直接上書き）
+//   - %LOCALAPPDATA%\sysmeters に JSON キャッシュを保存（Usage：usage_interval_sec 秒、Plan：3600 秒）
+//   - %LOCALAPPDATA%\sysmeters に 5h/7d 使用率の時系列履歴を保存（TTL なし、apply_result 実行毎に直接上書き）
 //     アプリ再起動後も init() で読み込み、履歴を復元する。
 //     （保持期間は各 delta ウィンドウ幅に従う。7d はデフォルト 12h、5h は数分。
 //      7d は加えて停止明け判定用のアンカー 1 個を最大で窓幅 2 倍前まで残す）

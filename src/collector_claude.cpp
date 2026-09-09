@@ -818,7 +818,7 @@ void ClaudeCollector::init(HWND notify_wnd, int account_index,
     config_dir_   = config_dir;
 
     // インスタンス固有の credentials/キャッシュパスを構築する
-    // ホームディレクトリや TEMP の取得に失敗した場合は空 path のままにし、
+    // ホームディレクトリやキャッシュディレクトリの取得に失敗した場合は空 path のままにし、
     // 後段の I/O は静かに失敗させる（既存挙動互換）
     // config_dir が空のときはメイン（~/.claude）、非空のときはサブ（指定ディレクトリ直下）から credentials を読む
     if (!config_dir.empty()) {
@@ -830,16 +830,22 @@ void ClaudeCollector::init(HWND notify_wnd, int account_index,
             creds_path_ = fs::path(home) / L".claude" / L".credentials.json";
         }
     }
-    wchar_t tmp[MAX_PATH];
-    DWORD tlen = GetTempPathW(MAX_PATH, tmp);
-    if (tlen != 0 && tlen <= MAX_PATH) {
-        // メインは既存ファイル名と互換になるよう suffix 空を維持する
-        std::string usage_name = "claude-usage-cache" + cache_suffix + ".json";
-        std::string plan_name  = "claude-plan-cache"  + cache_suffix + ".json";
-        cache_usage_path_ = fs::path(tmp) / fs::path(usage_name);
-        cache_plan_path_  = fs::path(tmp) / fs::path(plan_name);
-        std::string hist_name = "claude-history-cache" + cache_suffix + ".json";
-        cache_hist_path_  = fs::path(tmp) / fs::path(hist_name);
+    // キャッシュディレクトリは %LOCALAPPDATA%\sysmeters。
+    // テンポラリ（旧保存先）は OS やユーザの掃除で消え、5h→7d 換算率の学習と 7d 履歴の
+    // アンカーがやり直しになるため移した。exe ディレクトリ配下にしないのは、Scoop が更新時に
+    // バージョンディレクトリを作り直し、manifest の persist 指定なしではキャッシュが消えるため。
+    // 取得・作成に失敗したときはパスを空のままにし、後段の I/O は静かに失敗させる（既存契約）。
+    // 旧テンポラリのファイルは移行しない（学習は数時間、履歴は 30 分で復帰する）
+    wchar_t appdata[MAX_PATH] = {};
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appdata))) {
+        fs::path cache_dir = fs::path(appdata) / L"sysmeters";
+        int dir_err = SHCreateDirectoryExW(nullptr, cache_dir.c_str(), nullptr);
+        if (dir_err == ERROR_SUCCESS || dir_err == ERROR_ALREADY_EXISTS || dir_err == ERROR_FILE_EXISTS) {
+            // メインは既存ファイル名と互換になるよう suffix 空を維持する
+            cache_usage_path_ = cache_dir / ("claude-usage-cache"   + cache_suffix + ".json");
+            cache_plan_path_  = cache_dir / ("claude-plan-cache"    + cache_suffix + ".json");
+            cache_hist_path_  = cache_dir / ("claude-history-cache" + cache_suffix + ".json");
+        }
     }
 
     // API 取得完了までの空白を埋めるため、TTL 無視で前回キャッシュを暫定値として読み込む

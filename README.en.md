@@ -136,7 +136,7 @@ A display specific to the 7d bar. When it determines that the recent average con
 
 The pace reference point is a sample from approximately 12 hours earlier; if unavailable, the oldest sample (once 30 minutes have elapsed) is used, and after the app resumes from being stopped, the last sample before the stop (the anchor) substitutes for it. No determination is made while the pace cannot be estimated (when the observed history spans less than 30 minutes, or when there has been no recent increase).
 
-The 7d history is saved to a file in the temporary directory and, with the last sample before a stop as an anchor, retained for up to 24 hours (twice the window width). Determination therefore continues based on the effective pace from before the stop even across sysmeters or OS restarts; after a stop longer than 24 hours, the history is rebuilt and determination resumes in about 30 minutes.
+The 7d history is saved to a file under `%LOCALAPPDATA%\sysmeters` and, with the last sample before a stop as an anchor, retained for up to 24 hours (twice the window width). Determination therefore continues based on the effective pace from before the stop even across sysmeters or OS restarts; after a stop longer than 24 hours, the history is rebuilt and determination resumes in about 30 minutes.
 
 ## Installation
 
@@ -163,10 +163,11 @@ scoop install sysmeters
 
 #### Uninstall
 
-Uninstalling leaves the following registry settings behind. Remove them manually if you no longer need them.
+Uninstalling leaves the following registry settings and cache directory behind. Remove them manually if you no longer need them.
 
 - `HKEY_CURRENT_USER\Software\sysmeters` (display settings toggled from the tray menu)
 - The `sysmeters` value under `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` (only if startup registration was turned on)
+- `%LOCALAPPDATA%\sysmeters` (Claude Code usage cache)
 
 ## Usage
 
