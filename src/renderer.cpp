@@ -1118,6 +1118,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     //                    0 以上のときバー右側、7d 行のリセット日時の月数字と桁を揃えた位置に
     //                    リセット時刻と同色・同フォントで右詰め描画する
     //                    （5h のみで使用、7d は -1 のまま非表示。判定・算出は呼び出し側で行う）
+    // ペース線（緑）の太さ（px）。1px のグリッド線と見分けが付き、バー内で主張しすぎない値にする
+    static constexpr float PACE_LINE_W = 2.5f;
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
                          bool underuse = false,
@@ -1210,7 +1212,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             set_brush_color(brush_fill_, COL_PACE_IDEAL);
             render_target_->DrawLine(
                 D2D1::Point2F(ex, br.top), D2D1::Point2F(ex, br.bottom),
-                brush_fill_, 3.5f);
+                brush_fill_, PACE_LINE_W);
         }
 
         // 警告解除までの残り時間（黒字、バー左端＝塗り部分の上に描画する）
