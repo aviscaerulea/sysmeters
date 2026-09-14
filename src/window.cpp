@@ -239,6 +239,7 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
     apply_topmost();
     toast_alert_    = load_toast_alert();
     fullscreen_mute_ = load_fullscreen_mute();
+    reset_notify_    = load_reset_notify();
     load_always_alert();
     load_visibility();
 
@@ -489,6 +490,18 @@ void AppWindow::show_context_menu() {
                 IDM_TOP_PROC, L"トッププロセス表示");
     AppendMenuW(menu, MF_STRING | (toast_alert_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_ALERT_TOAST, L"Toast 通知");
+    // 5h リセット通知サブメニュー（通知方法の排他選択。ラジオ表示で択一を示す）
+    {
+        HMENU rn_menu = CreatePopupMenu();
+        AppendMenuW(rn_menu, MF_STRING, IDM_RESET_NOTIFY_TOAST, L"Toast");
+        AppendMenuW(rn_menu, MF_STRING, IDM_RESET_NOTIFY_SOUND, L"通知音");
+        AppendMenuW(rn_menu, MF_STRING, IDM_RESET_NOTIFY_NONE,  L"通知しない");
+        const UINT checked = (reset_notify_ == RESET_NOTIFY_TOAST) ? IDM_RESET_NOTIFY_TOAST
+                           : (reset_notify_ == RESET_NOTIFY_SOUND) ? IDM_RESET_NOTIFY_SOUND
+                           : IDM_RESET_NOTIFY_NONE;
+        CheckMenuRadioItem(rn_menu, IDM_RESET_NOTIFY_TOAST, IDM_RESET_NOTIFY_NONE, checked, MF_BYCOMMAND);
+        AppendMenuW(menu, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(rn_menu), L"5h リセット通知");
+    }
     AppendMenuW(menu, MF_STRING | (fullscreen_mute_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_FULLSCREEN_MUTE, L"フルスクリーン時は通知しない");
     // 常に警告通知を有効にするサブメニュー（フルスクリーン抑制の例外項目）
@@ -597,6 +610,7 @@ static constexpr LPCWSTR REG_ALERT_TOAST    = L"AlertToast";         // Toast �
 static constexpr LPCWSTR REG_FULLSCREEN_MUTE = L"FullscreenMute";  // フルスクリーン抑制設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_COMPACT         = L"Compact";          // コンパクト表示設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_TOP_PROC        = L"TopProcess";       // トッププロセス表示設定の値名（REG_DWORD、0 or 1）
+static constexpr LPCWSTR REG_RESET_NOTIFY    = L"ClaudeResetNotify"; // 5h リセット通知方法の値名（REG_DWORD、0=通知しない 1=Toast 2=通知音）
 // 「常に警告通知を有効にする」（フルスクリーン抑制の例外項目）の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_ALWAYS_ALERT_CPU       = L"AlwaysAlert_CPU";
 static constexpr LPCWSTR REG_ALWAYS_ALERT_TEMP_CPU  = L"AlwaysAlert_TempCPU";
@@ -616,33 +630,42 @@ static constexpr LPCWSTR REG_VIS_CLAUDE_SUB    = L"Visible_Claude_Sub";
 // 更新通知済みバージョンの値名（REG_SZ）。同一版の Toast 通知を 1 回に抑えるために保持する
 static constexpr LPCWSTR REG_NOTIFIED_VERSION = L"NotifiedUpdateVersion";
 
-// HKCU\Software\sysmeters の DWORD 値を bool として読む
+// HKCU\Software\sysmeters の DWORD 値を読む
 //
 // キーや値が存在しないか型が不正な場合は default_val を返す。
-static bool load_reg_bool(LPCWSTR name, bool default_val) {
+static DWORD load_reg_dword(LPCWSTR name, DWORD default_val) {
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &key) != ERROR_SUCCESS)
         return default_val;
 
-    DWORD val = default_val ? 1 : 0, size = sizeof(val), type = 0;
+    DWORD val = default_val, size = sizeof(val), type = 0;
     LONG result = RegQueryValueExW(key, name, nullptr, &type,
                                    reinterpret_cast<BYTE*>(&val), &size);
     RegCloseKey(key);
 
     if (result != ERROR_SUCCESS || type != REG_DWORD) return default_val;
-    return val != 0;
+    return val;
 }
 
-// HKCU\Software\sysmeters に DWORD 値（bool）を書く
-static void save_reg_bool(LPCWSTR name, bool value) {
+// HKCU\Software\sysmeters に DWORD 値を書く
+static void save_reg_dword(LPCWSTR name, DWORD value) {
     HKEY key;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr,
                         0, KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS)
         return;
 
-    DWORD val = value ? 1 : 0;
-    RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&val), sizeof(val));
+    RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
     RegCloseKey(key);
+}
+
+// HKCU\Software\sysmeters の DWORD 値を bool として読む（0 以外を true）
+static bool load_reg_bool(LPCWSTR name, bool default_val) {
+    return load_reg_dword(name, default_val ? 1 : 0) != 0;
+}
+
+// HKCU\Software\sysmeters に DWORD 値（bool）を書く
+static void save_reg_bool(LPCWSTR name, bool value) {
+    save_reg_dword(name, value ? 1 : 0);
 }
 
 // HKCU\Software\sysmeters の REG_SZ 値を読む
@@ -714,6 +737,13 @@ void AppWindow::save_compact()          { save_reg_bool(REG_COMPACT,     compact
 bool AppWindow::load_top_proc()         { return load_reg_bool(REG_TOP_PROC,    DEF_TOP_PROC);            }
 void AppWindow::save_top_proc()         { save_reg_bool(REG_TOP_PROC,    top_proc_);                      }
 
+// 範囲外の値（旧版や手編集）はデフォルトへ戻す
+AppWindow::ResetNotify AppWindow::load_reset_notify() {
+    const DWORD v = load_reg_dword(REG_RESET_NOTIFY, static_cast<DWORD>(DEF_RESET_NOTIFY));
+    return (v <= RESET_NOTIFY_SOUND) ? static_cast<ResetNotify>(v) : DEF_RESET_NOTIFY;
+}
+void AppWindow::save_reset_notify() { save_reg_dword(REG_RESET_NOTIFY, static_cast<DWORD>(reset_notify_)); }
+
 void AppWindow::load_always_alert() {
     always_alert_cpu_       = load_reg_bool(REG_ALWAYS_ALERT_CPU,       DEF_ALWAYS_ALERT_CPU);
     always_alert_temp_cpu_  = load_reg_bool(REG_ALWAYS_ALERT_TEMP_CPU,  DEF_ALWAYS_ALERT_TEMP_CPU);
@@ -754,6 +784,57 @@ bool AppWindow::is_fullscreen_app_running() {
     return state == QUNS_RUNNING_D3D_FULL_SCREEN
         || state == QUNS_PRESENTATION_MODE
         || state == QUNS_BUSY;
+}
+
+// 5h リセット時刻の通過をアカウント別に判定し、条件を満たせば通知する
+//
+// メトリクスを更新するのは 60 秒周期のフェッチ結果だけのため、1 秒周期のこの判定が
+// 「時計が five_h_resets_ts を通過した」瞬間に見る five_h_pct はリセット直前の使用率である。
+// これを reset_notify_min_pct と比較し、以下なら通知しない。
+// Usage API 取得失敗（Err）中も前回値が残るため時計比較だけで判定できる。
+// 同じリセット時刻は通知の有無に関わらず 1 回だけ判定する（claude_reset_notified_ts_）。
+// 通過から RESET_NOTIFY_FRESH_SEC を超えたリセットは通知しない（起動直後にキャッシュから
+// 復元した過去のリセット時刻での誤通知を防ぐ）。
+// 通知方法が「通知しない」でも判定と記録は行い、途中で方法を切り替えても過去分が遡って鳴らないようにする。
+// フルスクリーン抑制は警告と同じ条件で Toast と通知音の両方に適用する（例外項目は設けない）。
+// 抑制中に通過したリセットの通知は破棄する。抑制解除後にも再送しない（ユーザ判断で受容済み。
+// 保留状態を持たずに単純さを優先する）。
+void AppWindow::check_claude_reset_notify() {
+    const ClaudeMetrics* accts[2] = { &metrics_->claude_main, &metrics_->claude_sub };
+    const time_t now = time(nullptr);
+    for (int i = 0; i < 2; ++i) {
+        const ClaudeMetrics& m = *accts[i];
+        if (!m.account_enabled || !m.avail || m.five_h_resets_ts <= 0) continue;
+        if (m.five_h_resets_ts > now) continue;
+        if (m.five_h_resets_ts == claude_reset_notified_ts_[i]) continue;
+        claude_reset_notified_ts_[i] = m.five_h_resets_ts;
+
+        if (now - m.five_h_resets_ts > RESET_NOTIFY_FRESH_SEC) {
+            log_info("claude 5h reset: skipped stale (account=%d, age=%llds)", i,
+                     static_cast<long long>(now - m.five_h_resets_ts));
+            continue;
+        }
+        if (m.five_h_pct <= cfg_->claude_reset_notify_min_pct) {
+            log_info("claude 5h reset: skipped low usage (account=%d, pct=%.1f)", i, m.five_h_pct);
+            continue;
+        }
+        if (reset_notify_ == RESET_NOTIFY_NONE) continue;
+        if (fullscreen_mute_ && is_fullscreen_app_running()) {
+            log_info("claude 5h reset: suppressed by fullscreen (account=%d)", i);
+            continue;
+        }
+        if (reset_notify_ == RESET_NOTIFY_TOAST) {
+            wchar_t body[128];
+            _snwprintf_s(body, _TRUNCATE, L"%ls の 5h ウィンドウがリセットされました（直前 %.0f%%）",
+                         m.account_label, m.five_h_pct);
+            show_notify(L"Claude 5h リセット", body);
+        }
+        else {
+            alert_->play_reset_sound();
+        }
+        log_info("claude 5h reset: notified (account=%d, pct=%.1f, method=%s)", i, m.five_h_pct,
+                 reset_notify_ == RESET_NOTIFY_TOAST ? "toast" : "sound");
+    }
 }
 
 void AppWindow::load_visibility() {
@@ -1113,6 +1194,7 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             uint32_t fired = alert_->check(*metrics_, *cfg_, muted, always_mask);
             const uint32_t toast_mask = muted ? (fired & always_mask) : fired;
             if (toast_mask && toast_alert_) show_balloon(toast_mask);
+            check_claude_reset_notify();
         }
         update_window_size();
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -1173,6 +1255,10 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             fullscreen_mute_ = !fullscreen_mute_;
             save_fullscreen_mute();
             break;
+        // 5h リセット通知方法の選択：値を確定 → 永続化（再描画・リサイズは不要）
+        case IDM_RESET_NOTIFY_TOAST: reset_notify_ = RESET_NOTIFY_TOAST; save_reset_notify(); break;
+        case IDM_RESET_NOTIFY_SOUND: reset_notify_ = RESET_NOTIFY_SOUND; save_reset_notify(); break;
+        case IDM_RESET_NOTIFY_NONE:  reset_notify_ = RESET_NOTIFY_NONE;  save_reset_notify(); break;
         // コンパクト表示トグル：フラグ反転 → 永続化 → renderer 反映 → 先行リサイズ＋同期再描画
         case IDM_COMPACT:
             compact_ = !compact_;

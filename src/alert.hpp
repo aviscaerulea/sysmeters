@@ -52,12 +52,23 @@ public:
     uint32_t check(const AllMetrics& m, const AppConfig& cfg, bool mute = false,
                    uint32_t always_mask = 0);
 
+    // 5h リセット通知の通知音（claude_5h_reset.wav）を 1 回再生する
+    // 閾値判定を経ない。ファイルが無い場合は何もしない。通知音自身の再生中ならスキップする
+    void play_reset_sound();
+
 private:
     bool           fired_[COUNT_] = {};     // true = 発火済み（リセット閾値未達まで再発火しない）
-    wchar_t        wav_path_[MAX_PATH] = {};
+    wchar_t        wav_path_[MAX_PATH] = {};   // 警告音 alert.wav の絶対パス
     bool           wav_avail_    = false;
+    // 5h リセット通知の通知音 claude_5h_reset.wav の絶対パスと存在フラグ。
+    // 警告音と区別できる音にするため専用ファイルとし、alert.wav と同じ形式（44.1kHz / 16bit / ステレオ）で置く
+    wchar_t        reset_wav_path_[MAX_PATH] = {};
+    bool           reset_wav_avail_ = false;
     int            guard_tone_ms_ = 1500;   // ガードトーン長（再生前後の 19kHz 不可聴トーン、ms）
-    HANDLE         sound_thread_ = nullptr;
+    // 再生スレッドのスロット。警告音と通知音で別に持ち、一方の再生中でも他方を取りこぼさない
+    // （WASAPI 共有モードのため同時再生は OS がミックスする）。同一スロット内は再生中ならスキップする
+    HANDLE         sound_thread_       = nullptr;   // 警告音 alert.wav
+    HANDLE         reset_sound_thread_ = nullptr;   // 通知音 claude_5h_reset.wav
 
     // 検出ドライブ数と、init() で構築するディスク系ラベル（例：L"ディスク C: 使用率"）
     // 添字は DISK_0/TEMP_NVME_0 起点のオフセットに対応する
@@ -65,8 +76,10 @@ private:
     wchar_t disk_label_[kMaxDiskDrives][24] = {};
     wchar_t nvme_label_[kMaxDiskDrives][24] = {};
 
-    // バックグラウンドスレッドで WASAPI 再生を開始する
-    void play();
+    // 指定 wav を slot のバックグラウンドスレッドで WASAPI 再生する（警告音・通知音で共用）
+    void play(const wchar_t* wav_path, HANDLE& slot);
+    // slot の再生スレッドの終了を待ってハンドルを閉じる（shutdown 用）
+    static void join_slot(HANDLE& slot);
 
     static DWORD WINAPI sound_thread_func(LPVOID param);
 };

@@ -37,6 +37,7 @@ A Toast notification appears the moment any warning threshold is exceeded. Notif
 - OS: Displays the OS name and continuous uptime (turns to the warning color once uptime exceeds the threshold)
 - Claude Code: Displays 5h / 7d rate limit usage, reset times, and session counts (main and sub accounts can be displayed simultaneously)
 - Claude Code nudge: Detects the gap after a rate limit reset where consumption has not yet started, and automatically launches `claude.exe`
+- Claude Code 5h reset notification: Announces a reset via Toast or notification sound (skipped when usage is at or below the threshold)
 - Top process display: Shows the name and usage of the top process inside the CPU / GPU area charts
 - Display item toggles: Turns each section — CPU, GPU, memory, disk, network, and Claude — on and off individually (disks can also be toggled per drive)
 - Compact mode: Scales the entire display, including charts and fonts, down to 3/5
@@ -85,6 +86,12 @@ If the launched `claude.exe` does not lead to consumption and the gap persists, 
 Even while a Usage API fetch is failing (`Err` displayed), it fires on an estimate once the known 5h reset time has passed. (because whether a new window has begun cannot be confirmed; for an `Err` caused by expired credentials, launching `claude.exe` can heal the `Err` by refreshing the token)
 
 The launch command is shared between both accounts. When run for the sub account, it is launched with the `CLAUDE_CONFIG_DIR` environment variable temporarily set to the sub account's configuration directory. (the Claude CLI has no `--config-dir` command option; overriding the configuration directory is only possible through the environment variable)
+
+### Claude Code 5h Reset Notification
+
+A feature that notifies you, per account, the moment the 5h window reset time passes. Choose the notification method from "5h リセット通知" (5h Reset Notification) in the tray menu: Toast, notification sound, or none (default is Toast). The notification sound plays `claude_5h_reset.wav`, a file separate from the alert sound.
+
+Resets where the 5h usage just before the reset is at or below `reset_notify_min_pct` (default 1%) are not notified, since the window was not used. Resets that passed while sysmeters was stopped are not notified at startup either. Fullscreen suppression applies under the same conditions as warnings.
 
 ### Warning Colors
 
@@ -175,7 +182,7 @@ When installed via Scoop, it starts as soon as installation completes. After tha
 
 When extracted from the ZIP, run `sysmeters.exe` in the extraction directory. The configuration file and the alert sound are read from the directory containing the executable, so keep the extracted files together.
 
-An icon appears in the system tray (notification area). Left-clicking the icon restores the window from the minimized state and brings it to the front once (without taking focus). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
+An icon appears in the system tray (notification area). Left-clicking the icon restores the window from the minimized state and brings it to the front once (without taking focus). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, 5h reset notification method, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
 
 ## Configuration
 
@@ -191,7 +198,7 @@ The main configuration sections are as follows.
 | `[window]` | Initial window position and width |
 | `[color]` | Background color, chart colors, bar colors |
 | `[threshold]` | Warning thresholds, reset thresholds, alert sound on/off, sample count for averaging |
-| `[claude]` | Claude Code section display adjustments, nudge, underuse detection |
+| `[claude]` | Claude Code section display adjustments, nudge, 5h reset notification, underuse detection |
 | `[claude_sub]` | Sub account activation and configuration directory |
 | `[topproc]` | Appearance conditions for the top process display and afterimage duration |
 | `[guard]` | Length of the inaudible tone for BLE headphones |

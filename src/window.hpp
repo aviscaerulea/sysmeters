@@ -55,6 +55,13 @@ private:
     static constexpr bool DEF_ALWAYS_ALERT_GPU       = false;
     static constexpr bool DEF_ALWAYS_ALERT_TEMP_GPU  = true;
     static constexpr bool DEF_ALWAYS_ALERT_TEMP_DISK = true;
+    // 5h リセット通知の通知方法。レジストリに REG_DWORD で保存する（値は enum の数値）
+    enum ResetNotify : int { RESET_NOTIFY_NONE = 0, RESET_NOTIFY_TOAST = 1, RESET_NOTIFY_SOUND = 2 };
+    static constexpr ResetNotify DEF_RESET_NOTIFY = RESET_NOTIFY_TOAST;
+    // 5h リセット通知の鮮度ゲート（秒）。リセット時刻の通過からこの秒数を超えたものは通知しない。
+    // 起動直後にキャッシュから復元した過去のリセット時刻での誤通知を防ぐ。
+    // 通常運転では 1 秒周期の判定が通過直後に捕まえるため、スリープ復帰等のタイマー停滞の余裕として 120 秒とする
+    static constexpr time_t RESET_NOTIFY_FRESH_SEC = 120;
 
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
@@ -72,6 +79,11 @@ private:
     bool always_alert_gpu_       = DEF_ALWAYS_ALERT_GPU;        // GPU 使用率
     bool always_alert_temp_gpu_  = DEF_ALWAYS_ALERT_TEMP_GPU;   // GPU 温度
     bool always_alert_temp_disk_ = DEF_ALWAYS_ALERT_TEMP_DISK;  // ディスク温度（全ドライブ一括）
+    // 5h リセット通知の通知方法（レジストリ保存）
+    ResetNotify reset_notify_ = DEF_RESET_NOTIFY;
+    // 5h リセット通知の判定済みリセット時刻（添字 0=Main, 1=Sub）。同じリセット時刻で二度判定しない。
+    // 通知をスキップした場合も記録し、閾値以下や鮮度切れのリセットを毎秒再判定しない
+    time_t claude_reset_notified_ts_[2] = { -1, -1 };
     // 現在フルスクリーン抑制が働いているか（タイトルバー表示の差分検知用。WM_TIMER で更新）
     bool fullscreen_silent_ = false;
     Visibility vis_;                   // セクション表示フラグ（カテゴリ単位の表示/非表示）
@@ -132,6 +144,10 @@ private:
     void save_compact();          // レジストリにコンパクト表示設定を書く
     bool load_top_proc();         // レジストリからトッププロセス表示設定を読む（未設定時は true）
     void save_top_proc();         // レジストリにトッププロセス表示設定を書く
+    ResetNotify load_reset_notify();  // レジストリから 5h リセット通知方法を読む（未設定・範囲外時は Toast）
+    void save_reset_notify();         // レジストリに 5h リセット通知方法を書く
+    // 5h リセット時刻の通過をアカウント別に判定し、条件を満たせば通知する（WM_TIMER 1 秒周期で呼ぶ）
+    void check_claude_reset_notify();
     // 現在の描画スケールを反映した物理クライアント幅（ceil(win_width × scale)）
     int  client_width() const;
     void load_always_alert();  // レジストリから「常に警告通知」5 フラグを一括読み込み

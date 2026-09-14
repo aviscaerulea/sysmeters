@@ -26,6 +26,10 @@
 #define IDM_VIS_NET      114
 #define IDM_VIS_CLAUDE_MAIN 115
 #define IDM_VIS_CLAUDE_SUB  116
+// 5h リセット通知サブメニュー（通知方法の排他選択）
+#define IDM_RESET_NOTIFY_TOAST 117
+#define IDM_RESET_NOTIFY_SOUND 118
+#define IDM_RESET_NOTIFY_NONE  119
 // 常に警告通知を有効にするサブメニュー（フルスクリーン抑制の例外項目）
 #define IDM_ALWAYS_ALERT_CPU       120
 #define IDM_ALWAYS_ALERT_TEMP_CPU  121

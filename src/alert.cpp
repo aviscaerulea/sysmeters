@@ -296,16 +296,23 @@ void AlertManager::init(const AppConfig& cfg, const std::vector<char>& drives) {
     guard_tone_ms_ = cfg.guard_tone_ms;
     wchar_t exe[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    auto wav = fs::path(exe).parent_path() / L"alert.wav";
-    auto wav_str = wav.wstring();
-    if (wav_str.size() >= MAX_PATH) {
-        log_error("alert: wav path exceeds MAX_PATH, sound alerts disabled");
-        return;
-    }
-    wcscpy_s(wav_path_, wav_str.c_str());
-    wav_avail_ = (GetFileAttributesW(wav_path_) != INVALID_FILE_ATTRIBUTES);
-    if (!wav_avail_)
-        log_info("alert: alert.wav not found, sound alerts disabled");
+    const fs::path exe_dir = fs::path(exe).parent_path();
+    // exe と同じディレクトリの wav を解決する。存在すれば avail を立てる。
+    // 不在・パス長超過は該当音の無効化にとどめ、他の音や閾値判定には影響させない
+    // name は ASCII 固定のファイル名で、ログにそのまま出すため narrow で受ける
+    auto resolve_wav = [&exe_dir](const char* name, wchar_t (&out_path)[MAX_PATH], bool& out_avail) {
+        auto wav_str = (exe_dir / name).wstring();
+        if (wav_str.size() >= MAX_PATH) {
+            log_error("alert: %s path exceeds MAX_PATH, sound disabled", name);
+            return;
+        }
+        wcscpy_s(out_path, wav_str.c_str());
+        out_avail = (GetFileAttributesW(out_path) != INVALID_FILE_ATTRIBUTES);
+        if (!out_avail)
+            log_info("alert: %s not found, sound disabled", name);
+    };
+    resolve_wav("alert.wav",           wav_path_,       wav_avail_);
+    resolve_wav("claude_5h_reset.wav", reset_wav_path_, reset_wav_avail_);
 
     // ディスク系ラベルをドライブレター入りで事前構築する（kMaxDiskDrives 台を超える分は無視）
     disk_count_ = static_cast<int>(std::min(drives.size(), static_cast<size_t>(kMaxDiskDrives)));
@@ -317,34 +324,47 @@ void AlertManager::init(const AppConfig& cfg, const std::vector<char>& drives) {
 
 void AlertManager::shutdown() {
     g_shutdown = true;
-    if (sound_thread_) {
-        // g_shutdown を true にすると play_tone_segment / WAV 供給ループが最大 200ms 以内に停止する
-        // guard_tone_ms の設定値に関わらず 5 秒のタイムアウトで十分。
-        // タイムアウトしてスレッドが残存しても、参照先は static の g_shutdown と
-        // スレッド自身が所有する SoundParam のみのため、本体の delete は安全。
-        WaitForSingleObject(sound_thread_, 5000);
-        CloseHandle(sound_thread_);
-        sound_thread_ = nullptr;
-    }
+    join_slot(sound_thread_);
+    join_slot(reset_sound_thread_);
 }
 
-// バックグラウンドスレッドで alert.wav を再生する
+// 再生スレッドの終了を待ってハンドルを閉じる
 //
-// 前の再生スレッドがまだ動いている場合はスキップする（連続再生防止）。
-void AlertManager::play() {
-    if (sound_thread_) {
-        if (WaitForSingleObject(sound_thread_, 0) != WAIT_OBJECT_0)
+// g_shutdown を true にすると play_tone_segment / WAV 供給ループが最大 200ms 以内に停止する。
+// guard_tone_ms の設定値に関わらず 5 秒のタイムアウトで十分。
+// スロットは 2 本を逐次待つため、両方がハングした最悪時の待ちは合計 10 秒になる（通常は即時終了）。
+// タイムアウトしてスレッドが残存しても、参照先は static の g_shutdown と
+// スレッド自身が所有する SoundParam のみのため、本体の delete は安全。
+void AlertManager::join_slot(HANDLE& slot) {
+    if (!slot) return;
+    WaitForSingleObject(slot, 5000);
+    CloseHandle(slot);
+    slot = nullptr;
+}
+
+// 5h リセット通知の通知音を単発再生する
+void AlertManager::play_reset_sound() {
+    if (reset_wav_avail_) play(reset_wav_path_, reset_sound_thread_);
+}
+
+// 指定 wav を slot のバックグラウンドスレッドで再生する
+//
+// slot の前の再生スレッドがまだ動いている場合はスキップする（同一音の連続再生防止）。
+// 警告音と通知音はスロットが別のため互いにスキップし合わない。
+void AlertManager::play(const wchar_t* wav_path, HANDLE& slot) {
+    if (slot) {
+        if (WaitForSingleObject(slot, 0) != WAIT_OBJECT_0)
             return;  // 再生中のためスキップ
-        CloseHandle(sound_thread_);
-        sound_thread_ = nullptr;
+        CloseHandle(slot);
+        slot = nullptr;
     }
     auto* p = new SoundParam{};
-    wcscpy_s(p->wav_path, wav_path_);
+    wcscpy_s(p->wav_path, wav_path);
     p->shutdown = &g_shutdown;
     p->tone_ms  = guard_tone_ms_;
     HANDLE h = CreateThread(nullptr, 0, sound_thread_func, p, 0, nullptr);
     if (h) {
-        sound_thread_ = h;
+        slot = h;
     }
     else {
         log_error("alert: CreateThread failed");
@@ -487,7 +507,7 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
 
     // mute 中は always_mask の例外項目のみ警告音の対象とする
     const uint32_t sound_mask = mute ? (fired_mask & always_mask) : fired_mask;
-    if (sound_mask && cfg.alert_sound && wav_avail_) play();
+    if (sound_mask && cfg.alert_sound && wav_avail_) play(wav_path_, sound_thread_);
     return fired_mask;
 }
 

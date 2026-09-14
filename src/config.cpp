@@ -194,6 +194,7 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_underuse_enable   = get_bool ("claude", "underuse_enable",   cfg.claude_underuse_enable);
         cfg.claude_underuse_grace_hours = get_int("claude", "underuse_grace_hours", cfg.claude_underuse_grace_hours);
         cfg.claude_underuse_warn_pct = get_float("claude", "underuse_warn_pct", cfg.claude_underuse_warn_pct);
+        cfg.claude_reset_notify_min_pct = get_float("claude", "reset_notify_min_pct", cfg.claude_reset_notify_min_pct);
 
         // メインアカウント設定（[claude] セクション）
         // メインは ~/.claude を固定使用するため config_dir は持たない。
@@ -264,6 +265,9 @@ AppConfig load_config(const std::string& path) {
     // 使い切り不能検知の発動猶予サニティチェック（0〜168 時間 = 7d 全長）
     // 7d ウィンドウ全長を超える猶予は判定機会が消滅するため上限とする。0 は猶予なし
     cfg.claude_underuse_grace_hours = std::clamp(cfg.claude_underuse_grace_hours, 0, 168);
+
+    // 5h リセット通知の下限使用率サニティチェック（0〜100%）
+    cfg.claude_reset_notify_min_pct = std::clamp(cfg.claude_reset_notify_min_pct, 0.f, 100.f);
 
     // ガードトーン長のサニティチェック（0〜10 秒）
     cfg.guard_tone_ms = std::clamp(cfg.guard_tone_ms, 0, 10000);
