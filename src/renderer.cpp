@@ -1118,38 +1118,12 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     //                    0 以上のときバー右側、7d 行のリセット日時の月数字と桁を揃えた位置に
     //                    リセット時刻と同色・同フォントで右詰め描画する
     //                    （5h のみで使用、7d は -1 のまま非表示。判定・算出は呼び出し側で行う）
-    // reach_line_pct:   7d 到達限界線の位置（%）。「今から 5h 枠を想定使用率で回し続けても 100% に
-    //                    届かなくなる」使用率で、0 より大きく 100 未満のときバー上端に
-    //                    cfg.col_claude_reach_line の小さな三角（下向き）を置く
-    //                    （7d のみで使用、5h は -1 のまま非表示。算出は呼び出し側で行う）
-    // ペース線（緑）の太さ（px）。1px のグリッド線と見分けが付き、バー内で主張しすぎない値にする
-    static constexpr float PACE_LINE_W = 2.5f;
-    // 到達限界マーカー（二等辺三角）の寸法（px）。底辺の幅と高さ。底辺より高さを取り、やや尖らせる。
-    // 高さはバー高 16px の中で塗りを横切らず、かつ 1px のグリッド線と見分けが付く程度にする
-    static constexpr float REACH_TRI_W = 6.f;
-    static constexpr float REACH_TRI_H = 6.f;
-    // 三角形を 1 つ塗る（底辺の両端 2 点と頂点 1 点）。到達限界マーカー専用の小物
-    auto fill_triangle = [&](D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F apex) {
-        ID2D1PathGeometry* path = nullptr;
-        if (FAILED(d2d_factory_->CreatePathGeometry(&path))) return;
-        ID2D1GeometrySink* sink = nullptr;
-        if (SUCCEEDED(path->Open(&sink))) {
-            sink->BeginFigure(a, D2D1_FIGURE_BEGIN_FILLED);
-            sink->AddLine(b);
-            sink->AddLine(apex);
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-            if (SUCCEEDED(sink->Close())) render_target_->FillGeometry(path, brush_fill_);
-            sink->Release();
-        }
-        path->Release();
-    };
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
                          bool underuse = false,
                          float delta_start_pct = 0.f,
                          double window_secs = 0.0,
-                         int turns_left = -1,
-                         float reach_line_pct = -1.f) {
+                         int turns_left = -1) {
         static constexpr float CLAUDE_BAR_H = BAR_H;  // VRAM 等と同じバー高さに揃える
 
         // ラベル（"5h"/"7d"）は常に通常色で左寄せ、パーセンテージは条件付き色・フォントで右寄せ
@@ -1230,31 +1204,13 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                 brush_fill_, 1.0f);
         }
 
-        // 7d 到達限界線（呼び出し側が算出。-1 のとき非表示）
-        // 塗りがこの位置より左なら 100% 到達不能で、位置と塗りの距離が余裕を表す。
-        // バー上端から下向きの小さな三角で示す。全高の線は塗りのアンバーや直近増分の帯と
-        // 同系の色では溶け、異系の色ではパレットから浮いて見えたため、塗りを横切らない目印にした。
-        // 緑線より先に描き、重なったときは緑線を優先して見せる
-        // bar_w < REACH_TRI_W（win_width の下限 80 では負にもなる）だと後続クランプの
-        // 下限が上限を超え std::clamp の事前条件違反（Debug は CRT アサート中断、
-        // Release は位置不正）になるため、底辺が収まらない狭幅では三角を描かない
-        if (avail && reach_line_pct > 0.f && reach_line_pct < 100.f && bar_w >= REACH_TRI_W) {
-            float hw = REACH_TRI_W / 2.f;
-            // 底辺がバー矩形からはみ出さないよう、中心をバー端から半幅分内側にクランプする
-            // （リセット直前は位置が 100% へ連続的に近づき、右端の帯域を必ず通過するため）
-            float rx = std::clamp(br.left + bar_w * (reach_line_pct / 100.f), br.left + hw, br.right - hw);
-            set_brush_color(brush_fill_, cfg.col_claude_reach_line);
-            fill_triangle(D2D1::Point2F(rx - hw, br.top), D2D1::Point2F(rx + hw, br.top),
-                          D2D1::Point2F(rx, br.top + REACH_TRI_H));
-        }
-
         // 現在時刻の均等消費ペース線（緑）
         if (avail && expected_pct > 0.f) {
             float ex = br.left + bar_w * (expected_pct / 100.f);
             set_brush_color(brush_fill_, COL_PACE_IDEAL);
             render_target_->DrawLine(
                 D2D1::Point2F(ex, br.top), D2D1::Point2F(ex, br.bottom),
-                brush_fill_, PACE_LINE_W);
+                brush_fill_, 3.5f);
         }
 
         // 警告解除までの残り時間（黒字、バー左端＝塗り部分の上に描画する）
@@ -1430,24 +1386,12 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         }
         if (turns_left > cfg.claude_turns_show_from) turns_left = -1;
     }
-    // 7d 到達限界線の位置（%）。残り時間を 5h 単位で数え、1 ウィンドウあたり
-    // 換算率（five_h_as_7d_pct）× reach_line_5h_pct % 消費し続けたときの最大増加分を 100 から引く。
-    // 連続近似（進行中の 5h ターンの進行度とウィンドウ境界の離散性は無視）で足りる用途。
-    // 換算率が未推定、resets が未取得、機能無効（0）、残り時間が十分で位置が 0 以下、のいずれかのときは -1（非表示）
-    float reach_line_7d = -1.f;
-    if (m.avail && cfg.claude_reach_line_5h_pct > 0 && m.five_h_as_7d_pct > 0.f && m.seven_d_resets_ts > 0) {
-        double remaining = static_cast<double>(m.seven_d_resets_ts) - static_cast<double>(time(nullptr));
-        if (remaining < 0.0) remaining = 0.0;
-        double max_gain = remaining / CLAUDE_WIN_5H_SECS * m.five_h_as_7d_pct
-                        * (cfg.claude_reach_line_5h_pct / 100.0);
-        if (max_gain < 100.0) reach_line_7d = static_cast<float>(100.0 - max_gain);
-    }
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
              claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS), 5, cfg.warn_claude_5h_pct,
              false, five_h_delta_start, 0.0, turns_left);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
              seven_d_expected, 7, cfg.warn_claude_7d_pct,
-             underuse_7d, seven_d_delta_start, CLAUDE_WIN_7D_SECS, -1, reach_line_7d);
+             underuse_7d, seven_d_delta_start, CLAUDE_WIN_7D_SECS);
     // モデルスコープ（Fable 等）7d 専用ミニバー
     // 7d バー下端に隙間なく密着する塗り矩形のみ（縦幅は cfg.claude_scoped_bar_px、0 = 非表示）。
     // バー全幅 = スコープ枠の 100%。
