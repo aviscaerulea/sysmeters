@@ -271,7 +271,7 @@ static json hist_to_json_array(const std::vector<ClaudeHistorySample>& hist) {
 //
 // init() から一度だけ呼ばれ、起動直後の履歴（restored_hist5_ / restored_hist7_）の種にする。
 // read_cache_raw を再利用するため TTL 判定はなく、ファイル未存在・parse 失敗時は
-// out_five / out_seven を空のまま返す。（現状互換：履歴なしからスタートする挙動に退化する）
+// out_five / out_seven を空のまま返す（現状互換：履歴なしからスタートする挙動に退化する）。
 static void load_history_cache(const fs::path& path,
                                std::vector<ClaudeHistorySample>& out_five,
                                std::vector<ClaudeHistorySample>& out_seven) {
@@ -831,11 +831,11 @@ void ClaudeCollector::init(HWND notify_wnd, int account_index,
         }
     }
     // キャッシュディレクトリは %LOCALAPPDATA%\sysmeters。
-    // テンポラリ（旧保存先）は OS やユーザの掃除で消え、5h→7d 換算率の学習と 7d 履歴の
-    // アンカーがやり直しになるため移した。exe ディレクトリ配下にしないのは、Scoop が更新時に
-    // バージョンディレクトリを作り直し、manifest の persist 指定なしではキャッシュが消えるため。
+    // テンポラリ（旧保存先）は OS やユーザの掃除で消え、7d 履歴のアンカーがやり直しになるため
+    // 移した。exe ディレクトリ配下にしないのは、Scoop が更新時にバージョンディレクトリを作り直し、
+    // manifest の persist 指定なしではキャッシュが消えるため。
     // 取得・作成に失敗したときはパスを空のままにし、後段の I/O は静かに失敗させる（既存契約）。
-    // 旧テンポラリのファイルは移行しない（学習は数時間、履歴は 30 分で復帰する）
+    // 旧テンポラリのファイルは移行しない（履歴は 30 分で復帰する）
     wchar_t appdata[MAX_PATH] = {};
     if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appdata))) {
         fs::path cache_dir = fs::path(appdata) / L"sysmeters";
