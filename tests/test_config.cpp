@@ -25,7 +25,7 @@ std::string write_temp_toml(const std::string& content) {
 TEST_CASE("load_config: 存在しないパスはデフォルト値を返す") {
     AppConfig cfg = load_config("__no_such_file_for_sysmeters_tests__.toml");
     CHECK(cfg.warn_cpu_pct  == 95.f);
-    CHECK(cfg.reset_cpu_pct == 90.f);
+    CHECK(cfg.reset_cpu_pct == 70.f);
     CHECK(cfg.win_width     == 460);
 }
 

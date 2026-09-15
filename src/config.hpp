@@ -93,9 +93,9 @@ struct AppConfig {
     //（60 = 履歴 RingBuffer の容量。0 以下は average() が 0 を返し警告が発火しなくなるため下限 1）
     int   alert_avg_samples     = 15;  // CPU/GPU 使用率（0.9 秒 × 15 ≒ 13.5 秒）
     int   alert_avg_samples_mem =  7;  // RAM/VRAM 使用率（2.0 秒 × 7 = 14 秒）
-    float reset_cpu_pct      = 90.f;  // CPU 使用率の警告音リセット閾値（%）
-    float reset_gpu_pct      = 90.f;  // GPU 使用率の警告音リセット閾値（%）
-    float reset_mem_pct       = 85.f;  // RAM/VRAM の警告音リセット閾値（%）
+    float reset_cpu_pct      = 70.f;  // CPU 使用率の警告音リセット閾値（%）
+    float reset_gpu_pct      = 70.f;  // GPU 使用率の警告音リセット閾値（%）
+    float reset_mem_pct       = 80.f;  // RAM/VRAM の警告音リセット閾値（%）
     float reset_disk_space_pct = 85.f; // Disk Space の警告音リセット閾値（%）
     float reset_temp         = 85.f;  // CPU/GPU/NVMe 温度の警告音リセット閾値（℃）
     float reset_disk_gbh     =  5.f;  // Disk 書き込みの警告音リセット閾値（GB/h）

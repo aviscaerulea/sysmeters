@@ -19,7 +19,7 @@ constexpr uint32_t bit(int id) { return 1u << id; }
 
 TEST_CASE("AlertManager::check: 閾値未満では発火しない") {
     AlertManager mgr;
-    AppConfig cfg;          // warn_cpu_pct = 95, reset_cpu_pct = 90
+    AppConfig cfg;          // warn_cpu_pct = 95, reset_cpu_pct = 70
     AllMetrics m;
     fill_cpu_history(m, 50.f);
     uint32_t r = mgr.check(m, cfg, /*mute=*/true);
@@ -40,12 +40,12 @@ TEST_CASE("AlertManager::check: 閾値超過で 1 回だけ発火（ヒステリ
 
 TEST_CASE("AlertManager::check: リセット閾値を下回ると次回発火可能") {
     AlertManager mgr;
-    AppConfig cfg;          // reset_cpu_pct = 90
+    AppConfig cfg;          // reset_cpu_pct = 70
     AllMetrics m;
     fill_cpu_history(m, 97.f);
     mgr.check(m, cfg, true);   // 1 回目発火
 
-    fill_cpu_history(m, 80.f); // reset 90 を下回らせて解除
+    fill_cpu_history(m, 60.f); // reset 70 を下回らせて解除
     mgr.check(m, cfg, true);
 
     fill_cpu_history(m, 97.f); // 再上昇
