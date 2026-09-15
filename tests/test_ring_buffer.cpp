@@ -2,11 +2,10 @@
 #include "doctest.h"
 #include "ring_buffer.hpp"
 
-TEST_CASE("RingBuffer: 初期状態は空・容量 N") {
+TEST_CASE("RingBuffer: 初期状態は空") {
     RingBuffer<int, 5> rb;
     CHECK(rb.size() == 0);
     CHECK(rb.empty());
-    CHECK(rb.capacity() == 5);
 }
 
 TEST_CASE("RingBuffer: push が N で頭打ち、最古→最新の並び") {

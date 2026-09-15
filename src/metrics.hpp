@@ -8,10 +8,9 @@
 
 // 全メトリクスデータ構造体
 
-// OS 情報：マシン名、OS バージョン、アップタイム
-// マシン名は起動時 1 回取得、アップタイムは 60 秒ごと、OS ラベルは 1 時間ごとに更新する
+// OS 情報：OS バージョン、アップタイム
+// アップタイムは 60 秒ごと、OS ラベルは 1 時間ごとに更新する
 struct OsMetrics {
-    wchar_t machine_name[MAX_COMPUTERNAME_LENGTH + 1] = {};
     wchar_t os_label[64] = {};    // "Windows 11 Pro (24H2 26100)" 形式
     ULONGLONG uptime_ms = 0;
 };
@@ -168,7 +167,6 @@ struct ClaudeMetrics {
     wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
     wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、時はゼロ埋めなしの 2 桁右寄せ。未取得時は空文字）
-    time_t fetched_ts = 0;            // Usage API 実フェッチ時刻（UTC time_t、fetched_at の元値。未取得時 0）
     // 5h / 7d 使用率の時系列（各 delta ウィンドウの N+1 分を保持）
     // apply_result 呼び出し時に push し、保持期間外を先頭から破棄する。
     // 描画側で「現在値」と「N 分前の値」の差分を濃色オーバーレイとして表示する。

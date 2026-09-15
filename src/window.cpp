@@ -17,7 +17,6 @@
 #include "update_check.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <windowsx.h>
 #include <shellapi.h>
 #include <dwmapi.h>
 #pragma comment(lib, "shell32.lib")
@@ -205,12 +204,8 @@ bool AppWindow::create(HINSTANCE hinstance, const AppConfig& cfg) {
         update_process_priority();
     }
 
-    // OS 情報初期取得（マシン名は不変、OS ラベルは 1 時間ごとに update_os_label で再取得）
-    {
-        DWORD sz = MAX_COMPUTERNAME_LENGTH + 1;
-        GetComputerNameW(metrics_->os.machine_name, &sz);
-        update_os_label();
-    }
+    // OS ラベル初期取得（以後 1 時間ごとに update_os_label で再取得）
+    update_os_label();
 
     // 初回描画（全メトリクスを一括取得）
     metrics_->os.uptime_ms = GetTickCount64();

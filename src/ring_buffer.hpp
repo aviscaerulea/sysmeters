@@ -35,9 +35,8 @@ public:
         return sum / static_cast<T>(n);
     }
 
-    std::size_t size()     const { return count_; }
-    std::size_t capacity() const { return N; }
-    bool        empty()    const { return count_ == 0; }
+    std::size_t size()  const { return count_; }
+    bool        empty() const { return count_ == 0; }
 
 private:
     std::array<T, N> data_;

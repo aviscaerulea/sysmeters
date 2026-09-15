@@ -193,10 +193,9 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_reset_notify_min_pct = get_float("claude", "reset_notify_min_pct", cfg.claude_reset_notify_min_pct);
 
         // メインアカウント設定（[claude] セクション）
-        // メインは ~/.claude を固定使用するため config_dir は持たない。
+        // メインは ~/.claude を固定使用するため config_dir は構造体デフォルトの空のままにする。
         // enable はロード時に true 強制（[claude] セクションで明示しなくても動く既存互換）。
         cfg.claude_main.name         = get_wstr("claude", "name",         L"Claude");
-        cfg.claude_main.config_dir.clear();
         cfg.claude_main.nudge_enable = get_bool("claude", "nudge_enable", false);
         cfg.claude_main.enable       = true;
 

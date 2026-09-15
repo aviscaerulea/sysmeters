@@ -13,7 +13,6 @@
 #include "logger.hpp"
 #include <string>
 #include <fstream>
-#include <sstream>
 #include <filesystem>
 #include <algorithm>
 #include <chrono>
@@ -332,10 +331,10 @@ static bool json_bool(const nlohmann::json& j, const char* key, bool def) {
 // do_fetch（API/キャッシュ経由）と init（前回キャッシュ復元）で共有する。
 // usage_j が null の場合は何もしない。成功時のみ result.avail を true にし、
 // キャッシュ JSON に付与された "_ts"（do_fetch がキャッシュ保存時に付与、新規取得・
-// キャッシュヒット・起動時復元のいずれでも保持）を result.fetched_ts に生値のまま格納し、
-// あわせてローカル時刻 "HH:MM"（時はゼロ埋めなしの 2 桁右寄せ。1 桁時は先頭に空白）に整形して
-// result.fetched_at へ格納する。等幅フォントで桁と直近使用ドットの位置が時刻に依らず揃うようにするため。
-// （fetched_at は画面表示用の取得時刻鮮度インジケータ、fetched_ts はペース追跡のサンプル時刻）
+// キャッシュヒット・起動時復元のいずれでも保持）をローカル時刻 "HH:MM"（時はゼロ埋めなしの
+// 2 桁右寄せ。1 桁時は先頭に空白）に整形して result.fetched_at へ格納する。
+// 等幅フォントで桁と直近使用ドットの位置が時刻に依らず揃うようにするため。
+// （fetched_at は画面表示用の取得時刻鮮度インジケータ）
 static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
     if (usage_j == nullptr) return;
     try {
@@ -362,7 +361,6 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         result.avail = true;
 
         time_t fetched_ts = static_cast<time_t>(json_num(usage_j, "_ts", 0.0));
-        result.fetched_ts = fetched_ts;
         if (fetched_ts > 0) {
             struct tm lt{};
             localtime_s(&lt, &fetched_ts);
