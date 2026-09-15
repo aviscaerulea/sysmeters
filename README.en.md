@@ -133,18 +133,6 @@ While the 7d bar is in a warning state, the time remaining until the warning cle
 
 For accounts billed for usage beyond the plan limit, the overage amount `$X.X` is shown on the header row. The text turns red once the overage exceeds the threshold.
 
-#### Bar Background Color (Underuse Detection)
-
-A display specific to the 7d bar. When it determines that the recent average consumption pace will not reach the target usage — that recovery is no longer possible — the background of the unused portion of the 7d bar turns dark blue. This is display only; no alert sound or Toast is raised. It occurs only when all of the following hold.
-
-- The current usage rate is at or below the even-pace marker (green line); not shown while the pace is exceeded
-- The grace period (default 48 hours) has elapsed since the 7d window started (reset)
-- Even if consumption continues at the measured recent average pace for the remaining time, the projected final usage will not reach the target (default 98%)
-
-The pace reference point is a sample from approximately 12 hours earlier; if unavailable, the oldest sample (once 30 minutes have elapsed) is used, and after the app resumes from being stopped, the last sample before the stop (the anchor) substitutes for it. No determination is made while the pace cannot be estimated (when the observed history spans less than 30 minutes, or when there has been no recent increase).
-
-The 7d history is saved to a file under `%LOCALAPPDATA%\sysmeters` and, with the last sample before a stop as an anchor, retained for up to 24 hours (twice the window width). Determination therefore continues based on the effective pace from before the stop even across sysmeters or OS restarts; after a stop longer than 24 hours, the history is rebuilt and determination resumes in about 30 minutes.
-
 ## Installation
 
 ### Requirements
@@ -198,7 +186,7 @@ The main configuration sections are as follows.
 | `[window]` | Initial window position and width |
 | `[color]` | Background color, chart colors, bar colors |
 | `[threshold]` | Warning thresholds, reset thresholds, alert sound on/off, sample count for averaging |
-| `[claude]` | Claude Code section display adjustments, nudge, 5h reset notification, underuse detection |
+| `[claude]` | Claude Code section display adjustments, nudge, 5h reset notification |
 | `[claude_sub]` | Sub account activation and configuration directory |
 | `[topproc]` | Appearance conditions for the top process display and afterimage duration |
 | `[guard]` | Length of the inaudible tone for BLE headphones |

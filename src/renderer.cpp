@@ -1043,23 +1043,10 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     static constexpr float RESET_W = 138.f;  // リセット時刻テキスト幅（"12/31 月 23:59" が収まる幅）
     // 均等消費ペースは metrics.hpp の claude_expected_pct（警告音判定と共用）で都度算出する
 
-    // 追い上げ可能な最大到達率（%）を実測ペースから外挿する
-    // rate は 7d 履歴の端点差分から算出した平均消費レート（%/秒、calc_hist_rate が算出）。
-    // rate 0（推定不可：起動直後・ウィンドウ切替直後・増加実績なし）や resets_ts 無効時は
-    // -1 を返し、呼び出し側は使い切り不能の判定をしない（警告なしの安全側）
-    auto calc_reach_pct = [](time_t resets_ts, float pct, float rate) -> float {
-        if (rate <= 0.f || resets_ts <= 0) return -1.f;
-        double remaining = static_cast<double>(resets_ts) - static_cast<double>(time(nullptr));
-        if (remaining < 0.0) remaining = 0.0;
-        return pct + rate * static_cast<float>(remaining);
-    };
-
     // 履歴から「N 分前の使用率」を求める（5h/7d オーバーレイ共用）
     // 新しい順に走査し、ts <= now - N 分 の最初のサンプルを返す。
     // N 分前のサンプルが無い場合、最古サンプルの経過時間が 60 秒以上なら最古サンプルを返す
     // （起動直後でもおおむねペースが見える効果。1 分未満は誤差が大きいため抑制）
-    // 長時間停止明けは collector が残したアンカー（停止前最後のサンプル）が「N 分以上前の
-    // 最新サンプル」に該当するため、起点が N 分前より古くなる。（停止中の増分も濃色に含まれる）
     auto calc_delta_start_pct = [&](const std::vector<ClaudeHistorySample>& hist, int win_min) -> float {
         if (win_min <= 0 || hist.empty()) return 0.f;
         time_t now = time(nullptr);
@@ -1071,35 +1058,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         return 0.f;
     };
 
-    // 短スパン外挿の抑制下限（秒）
-    // コールドスタート直後（win_min 分前の基準サンプルが無い）に最古サンプルで代用する際、
-    // これ未満の観測時間では傾きが暴れるため推定不可扱いにする
-    constexpr time_t UNDERUSE_MIN_SPAN_SECS = 30 * 60;
-    // 7d 履歴から直近の実質平均消費レート（%/秒）を求める
-    // 基準点は「win_min 分以上前」の最新サンプル。（アプリ停止明けは collector が残した
-    // アンカー＝停止前最後のサンプルが該当し、停止期間も分母に含んだ正味ペースになる）
-    // 基準サンプルが無い場合（コールドスタート直後）は最古サンプルで代用するが、
-    // 観測時間が UNDERUSE_MIN_SPAN_SECS 未満なら 0（推定不可）を返す。
-    // 増加 0 以下（リセット跨ぎで旧ウィンドウの高値が基準になった場合を含む）も 0 を返す
-    auto calc_hist_rate = [](const std::vector<ClaudeHistorySample>& hist, int win_min, float pct_now) -> float {
-        if (win_min <= 0 || hist.empty()) return 0.f;
-        time_t now = time(nullptr);
-        time_t target = now - static_cast<time_t>(win_min) * 60;
-        const ClaudeHistorySample* base = nullptr;
-        for (auto it = hist.rbegin(); it != hist.rend(); ++it) {
-            if (it->ts <= target) {
-                base = &*it;
-                break;
-            }
-        }
-        if (!base && now - hist.front().ts >= UNDERUSE_MIN_SPAN_SECS) base = &hist.front();
-        if (!base) return 0.f;
-        time_t span = now - base->ts;
-        if (span <= 0) return 0.f;
-        float rate = (pct_now - base->pct) / static_cast<float>(span);
-        return rate > 0.f ? rate : 0.f;
-    };
-
     // Claude レートリミット横バーを 1 本描画する
     //
     // lbl:              ラベル文字列（"5h"/"7d"）
@@ -1109,8 +1067,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // expected_pct:     均等消費ペースの理想位置（%）。0 のとき計算不可
     // tick_count:       バーの分割数。等分位置に縦線を tick_count - 1 本引く。（0 のとき縦線なし）
     // warn_pct:         理想ペースからの超過率の警告閾値（%）
-    // underuse:         使い切り不能検知の発火フラグ（判定は呼び出し側で行う。7d バー専用、5h は常に false）。
-    //                   true のときバー未使用部分の背景を暗青（col_claude_underuse_bg）で塗る
     // delta_start_pct:  直近ウィンドウ開始時点の使用率（%）。0 のとき増加分オーバーレイ非表示
     // window_secs:      ウィンドウ長（秒）。0 より大きいとき、パーセンテージが警告色（黄・赤）の間
     //                    バー左端に警告解除までの残り時間を黒字で表示する（7d のみで使用、5h は 0 のまま非表示）
@@ -1122,7 +1078,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     static constexpr float PACE_LINE_W = 2.5f;
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
-                         bool underuse = false,
                          float delta_start_pct = 0.f,
                          double window_secs = 0.0,
                          int turns_left = -1) {
@@ -1168,9 +1123,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         float bar_right = x + ww - RESET_W;
         float bar_top   = y + (SECTION_H - CLAUDE_BAR_H) / 2.f;  // 行内で縦中央揃え
         D2D1_RECT_F br  = D2D1::RectF(x + LBL_W + 4.f, bar_top, bar_right, bar_top + CLAUDE_BAR_H);
-        // 使い切り不能検知（7d 専用、判定は呼び出し側）：未使用部分の背景を暗青にして
-        // 容量を余らせる見込みが確定的であることを知らせる
-        set_brush_color(brush_fill_, underuse ? cfg.col_claude_underuse_bg : COL_BAR_BG);
+        set_brush_color(brush_fill_, COL_BAR_BG);
         render_target_->FillRectangle(br, brush_fill_);
 
         float fill_pct = avail ? pct : 0.f;
@@ -1345,28 +1298,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         draw_text_aligned(L"●", font_tiny_, dot_r, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
         recent_dot_drawn_ = true;
     }
-    // 7d 均等消費ペース位置（緑線）。使い切り不能検知の抑止判定と 7d バー描画で共用する
-    float seven_d_expected = claude_expected_pct(m.seven_d_resets_ts, CLAUDE_WIN_7D_SECS);
-    // 7d 使い切り不能検知：条件は次の 3 つすべて。（5h には検知を行わない）
-    // (1) ウィンドウ開始（リセット）から underuse_grace_hours 時間以上経過している
-    // (2) 現在の使用率が均等消費ペース位置（緑線）以下＝ペースに追いついていない。
-    //     ペース超過中は「使い過ぎ」の警告色と「余らせる」の暗青背景が同居して状態を
-    //     判断できなくなるため抑止する。判定式は draw_bar の pace_warning と同形
-    // (3) 直近の実質平均消費ペース（calc_hist_rate。停止期間も分母に含む正味レート）で
-    //     残り時間を外挿した予測到達率が underuse_warn_pct 未満
-    //     （レート推定不可のときは reach_pct が -1 になり判定しない）
-    // リセット直後は (1) が 48h（デフォルト）の間判定を止める。旧ウィンドウのサンプルは
-    // 保持期間切れの破棄と、アンカーのウィンドウ開始チェック（collector 側）で基準にならない
-    bool underuse_7d = false;
-    bool pace_over_7d = seven_d_expected > 0.f && m.seven_d_pct > seven_d_expected;
-    if (m.avail && cfg.claude_underuse_enable && m.seven_d_resets_ts > 0 && !pace_over_7d) {
-        double elapsed = CLAUDE_WIN_7D_SECS - (static_cast<double>(m.seven_d_resets_ts)
-                                               - static_cast<double>(time(nullptr)));
-        float rate  = calc_hist_rate(m.seven_d_history, cfg.claude_delta_window_7d_min, m.seven_d_pct);
-        float reach = calc_reach_pct(m.seven_d_resets_ts, m.seven_d_pct, rate);
-        underuse_7d = elapsed >= static_cast<double>(cfg.claude_underuse_grace_hours) * 3600.0
-                   && reach >= 0.f && reach < cfg.claude_underuse_warn_pct;
-    }
     // 5h 残ターン数：7d リセットまでに実行できる 5h ウィンドウ数。（進行中の現ターンを含む）
     // 現ターンの終端は、5h ウィンドウがアクティブ（five_h_resets_ts が未来）ならそのリセット時刻、
     // 非アクティブ（リセット通過後の間隙）なら「今開始した」と仮定した now + 5h とする。
@@ -1390,10 +1321,10 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     }
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
              claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS), 5, cfg.warn_claude_5h_pct,
-             false, five_h_delta_start, 0.0, turns_left);
+             five_h_delta_start, 0.0, turns_left);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
-             seven_d_expected, 7, cfg.warn_claude_7d_pct,
-             underuse_7d, seven_d_delta_start, CLAUDE_WIN_7D_SECS);
+             claude_expected_pct(m.seven_d_resets_ts, CLAUDE_WIN_7D_SECS), 7, cfg.warn_claude_7d_pct,
+             seven_d_delta_start, CLAUDE_WIN_7D_SECS);
     // モデルスコープ（Fable 等）7d 専用ミニバー
     // 7d バー下端に隙間なく密着する塗り矩形のみ（縦幅は cfg.claude_scoped_bar_px、0 = 非表示）。
     // バー全幅 = スコープ枠の 100%。

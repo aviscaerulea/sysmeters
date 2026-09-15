@@ -139,7 +139,6 @@ AppConfig load_config(const std::string& path) {
         cfg.col_claude_bar = get_u32("color", "claude_bar", cfg.col_claude_bar);
         cfg.col_claude_scoped_bar = get_u32("color", "claude_scoped_bar", cfg.col_claude_scoped_bar);
         cfg.col_claude_scoped_bar_warn = get_u32("color", "claude_scoped_bar_warn", cfg.col_claude_scoped_bar_warn);
-        cfg.col_claude_underuse_bg = get_u32("color", "claude_underuse_bg", cfg.col_claude_underuse_bg);
         cfg.col_cpu_core   = get_u32("color", "cpu_core",   cfg.col_cpu_core);
 
         cfg.warn_cpu_pct       = get_float("threshold", "cpu_pct",       cfg.warn_cpu_pct);
@@ -191,9 +190,6 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_delta_window_7d_min = get_int("claude", "delta_window_7d_min", cfg.claude_delta_window_7d_min);
         cfg.claude_scoped_bar_px = get_int("claude", "scoped_bar_px", cfg.claude_scoped_bar_px);
         cfg.claude_turns_show_from = get_int("claude", "turns_show_from", cfg.claude_turns_show_from);
-        cfg.claude_underuse_enable   = get_bool ("claude", "underuse_enable",   cfg.claude_underuse_enable);
-        cfg.claude_underuse_grace_hours = get_int("claude", "underuse_grace_hours", cfg.claude_underuse_grace_hours);
-        cfg.claude_underuse_warn_pct = get_float("claude", "underuse_warn_pct", cfg.claude_underuse_warn_pct);
         cfg.claude_reset_notify_min_pct = get_float("claude", "reset_notify_min_pct", cfg.claude_reset_notify_min_pct);
 
         // メインアカウント設定（[claude] セクション）
@@ -248,8 +244,8 @@ AppConfig load_config(const std::string& path) {
     // 上限 60 分は保持メモリの暴走防止と、5h ウィンドウ内で意味のある時間幅。0 は機能無効を意味する
     cfg.claude_delta_window_min = std::clamp(cfg.claude_delta_window_min, 0, 60);
 
-    // 7d 増加分濃色オーバーレイ兼 underuse ペース算出ウィンドウ幅のサニティチェック（0〜2880 分）
-    // 上限 48 時間は「直近ペース」としての意味を保つ幅。0 は 7d オーバーレイと underuse 検知の両方を無効化する。
+    // 7d 増加分濃色オーバーレイのウィンドウ幅のサニティチェック（0〜2880 分）
+    // 上限 48 時間は「直近」としての意味を保つ幅。0 は 7d オーバーレイを無効化する。
     cfg.claude_delta_window_7d_min = std::clamp(cfg.claude_delta_window_7d_min, 0, 2880);
 
     // 上位モデル専用 7d ミニバー縦幅のサニティチェック（0〜4px）
@@ -258,13 +254,6 @@ AppConfig load_config(const std::string& path) {
 
     // 5h 残ターン数表示開始値のサニティチェック。（0〜34 = 7d 内の最大ターン数）0 は機能無効
     cfg.claude_turns_show_from = std::clamp(cfg.claude_turns_show_from, 0, 34);
-
-    // 使い切り不能検知のサニティチェック（目標到達率 0〜100%）
-    cfg.claude_underuse_warn_pct = std::clamp(cfg.claude_underuse_warn_pct, 0.f, 100.f);
-
-    // 使い切り不能検知の発動猶予サニティチェック（0〜168 時間 = 7d 全長）
-    // 7d ウィンドウ全長を超える猶予は判定機会が消滅するため上限とする。0 は猶予なし
-    cfg.claude_underuse_grace_hours = std::clamp(cfg.claude_underuse_grace_hours, 0, 168);
 
     // 5h リセット通知の下限使用率サニティチェック（0〜100%）
     cfg.claude_reset_notify_min_pct = std::clamp(cfg.claude_reset_notify_min_pct, 0.f, 100.f);
