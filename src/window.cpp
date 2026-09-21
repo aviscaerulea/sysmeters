@@ -1214,10 +1214,14 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // 全ウィンドウ最小化ツール等に SW_MINIMIZE された HUD を自力で戻す導線。
             // sysmeters は見るだけの HUD のため、作業中アプリのフォーカスは奪わない。
             // （SW_SHOWNOACTIVATE + SWP_NOACTIVATE）
-            // HWND_TOP は Z 順の先頭へ一度出すだけで、「常に最前面」設定（topmost_）には影響しない
+            // HWND_TOP は非アクティブなウィンドウを他プロセスのフォアグラウンドウィンドウより
+            // 上へ持ち上げられない（Windows はこの要求を無視する）。
+            // TOPMOST 帯への移動はこの制約を受けないため、TOPMOST へ上げてから NOTOPMOST へ戻す。
+            // 「常に最前面」設定（topmost_）中は TOPMOST 帯の先頭へ移すだけで、NOTOPMOST へは戻さない。
             if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-            SetWindowPos(hwnd_, HWND_TOP, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            constexpr UINT kRaiseFlags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+            SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, kRaiseFlags);
+            if (!topmost_) SetWindowPos(hwnd_, HWND_NOTOPMOST, 0, 0, 0, 0, kRaiseFlags);
         }
         if (notif == WM_RBUTTONUP) {
             // 前面化しないとメニュー外クリックで TrackPopupMenu が閉じない（KB135788）
