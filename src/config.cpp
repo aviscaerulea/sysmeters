@@ -189,7 +189,6 @@ AppConfig load_config(const std::string& path) {
         cfg.claude_delta_window_min = get_int("claude", "delta_window_min", cfg.claude_delta_window_min);
         cfg.claude_delta_window_7d_min = get_int("claude", "delta_window_7d_min", cfg.claude_delta_window_7d_min);
         cfg.claude_scoped_bar_px = get_int("claude", "scoped_bar_px", cfg.claude_scoped_bar_px);
-        cfg.claude_turns_show_from = get_int("claude", "turns_show_from", cfg.claude_turns_show_from);
         cfg.claude_reset_notify_min_pct = get_float("claude", "reset_notify_min_pct", cfg.claude_reset_notify_min_pct);
 
         // メインアカウント設定（[claude] セクション）
@@ -250,9 +249,6 @@ AppConfig load_config(const std::string& path) {
     // 上位モデル専用 7d ミニバー縦幅のサニティチェック（0〜4px）
     // 4px 超は 7d バー行内の下余白に収まらずレイアウト変更を要するため上限とする。0 は非表示
     cfg.claude_scoped_bar_px = std::clamp(cfg.claude_scoped_bar_px, 0, 4);
-
-    // 5h 残ターン数表示開始値のサニティチェック。（0〜34 = 7d 内の最大ターン数）0 は機能無効
-    cfg.claude_turns_show_from = std::clamp(cfg.claude_turns_show_from, 0, 34);
 
     // 5h リセット通知の下限使用率サニティチェック（0〜100%）
     cfg.claude_reset_notify_min_pct = std::clamp(cfg.claude_reset_notify_min_pct, 0.f, 100.f);

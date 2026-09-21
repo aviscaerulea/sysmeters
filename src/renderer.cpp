@@ -1071,8 +1071,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // window_secs:      ウィンドウ長（秒）。0 より大きいとき、パーセンテージが警告色（黄・赤）の間
     //                    バー左端に警告解除までの残り時間を黒字で表示する（7d のみで使用、5h は 0 のまま非表示）
     // turns_left:       5h 残ターン数（7d リセットまでに実行できる 5h ウィンドウ数、現ターン含む）。
-    //                    0 以上のときバー右側、7d 行のリセット日時の月数字と桁を揃えた位置に
-    //                    リセット時刻と同色・同フォントで右詰め描画する
+    //                    0 以上のときバー右側、7d 行のリセット日時の月数字と右端を揃えた位置に
+    //                    ヘッダ行の Sessions と同じフォントサイズと補助情報トーンで右詰め描画する
     //                    （5h のみで使用、7d は -1 のまま非表示。判定・算出は呼び出し側で行う）
     // ペース線（緑）の太さ（px）。1px のグリッド線と見分けが付き、バー内で主張しすぎない値にする
     static constexpr float PACE_LINE_W = 2.5f;
@@ -1249,21 +1249,26 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             set_brush_color(brush_text_, COL_TEMP_NORMAL, 1.0f);
             draw_right(L"--:--", D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H));
         }
-        // 5h 残ターン数（リセット時刻と同色・同フォント）
-        // 7d 行のリセット日時 "M/D 曜 HH:MM" の月数字と桁を揃えて右詰めで描画する。
-        // 月数字の右端 = 日付右端（x + ww - TIME_W - DAY_GAP - DAY_W - DAY_GAP）から
-        // "/DD" 3 文字分（DATE_DAY_W）左。font_small_ は Consolas（等幅）のため、
-        // 残数が 2 桁でも月 2 桁（10〜12 月）と同じ桁位置に揃う。
-        // （日が 1 桁の月は日付が 1 文字分右へ寄り、桁ずれするが許容する）
-        // 5h 行のリセット時刻 "HH:MM" は右端 TIME_W 幅内に収まるため重ならない
+        // 5h 残ターン数（ヘッダ行の Sessions と同じフォントサイズと補助情報トーン）
+        // 主情報である使用率とリセット時刻より主張を抑えるため、同じ補助情報である
+        // Sessions にフォントサイズとアルファを揃える。
+        // 7d 行のリセット日時 "M/D 曜 HH:MM" の月数字と右端を揃えて右詰めで描画する。
+        // 月数字の右端は、日付右端（x + ww - TIME_W - DAY_GAP - DAY_W - DAY_GAP）から
+        // "/DD" 3 文字分（DATE_DAY_W）だけ左になる。
+        // 月と残数はフォントサイズが違うため、揃うのは右端のみで桁位置までは揃わない。
+        // （日が 1 桁の月は日付が 1 文字分右へ寄り、右端もずれるが許容する）
+        // 5h 行のリセット時刻 "HH:MM" は右端 TIME_W 幅内に収まるため重ならない。
         if (turns_left >= 0) {
             static constexpr float DATE_DAY_W = 30.f;  // "/DD" 3 文字分（Consolas 18pt 半角 ≈10px/文字）
             wchar_t tbuf[8];
             swprintf_s(tbuf, L"%d", turns_left);
-            set_brush_color(brush_text_, cfg.col_text);
-            draw_right(tbuf, D2D1::RectF(bar_right + 4.f, y,
-                            x + ww - TIME_W - DAY_GAP - DAY_W - DAY_GAP - DATE_DAY_W,
-                            y + SECTION_H));
+            set_brush_color(brush_text_, cfg.col_text, 0.6f);
+            draw_text_aligned(tbuf, font_tiny_,
+                              D2D1::RectF(bar_right + 4.f, y,
+                                          x + ww - TIME_W - DAY_GAP - DAY_W - DAY_GAP - DATE_DAY_W,
+                                          y + SECTION_H),
+                              brush_text_,
+                              DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
         // 5h と 7d の行送りは SECTION_H のみ。視覚的な隙間を詰めるため GAP を含めない。
         // セクション末尾のギャップは draw_bar 呼び出し後に 1 度だけ加算する。
@@ -1303,9 +1308,23 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 非アクティブ（リセット通過後の間隙）なら「今開始した」と仮定した now + 5h とする。
     // 以降は 5h 刻みで隙間なく開始し続けた場合に開始できるターン数を切り上げで加算する。
     // 7d リセット通過後の未更新データでは 0。（次回フェッチで新ウィンドウの値に置き換わる）
-    // 残数が turns_show_from を超える間、未取得、機能無効（0）の間は非表示（-1）
+    // 未取得の間は非表示（-1）。取得済みなら残数の大小に依らず常に表示する
+    //
+    // API 異常値対策：算出結果を [0, TURNS_MAX] にクランプしてから int へ落とす。
+    // seven_d_resets_ts は API JSON の値をクランプなしで格納している。
+    // 単位の取り違え等で極端な未来時刻が来ると、残数が巨大化する。
+    // 描画側の桁溢れ（幅 2 桁想定の矩形からのはみ出し）と、swprintf_s（_TRUNCATE 無指定）が
+    // invalid parameter handler を起動してプロセス即終了に至る経路を同時に塞ぐ。
+    // 上限クランプは double のまま行う。int へのキャスト後では、INT_MAX 超の値を
+    // 渡した時点で未定義動作になるためだ。
+    //
+    // 上限が 35 であって ceil(168h / 5h) = 34 でないのは、進行中の現ターンを無条件に
+    // 1 と数えた上で、その終端から 7d リセットまでを切り上げ加算する式のためだ。
+    // 現ターンが終わる直前かつ 7d リセット直後（後続が 165h 超）なら 1 + 34 = 35 に達する。
+    // 34 に切り詰めると、7d リセット直後の数時間だけ 1 少ない値を表示する
+    static constexpr int TURNS_MAX = 35;  // 1（現ターン）+ ceil(168h / 5h) の理論上限
     int turns_left = -1;
-    if (m.avail && cfg.claude_turns_show_from > 0 && m.seven_d_resets_ts > 0) {
+    if (m.avail && m.seven_d_resets_ts > 0) {
         time_t now = time(nullptr);
         if (m.seven_d_resets_ts <= now) {
             turns_left = 0;
@@ -1315,9 +1334,9 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                            ? static_cast<double>(m.five_h_resets_ts)
                            : static_cast<double>(now) + CLAUDE_WIN_5H_SECS;
             double after = static_cast<double>(m.seven_d_resets_ts) - cur_end;
-            turns_left = 1 + (after > 0.0 ? static_cast<int>(std::ceil(after / CLAUDE_WIN_5H_SECS)) : 0);
+            double turns = 1.0 + (after > 0.0 ? std::ceil(after / CLAUDE_WIN_5H_SECS) : 0.0);
+            turns_left = static_cast<int>(std::clamp(turns, 0.0, static_cast<double>(TURNS_MAX)));
         }
-        if (turns_left > cfg.claude_turns_show_from) turns_left = -1;
     }
     draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
              claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS), 5, cfg.warn_claude_5h_pct,
