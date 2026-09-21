@@ -29,9 +29,9 @@ A Toast notification appears the moment any warning threshold is exceeded. Notif
 
 - CPU: Displays overall usage (area chart), hard faults, per-logical-core usage (vertical bars), temperature, and system statistics (Proc/Thread/Handle)
 - GPU: Displays usage (area chart) and temperature, via NVIDIA NVML
-- RAM: Displays usage (horizontal bar) and used/total
+- RAM: Displays usage (horizontal bar), used/total, and WSL usage
 - VRAM: Displays usage (area chart) and used/total, via NVIDIA NVML
-- Disk I/O: Automatically detects fixed drives and displays read/write throughput, usage, used/total, and S.M.A.R.T. write volume per drive
+- Disk I/O: Automatically detects fixed drives and displays read/write throughput, usage, used/total, temperature, and S.M.A.R.T. write volume per drive
 - Network: Displays aggregated send/receive throughput across all NICs, separated by direction
 - IP: Displays the global IP address (shows NO INTERNET📵 when offline)
 - OS: Displays the OS name and continuous uptime (turns to the warning color once uptime exceeds the threshold)
@@ -168,7 +168,7 @@ Uninstalling leaves the following registry settings and cache directory behind. 
 
 When installed via Scoop, it starts as soon as installation completes. After that, the `sysmeters` command also launches it.
 
-When extracted from the ZIP, run `sysmeters.exe` in the extraction directory. The configuration file and the alert sound are read from the directory containing the executable, so keep the extracted files together.
+When extracted from the ZIP, run `sysmeters.exe` in the extraction directory. The bundled files, such as the configuration file and the alert sound, are read from the directory containing the executable, so keep the extracted files together.
 
 An icon appears in the system tray (notification area). Left-clicking the icon restores the window from the minimized state and brings it to the front once (without taking focus). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, 5h reset notification method, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
 
@@ -186,7 +186,7 @@ The main configuration sections are as follows.
 | `[window]` | Initial window position and width |
 | `[color]` | Background color, chart colors, bar colors |
 | `[threshold]` | Warning thresholds, reset thresholds, alert sound on/off, sample count for averaging |
-| `[claude]` | Claude Code section display adjustments, nudge, 5h reset notification |
+| `[claude]` | Usage API polling interval, Claude Code section display adjustments, nudge, 5h reset notification |
 | `[claude_sub]` | Sub account activation and configuration directory |
 | `[topproc]` | Appearance conditions for the top process display and afterimage duration |
 | `[guard]` | Length of the inaudible tone for BLE headphones |
@@ -209,4 +209,5 @@ config_dir = "C:\\Users\\xxx\\.claude-sub"
 - GPU and VRAM monitoring supports NVIDIA GPUs (NVML) only, and the corresponding sections are not displayed in environments without NVML
 - Displaying CPU temperature requires the PawnIO driver; no temperature is shown until it is installed
 - Disk I/O display covers up to 8 fixed drives
+- Disk temperature and write volume are read from NVMe SSDs only, and are not displayed for other disks
 - The Claude Code section requires being logged in via `claude login`, and `Logout` is displayed while logged out
