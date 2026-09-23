@@ -90,7 +90,7 @@ The launch command is shared between both accounts. When run for the sub account
 
 ### Claude Code 5h Reset Notification
 
-A feature that notifies you, per account, the moment the 5h window reset time passes. Choose the notification method from "5h リセット通知" (5h Reset Notification) in the tray menu: Toast, notification sound, or none (default is Toast). The notification sound plays `claude_5h_reset.wav`, a file separate from the alert sound.
+A feature that notifies you, per account, the moment the 5h window reset time passes. Choose the notification method from "5h リセット通知" (5h Reset Notification) in the tray menu: Toast, notification sound, or none (default is Toast). The notification sound plays `agent_reset.wav`, a file separate from the alert sound.
 
 Resets where the 5h usage just before the reset is at or below `reset_notify_min_pct` (default 1%) are not notified, since the window was not used. Resets that passed while sysmeters was stopped are not notified at startup either. Fullscreen suppression applies under the same conditions as warnings.
 

@@ -312,7 +312,7 @@ void AlertManager::init(const AppConfig& cfg, const std::vector<char>& drives) {
             log_info("alert: %s not found, sound disabled", name);
     };
     resolve_wav("alert.wav",           wav_path_,       wav_avail_);
-    resolve_wav("claude_5h_reset.wav", reset_wav_path_, reset_wav_avail_);
+    resolve_wav("agent_reset.wav",     reset_wav_path_, reset_wav_avail_);
 
     // ディスク系ラベルをドライブレター入りで事前構築する（kMaxDiskDrives 台を超える分は無視）
     disk_count_ = static_cast<int>(std::min(drives.size(), static_cast<size_t>(kMaxDiskDrives)));

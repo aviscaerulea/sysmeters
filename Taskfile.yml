@@ -40,7 +40,7 @@ tasks:
       - cp data/IntelMSR.bin out/
       - cp data/AMDFamily17.bin out/
       - cp data/alert.wav out/
-      - cp data/claude_5h_reset.wav out/
+      - cp data/agent_reset.wav out/
       - cmd: cp -f *.local.* out/
         ignore_error: true
 
@@ -71,7 +71,7 @@ tasks:
       - >-
         pwsh.exe -NoProfile -Command '
         Compress-Archive
-        -Path out\{{.APP_NAME}}.exe, out\{{.APP_NAME}}.toml, out\{{.APP_NAME}}.toml.example, out\{{.APP_NAME}}.local.toml, out\IntelMSR.bin, out\AMDFamily17.bin, out\alert.wav, out\claude_5h_reset.wav
+        -Path out\{{.APP_NAME}}.exe, out\{{.APP_NAME}}.toml, out\{{.APP_NAME}}.toml.example, out\{{.APP_NAME}}.local.toml, out\IntelMSR.bin, out\AMDFamily17.bin, out\alert.wav, out\agent_reset.wav
         -DestinationPath "out\{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"
         -Force'
       - cmd: echo "Package out/{{.APP_NAME}}-v{{.VERSION}}-{{.ARCH}}.zip"

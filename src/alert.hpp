@@ -35,7 +35,7 @@ public:
     // ディスク系ラベルはドライブレターを含むため init() で構築済みの内容を返す
     const wchar_t* label(Id id) const;
 
-    // exe ディレクトリから alert.wav パスを解決し、存在確認する
+    // exe ディレクトリから alert.wav と agent_reset.wav のパスを解決し、存在確認する
     // cfg からガードトーン長を保持し、drives からディスク系ラベル（レター入り）を構築する
     void init(const AppConfig& cfg, const std::vector<char>& drives);
 
@@ -52,7 +52,7 @@ public:
     uint32_t check(const AllMetrics& m, const AppConfig& cfg, bool mute = false,
                    uint32_t always_mask = 0);
 
-    // 5h リセット通知の通知音（claude_5h_reset.wav）を 1 回再生する
+    // 5h リセット通知の通知音（agent_reset.wav）を 1 回再生する
     // 閾値判定を経ない。ファイルが無い場合は何もしない。通知音自身の再生中ならスキップする
     void play_reset_sound();
 
@@ -60,7 +60,7 @@ private:
     bool           fired_[COUNT_] = {};     // true = 発火済み（リセット閾値未達まで再発火しない）
     wchar_t        wav_path_[MAX_PATH] = {};   // 警告音 alert.wav の絶対パス
     bool           wav_avail_    = false;
-    // 5h リセット通知の通知音 claude_5h_reset.wav の絶対パスと存在フラグ。
+    // 5h リセット通知の通知音 agent_reset.wav の絶対パスと存在フラグ。
     // 警告音と区別できる音にするため専用ファイルとし、alert.wav と同じ形式（44.1kHz / 16bit / ステレオ）で置く
     wchar_t        reset_wav_path_[MAX_PATH] = {};
     bool           reset_wav_avail_ = false;
@@ -68,7 +68,7 @@ private:
     // 再生スレッドのスロット。警告音と通知音で別に持ち、一方の再生中でも他方を取りこぼさない
     // （WASAPI 共有モードのため同時再生は OS がミックスする）。同一スロット内は再生中ならスキップする
     HANDLE         sound_thread_       = nullptr;   // 警告音 alert.wav
-    HANDLE         reset_sound_thread_ = nullptr;   // 通知音 claude_5h_reset.wav
+    HANDLE         reset_sound_thread_ = nullptr;   // 通知音 agent_reset.wav
 
     // 検出ドライブ数と、init() で構築するディスク系ラベル（例：L"ディスク C: 使用率"）
     // 添字は DISK_0/TEMP_NVME_0 起点のオフセットに対応する
