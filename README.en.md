@@ -72,6 +72,7 @@ Displays 5h / 7d rate limit usage (horizontal bars), reset times, and session co
 - Directly below the 7d bar, a gray mini bar shows consumption of the dedicated 7d quota for higher-tier models such as Fable (only for accounts whose Usage API returns a dedicated quota)
 - When the dedicated quota reaches 100%, the mini bar changes to the warning color and raises a per-account alert sound and Toast notification (reset once it falls back below 100%)
 - The latest data is force-fetched at the top of every hour
+- After the 5h reset time has passed, the 5h bar shows 0% and the reset time shows `--:--` until the next fetch
 - Session counts are determined from each `claude.exe` process's `CLAUDE_CONFIG_DIR` environment variable and tallied separately per account
 - To the left of the Sessions label, the timestamp of the most recent Usage API fetch (`HH:MM` format, hour without zero padding) is displayed in the same color and size, so data freshness can be confirmed
 - While the Usage API cannot be fetched, `Err` is displayed in red to the right of the plan name

@@ -1062,7 +1062,9 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     //
     // lbl:              ラベル文字列（"5h"/"7d"）
     // pct:              現在使用率（0〜100%）
-    // reset:            リセット時刻文字列（avail=false のとき nullptr 可）
+    // reset:            リセット時刻文字列。avail=false のとき nullptr 可。
+    //                    空文字列は「アクティブなウィンドウが無い」を意味し、未取得と同じ
+    //                    プレースホルダ "--:--" を描く（5h リセット通過後・次回取得前の表示に使う）
     // avail:            データ取得済みなら true（false のときグレー表示）
     // expected_pct:     均等消費ペースの理想位置（%）。0 のとき計算不可
     // tick_count:       バーの分割数。等分位置に縦線を tick_count - 1 本引く。（0 のとき縦線なし）
@@ -1220,7 +1222,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             draw_text_aligned(text, font_small_, r, brush_text_,
                               DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         };
-        if (avail) {
+        if (avail && reset && *reset) {
             wchar_t rtbuf[40];
             swprintf_s(rtbuf, L"%.38s", reset);
             set_brush_color(brush_text_, cfg.col_text, 1.0f);
@@ -1245,7 +1247,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             }
         }
         else {
-            // 未取得時のプレースホルダ（API 取得完了で本来の時刻に置き換わる）
+            // 未取得時、またはアクティブなウィンドウが無いときのプレースホルダ
+            // （API 取得完了で本来の時刻に置き換わる）
             set_brush_color(brush_text_, COL_TEMP_NORMAL, 1.0f);
             draw_right(L"--:--", D2D1::RectF(x + ww - RESET_W, y, x + ww, y + SECTION_H));
         }
@@ -1278,6 +1281,21 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     float five_h_delta_start  = calc_delta_start_pct(m.five_h_history,  cfg.claude_delta_window_min);
     float seven_d_delta_start = calc_delta_start_pct(m.seven_d_history, cfg.claude_delta_window_7d_min);
 
+    // 5h ウィンドウ終了後（five_h_resets_ts が過去）の表示値
+    // 5h リセット通知はリセット時刻を通過した瞬間に発火するが、ClaudeMetrics の値は次回の
+    // Usage API 取得（間隔 usage_interval_sec + API 遅延）まで旧ウィンドウのまま残る。
+    // その間に旧使用率を描くと通知と画面が食い違うため、描画だけ「終わったウィンドウは 0%、
+    // リセット時刻はプレースホルダ、ペース線なし」に置き換える。通知設定には依存しない。
+    // 実値（five_h_pct）は通知本文の「直前 N%」と警告判定が参照するため書き換えない。
+    // API が旧ウィンドウを返し続けても同じ規則で 0% になるため、表示がちらつかない。
+    // nudge（collector_claude.cpp）も rts <= now を「ウィンドウ終了」と扱っており解釈を揃える。
+    // 濃色オーバーレイと直近使用ドットは pct(0) > delta_start が偽になり自然に消える
+    const bool five_h_ended = m.five_h_resets_ts > 0 && m.five_h_resets_ts <= time(nullptr);
+    const float five_h_disp_pct = five_h_ended ? 0.f : m.five_h_pct;
+    const wchar_t* five_h_disp_reset = five_h_ended ? L"" : m.five_h_reset;
+    const float five_h_disp_expected = five_h_ended ? 0.f
+                                     : claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS);
+
     // 直近使用ドット：ヘッダ行右側の取得時刻・Sessions テキストの直前に ● を置き、
     // 直近 delta_window_min 分以内に 5h 使用率が増えている間だけ明滅させる。
     // 表示条件は 5h 濃色オーバーレイと同一（1 対 1）。量はバーの濃色、鮮度はこのドットが担う。
@@ -1291,7 +1309,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // マルチアカウントで上下のドットが同じ横位置に揃うようにするため
     // ● は取得時刻と同じ font_tiny_・同じ行ボックス（ssr）で描き、縦位置はグリフ設計に任せる
     // （font_small_ では 1px ほど大きく見えた）
-    if (m.avail && five_h_delta_start > 0.f && m.five_h_pct > five_h_delta_start) {
+    if (m.avail && five_h_delta_start > 0.f && five_h_disp_pct > five_h_delta_start) {
         constexpr ULONGLONG RECENT_DOT_PERIOD_MS = 2000;  // 明滅周期
         float phase = static_cast<float>(GetTickCount64() % RECENT_DOT_PERIOD_MS)
                     / static_cast<float>(RECENT_DOT_PERIOD_MS);
@@ -1338,8 +1356,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
             turns_left = static_cast<int>(std::clamp(turns, 0.0, static_cast<double>(TURNS_MAX)));
         }
     }
-    draw_bar(L"5h", m.five_h_pct,  m.five_h_reset,  m.avail,
-             claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS), 5, cfg.warn_claude_5h_pct,
+    draw_bar(L"5h", five_h_disp_pct, five_h_disp_reset, m.avail,
+             five_h_disp_expected, 5, cfg.warn_claude_5h_pct,
              five_h_delta_start, 0.0, turns_left);
     draw_bar(L"7d", m.seven_d_pct, m.seven_d_reset, m.avail,
              claude_expected_pct(m.seven_d_resets_ts, CLAUDE_WIN_7D_SECS), 7, cfg.warn_claude_7d_pct,
