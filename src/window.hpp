@@ -55,9 +55,8 @@ private:
     static constexpr bool DEF_ALWAYS_ALERT_GPU       = false;
     static constexpr bool DEF_ALWAYS_ALERT_TEMP_GPU  = true;
     static constexpr bool DEF_ALWAYS_ALERT_TEMP_DISK = true;
-    // 5h リセット通知の通知方法。レジストリに REG_DWORD で保存する（値は enum の数値）
-    enum ResetNotify : int { RESET_NOTIFY_NONE = 0, RESET_NOTIFY_TOAST = 1, RESET_NOTIFY_SOUND = 2 };
-    static constexpr ResetNotify DEF_RESET_NOTIFY = RESET_NOTIFY_TOAST;
+    // 5h リセット通知の有効/無効。ON なら Toast と agent_reset.wav を常に併用する（閾値警告と同じ方式）
+    static constexpr bool DEF_RESET_NOTIFY = true;
     // 5h リセット通知の鮮度ゲート（秒）。リセット時刻の通過からこの秒数を超えたものは通知しない。
     // 起動直後にキャッシュから復元した過去のリセット時刻での誤通知を防ぐ。
     // 通常運転では 1 秒周期の判定が通過直後に捕まえるため、スリープ復帰等のタイマー停滞の余裕として 120 秒とする
@@ -79,8 +78,8 @@ private:
     bool always_alert_gpu_       = DEF_ALWAYS_ALERT_GPU;        // GPU 使用率
     bool always_alert_temp_gpu_  = DEF_ALWAYS_ALERT_TEMP_GPU;   // GPU 温度
     bool always_alert_temp_disk_ = DEF_ALWAYS_ALERT_TEMP_DISK;  // ディスク温度（全ドライブ一括）
-    // 5h リセット通知の通知方法（レジストリ保存）
-    ResetNotify reset_notify_ = DEF_RESET_NOTIFY;
+    // 5h リセット通知の有効/無効（レジストリ保存）
+    bool reset_notify_ = DEF_RESET_NOTIFY;
     // 5h リセット通知の判定済みリセット時刻（添字 0=Main, 1=Sub）。同じリセット時刻で二度判定しない。
     // 通知をスキップした場合も記録し、閾値以下や鮮度切れのリセットを毎秒再判定しない
     time_t claude_reset_notified_ts_[2] = { -1, -1 };
@@ -125,7 +124,8 @@ private:
     // fired_mask の各ビットが AlertManager::Id に対応する。
     void show_balloon(uint32_t fired_mask);
     // 指定タイトル・本文で Toast 通知（情報レベル）を表示する
-    void show_notify(const wchar_t* title, const wchar_t* body);
+    // mute_default_sound が true のとき、Toast の OS 標準通知音を消す（呼び出し側が別途専用音を鳴らす場合用）
+    void show_notify(const wchar_t* title, const wchar_t* body, bool mute_default_sound = false);
     // 起動時に GitHub リリースチェックをバックグラウンドスレッドで開始する（create() から 1 度だけ呼ぶ）
     void start_update_check();
     // WM_UPDATE_DONE 受信時に新版状態を確定し、未通知版なら Toast 通知する
@@ -144,8 +144,8 @@ private:
     void save_compact();          // レジストリにコンパクト表示設定を書く
     bool load_top_proc();         // レジストリからトッププロセス表示設定を読む（未設定時は true）
     void save_top_proc();         // レジストリにトッププロセス表示設定を書く
-    ResetNotify load_reset_notify();  // レジストリから 5h リセット通知方法を読む（未設定・範囲外時は Toast）
-    void save_reset_notify();         // レジストリに 5h リセット通知方法を書く
+    bool load_reset_notify();  // レジストリから 5h リセット通知の有効/無効を読む（未設定時は true）
+    void save_reset_notify();  // レジストリに 5h リセット通知の有効/無効を書く
     // 5h リセット時刻の通過をアカウント別に判定し、条件を満たせば通知する（WM_TIMER 1 秒周期で呼ぶ）
     void check_claude_reset_notify();
     // 現在の描画スケールを反映した物理クライアント幅（ceil(win_width × scale)）

@@ -37,7 +37,7 @@ A Toast notification appears the moment any warning threshold is exceeded. Notif
 - OS: Displays the OS name and continuous uptime (turns to the warning color once uptime exceeds the threshold)
 - Claude Code: Displays 5h / 7d rate limit usage, reset times, and session counts (main and sub accounts can be displayed simultaneously)
 - Claude Code nudge: Detects the gap after a rate limit reset where consumption has not yet started, and automatically launches `claude.exe`
-- Claude Code 5h reset notification: Announces a reset via Toast or notification sound (skipped when usage is at or below the threshold)
+- Claude Code 5h reset notification: Announces a reset via Toast and a dedicated notification sound (skipped when usage is at or below the threshold)
 - Top process display: Shows the name and usage of the top process inside the CPU / GPU area charts
 - Display item toggles: Turns each section — CPU, GPU, memory, disk, network, and Claude — on and off individually (disks can also be toggled per drive)
 - Compact mode: Scales the entire display, including charts and fonts, down to 3/5
@@ -90,7 +90,7 @@ The launch command is shared between both accounts. When run for the sub account
 
 ### Claude Code 5h Reset Notification
 
-A feature that notifies you, per account, the moment the 5h window reset time passes. Choose the notification method from "5h リセット通知" (5h Reset Notification) in the tray menu: Toast, notification sound, or none (default is Toast). The notification sound plays `agent_reset.wav`, a file separate from the alert sound.
+A feature that notifies you, per account, the moment the 5h window reset time passes. Toggle it on/off from "5h リセット通知" (5h Reset Notification) in the tray menu (default is on). When on, it shows a Toast and plays a dedicated notification sound, `agent_reset.wav` (separate from the alert sound), at the same time, with the Toast's default Windows notification sound muted.
 
 Resets where the 5h usage just before the reset is at or below `reset_notify_min_pct` (default 1%) are not notified, since the window was not used. Resets that passed while sysmeters was stopped are not notified at startup either. Fullscreen suppression applies under the same conditions as warnings.
 
@@ -172,7 +172,7 @@ When installed via Scoop, it starts as soon as installation completes. After tha
 
 When extracted from the ZIP, run `sysmeters.exe` in the extraction directory. The bundled files, such as the configuration file and the alert sound, are read from the directory containing the executable, so keep the extracted files together.
 
-An icon appears in the system tray (notification area). Left-clicking the icon restores the window from the minimized state and brings it to the front once (without taking focus). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, 5h reset notification method, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
+An icon appears in the system tray (notification area). Left-clicking the icon restores the window from the minimized state and brings it to the front once (without taking focus). The right-click menu offers toggles for always-on-top, compact mode, top process display, Toast notifications, 5h reset notification, and Windows startup registration, along with display item selection, commands to open the configuration file and the log file, and exit. The top of the menu shows the version, and when a newer release exists you can click it to open the distribution page.
 
 ## Configuration
 

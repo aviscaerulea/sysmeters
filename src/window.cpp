@@ -431,13 +431,17 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
 }
 
 // 指定タイトル・本文で情報レベルの Toast 通知を表示する
-void AppWindow::show_notify(const wchar_t* title, const wchar_t* body) {
+//
+// mute_default_sound が true のとき、Toast の OS 標準通知音を消す（NIIF_NOSOUND）。
+// 呼び出し側が別途専用の通知音を再生し、二重再生を避けたい場合に使う
+// （閾値警告 Toast の show_balloon と同じ方式。既定 false は更新確認 Toast 用）。
+void AppWindow::show_notify(const wchar_t* title, const wchar_t* body, bool mute_default_sound) {
     NOTIFYICONDATAW nid{};
     nid.cbSize      = sizeof(nid);
     nid.hWnd        = hwnd_;
     nid.uID         = IDI_TRAY_ICON;
     nid.uFlags      = NIF_INFO;
-    nid.dwInfoFlags = NIIF_INFO;
+    nid.dwInfoFlags = NIIF_INFO | (mute_default_sound ? NIIF_NOSOUND : 0);
     wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
     wcsncpy_s(nid.szInfo,      body,  _TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &nid);
@@ -488,18 +492,8 @@ void AppWindow::show_context_menu() {
                 IDM_TOP_PROC, L"トッププロセス表示");
     AppendMenuW(menu, MF_STRING | (toast_alert_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_ALERT_TOAST, L"Toast 通知");
-    // 5h リセット通知サブメニュー（通知方法の排他選択。ラジオ表示で択一を示す）
-    {
-        HMENU rn_menu = CreatePopupMenu();
-        AppendMenuW(rn_menu, MF_STRING, IDM_RESET_NOTIFY_TOAST, L"Toast");
-        AppendMenuW(rn_menu, MF_STRING, IDM_RESET_NOTIFY_SOUND, L"通知音");
-        AppendMenuW(rn_menu, MF_STRING, IDM_RESET_NOTIFY_NONE,  L"通知しない");
-        const UINT checked = (reset_notify_ == RESET_NOTIFY_TOAST) ? IDM_RESET_NOTIFY_TOAST
-                           : (reset_notify_ == RESET_NOTIFY_SOUND) ? IDM_RESET_NOTIFY_SOUND
-                           : IDM_RESET_NOTIFY_NONE;
-        CheckMenuRadioItem(rn_menu, IDM_RESET_NOTIFY_TOAST, IDM_RESET_NOTIFY_NONE, checked, MF_BYCOMMAND);
-        AppendMenuW(menu, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(rn_menu), L"5h リセット通知");
-    }
+    AppendMenuW(menu, MF_STRING | (reset_notify_ ? MF_CHECKED : MF_UNCHECKED),
+                IDM_RESET_NOTIFY, L"5h リセット通知");
     AppendMenuW(menu, MF_STRING | (fullscreen_mute_ ? MF_CHECKED : MF_UNCHECKED),
                 IDM_FULLSCREEN_MUTE, L"フルスクリーン時は通知しない");
     // 常に警告通知を有効にするサブメニュー（フルスクリーン抑制の例外項目）
@@ -608,7 +602,7 @@ static constexpr LPCWSTR REG_ALERT_TOAST    = L"AlertToast";         // Toast �
 static constexpr LPCWSTR REG_FULLSCREEN_MUTE = L"FullscreenMute";  // フルスクリーン抑制設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_COMPACT         = L"Compact";          // コンパクト表示設定の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_TOP_PROC        = L"TopProcess";       // トッププロセス表示設定の値名（REG_DWORD、0 or 1）
-static constexpr LPCWSTR REG_RESET_NOTIFY    = L"ClaudeResetNotify"; // 5h リセット通知方法の値名（REG_DWORD、0=通知しない 1=Toast 2=通知音）
+static constexpr LPCWSTR REG_RESET_NOTIFY    = L"ClaudeResetNotify"; // 5h リセット通知の有効/無効の値名（REG_DWORD、0 or 1）
 // 「常に警告通知を有効にする」（フルスクリーン抑制の例外項目）の値名（REG_DWORD、0 or 1）
 static constexpr LPCWSTR REG_ALWAYS_ALERT_CPU       = L"AlwaysAlert_CPU";
 static constexpr LPCWSTR REG_ALWAYS_ALERT_TEMP_CPU  = L"AlwaysAlert_TempCPU";
@@ -735,12 +729,10 @@ void AppWindow::save_compact()          { save_reg_bool(REG_COMPACT,     compact
 bool AppWindow::load_top_proc()         { return load_reg_bool(REG_TOP_PROC,    DEF_TOP_PROC);            }
 void AppWindow::save_top_proc()         { save_reg_bool(REG_TOP_PROC,    top_proc_);                      }
 
-// 範囲外の値（旧版や手編集）はデフォルトへ戻す
-AppWindow::ResetNotify AppWindow::load_reset_notify() {
-    const DWORD v = load_reg_dword(REG_RESET_NOTIFY, static_cast<DWORD>(DEF_RESET_NOTIFY));
-    return (v <= RESET_NOTIFY_SOUND) ? static_cast<ResetNotify>(v) : DEF_RESET_NOTIFY;
-}
-void AppWindow::save_reset_notify() { save_reg_dword(REG_RESET_NOTIFY, static_cast<DWORD>(reset_notify_)); }
+// 旧版（Toast/通知音/通知しないの 3 択、値 0/1/2）からの移行：
+// 0（通知しない）→ false、1（Toast）と 2（通知音）→ true に自然に読み替わる
+bool AppWindow::load_reset_notify() { return load_reg_bool(REG_RESET_NOTIFY, DEF_RESET_NOTIFY); }
+void AppWindow::save_reset_notify() { save_reg_bool(REG_RESET_NOTIFY, reset_notify_);           }
 
 void AppWindow::load_always_alert() {
     always_alert_cpu_       = load_reg_bool(REG_ALWAYS_ALERT_CPU,       DEF_ALWAYS_ALERT_CPU);
@@ -793,8 +785,10 @@ bool AppWindow::is_fullscreen_app_running() {
 // 同じリセット時刻は通知の有無に関わらず 1 回だけ判定する（claude_reset_notified_ts_）。
 // 通過から RESET_NOTIFY_FRESH_SEC を超えたリセットは通知しない（起動直後にキャッシュから
 // 復元した過去のリセット時刻での誤通知を防ぐ）。
-// 通知方法が「通知しない」でも判定と記録は行い、途中で方法を切り替えても過去分が遡って鳴らないようにする。
-// フルスクリーン抑制は警告と同じ条件で Toast と通知音の両方に適用する（例外項目は設けない）。
+// reset_notify_ が false でも判定と記録は行い、途中で ON に切り替えても過去分が遡って鳴らないようにする。
+// 通知は Toast と agent_reset.wav を常に併用する（閾値警告 Toast と alert.wav の関係と同じ方式）。
+// Toast の OS 標準通知音は show_notify の mute_default_sound で消し、agent_reset.wav だけを聞かせる。
+// フルスクリーン抑制は警告と同じ条件で適用する（例外項目は設けない）。
 // 抑制中に通過したリセットの通知は破棄する。抑制解除後にも再送しない（ユーザ判断で受容済み。
 // 保留状態を持たずに単純さを優先する）。
 void AppWindow::check_claude_reset_notify() {
@@ -816,22 +810,17 @@ void AppWindow::check_claude_reset_notify() {
             log_info("claude 5h reset: skipped low usage (account=%d, pct=%.1f)", i, m.five_h_pct);
             continue;
         }
-        if (reset_notify_ == RESET_NOTIFY_NONE) continue;
+        if (!reset_notify_) continue;
         if (fullscreen_mute_ && is_fullscreen_app_running()) {
             log_info("claude 5h reset: suppressed by fullscreen (account=%d)", i);
             continue;
         }
-        if (reset_notify_ == RESET_NOTIFY_TOAST) {
-            wchar_t body[128];
-            _snwprintf_s(body, _TRUNCATE, L"%ls の 5h ウィンドウがリセットされました（直前 %.0f%%）",
-                         m.account_label, m.five_h_pct);
-            show_notify(L"Claude 5h リセット", body);
-        }
-        else {
-            alert_->play_reset_sound();
-        }
-        log_info("claude 5h reset: notified (account=%d, pct=%.1f, method=%s)", i, m.five_h_pct,
-                 reset_notify_ == RESET_NOTIFY_TOAST ? "toast" : "sound");
+        wchar_t body[128];
+        _snwprintf_s(body, _TRUNCATE, L"%ls の 5h ウィンドウがリセットされました（直前 %.0f%%）",
+                     m.account_label, m.five_h_pct);
+        show_notify(L"Claude 5h リセット", body, /*mute_default_sound=*/true);
+        alert_->play_reset_sound();
+        log_info("claude 5h reset: notified (account=%d, pct=%.1f)", i, m.five_h_pct);
     }
 }
 
@@ -1257,10 +1246,11 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             fullscreen_mute_ = !fullscreen_mute_;
             save_fullscreen_mute();
             break;
-        // 5h リセット通知方法の選択：値を確定 → 永続化（再描画・リサイズは不要）
-        case IDM_RESET_NOTIFY_TOAST: reset_notify_ = RESET_NOTIFY_TOAST; save_reset_notify(); break;
-        case IDM_RESET_NOTIFY_SOUND: reset_notify_ = RESET_NOTIFY_SOUND; save_reset_notify(); break;
-        case IDM_RESET_NOTIFY_NONE:  reset_notify_ = RESET_NOTIFY_NONE;  save_reset_notify(); break;
+        // 5h リセット通知トグル：フラグ反転 → 永続化（再描画・リサイズは不要）
+        case IDM_RESET_NOTIFY:
+            reset_notify_ = !reset_notify_;
+            save_reset_notify();
+            break;
         // コンパクト表示トグル：フラグ反転 → 永続化 → renderer 反映 → 先行リサイズ＋同期再描画
         case IDM_COMPACT:
             compact_ = !compact_;
