@@ -382,6 +382,9 @@ void AppWindow::remove_tray_icon() {
 // 発火した項目のビットマスクからバルーン（Toast）通知を表示する
 //
 // fired_mask の各ビットが AlertManager::Id に対応する。
+// 警告音（alert.wav）が有効なときは Toast の OS 標準通知音を消す（NIIF_NOSOUND）。
+// 警告音は同じ判定周期で AlertManager::check が鳴らすため、標準音を残すと二重に鳴る。
+// 警告音が無効（alert_sound = false）のときは、標準音を唯一の音として残す。
 // 1 件発火：Toast の 3 行表示領域の真ん中（2 行目）に配置するため前後に改行を挿入する。
 // 2〜3 件：上から順に詰めて表示する。
 // 4 件以上：上 2 行を項目名、3 行目を「ほか N 件」に集約する。
@@ -391,7 +394,7 @@ void AppWindow::show_balloon(uint32_t fired_mask) {
     nid.hWnd        = hwnd_;
     nid.uID         = IDI_TRAY_ICON;
     nid.uFlags      = NIF_INFO;
-    nid.dwInfoFlags = NIIF_WARNING;
+    nid.dwInfoFlags = NIIF_WARNING | (cfg_->alert_sound ? NIIF_NOSOUND : 0);
 
     const wchar_t* labels[AlertManager::COUNT_] = {};
     int n = 0;

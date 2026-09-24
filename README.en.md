@@ -104,6 +104,7 @@ When any monitored item exceeds its threshold, `alert.wav` is played. A hysteres
 
 - To address the problem of the beginning being cut off when BLE headphones enter power saving mode, a 19kHz inaudible tone is inserted before and after playback
 - Playback uses WASAPI shared mode, so it coexists with audio from other applications
+- The threshold-alert Toast mutes the default Windows notification sound so only the alert sound plays (the default sound remains when `alert_sound` is disabled)
 
 ### Notification Suppression
 
