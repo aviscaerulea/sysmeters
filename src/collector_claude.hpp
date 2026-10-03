@@ -15,9 +15,12 @@
 //   - credentials.json から OAuth トークン取得
 //   - Anthropic Usage API / Account API を呼び出し
 //   - %LOCALAPPDATA%\sysmeters に JSON キャッシュを保存（Usage：usage_interval_sec 秒、Plan：3600 秒）
-//   - %LOCALAPPDATA%\sysmeters に 5h/7d 使用率の時系列履歴を保存（TTL なし、apply_result 実行毎に直接上書き）
+//   - %LOCALAPPDATA%\sysmeters に 5h/7d 使用率の時系列履歴を保存（TTL なし、apply_result が履歴を追加するたびに直接上書き）
 //     アプリ再起動後も init() で読み込み、履歴を復元する。
 //     （保持期間は各 delta ウィンドウ幅に従う。7d はデフォルト 12h、5h は数分）
+// - statusline 連携：sysmeters.exe --statusline（write_claude_statusline）が書いた
+//   %LOCALAPPDATA%\sysmeters\claude-statusline{suffix}.json を poll_statusline() が 1 秒周期で取り込み、
+//   5h/7d を API 取得より早く反映する。Usage API 値と連携値のうち、時刻が新しい方を採る
 //
 // アカウントごとに 1 インスタンスを持つ。
 // - account_index：WM_CLAUDE_DONE の wParam として送る識別子（0=Main, 1=Sub）
@@ -38,14 +41,19 @@ public:
     // 取得結果を out へ反映する（WM_CLAUDE_DONE 受信後、メインスレッドから呼ぶ）
     // delta_window_min / delta_window_7d_min は 5h / 7d 履歴の保持期間決定に使う。
     // 履歴は out.five_h_history / out.seven_d_history に push し、
-    // (delta_window + 1) × 60 秒より古いサンプルを破棄する。
+    // (delta_window + 1) × 60 秒より古いサンプルを破棄する。statusline 連携の取り込みで
+    // 最大 1 秒周期に呼ばれるため、直前サンプルから 30 秒未満なら push しない。
     // （0 で履歴保持が 1 分に縮退し、描画側のオーバーレイが事実上無効になる）
     // out 側の履歴が空（アプリ起動後まだ 1 度も push していない）かつ init() が復元した履歴
     // （restored_hist5_ / restored_hist7_）が非空の場合、それを種として一度だけ引き継ぐ。
-    // （以後は通常の push_and_trim のみで運用する） avail 時は毎回 cache_hist_path_ へ
+    // （以後は通常の push_and_trim のみで運用する） push した回は cache_hist_path_ へ
     // 直接上書き保存し、次回起動時の復元に備える。（クラッシュ耐性優先。テンポラリ→リネームの
     // 原子的更新はしない。保存に失敗しても現状同様、次回起動時は履歴なしからの復帰に退化する）
     void apply_result(ClaudeMetrics& out, int delta_window_min, int delta_window_7d_min);
+
+    // statusline 連携ファイルの更新を検知して pending_ へ重ねる（TIMER_FAST からメインスレッドで呼ぶ）
+    // 取り込んだ結果 pending_ が更新されたら true。呼び出し側は true のとき apply_result 経路を通す
+    bool poll_statusline();
 
     // 2 段階終了：複数コレクタを並行停止できるよう、フラグ立てと join 待ちを分離
     // 両方のコレクタに request_shutdown() を先に呼んでから wait_shutdown() を順に呼ぶことで、
@@ -113,9 +121,26 @@ private:
     std::filesystem::path cache_usage_path_;
     std::filesystem::path cache_plan_path_;
     // 5h/7d 履歴の永続化キャッシュ（claude-history-cache{cache_suffix}.json）。
-    // apply_result が avail 時に毎回上書き保存し、init() が起動時に読み込んで
+    // apply_result が履歴を追加した回に上書き保存し、init() が起動時に読み込んで
     // restored_hist5_ / restored_hist7_ の種にする
     std::filesystem::path cache_hist_path_;
+    // statusline 連携ファイル（claude-statusline{cache_suffix}.json）。poll_statusline が読む
+    std::filesystem::path cache_push_path_;
+    // 連携ファイルの前回取り込み時の更新時刻（変化したときだけ読み直す。メインスレッド専用）
+    std::filesystem::file_time_type push_mtime_{};
+
+    // statusline 連携で取り込んだ 5h/7d（ウィンドウごとに欠落し得るため has5 / has7 で有無を持つ）
+    struct StatuslinePush {
+        double ts   = 0.0;     // 書き出し時刻（epoch 秒。0 = 未取り込み）
+        bool   has5 = false;
+        float  pct5 = 0.f;
+        time_t rts5 = -1;
+        bool   has7 = false;
+        float  pct7 = 0.f;
+        time_t rts7 = -1;
+    };
+    // poll_statusline（メインスレッド）が書き、do_fetch（バックグラウンドスレッド）も読むため result_mutex_ で保護する
+    StatuslinePush push_{};
 
     // バックグラウンドで取得した結果（仮置き）
     ClaudeMetrics pending_{};
@@ -136,8 +161,17 @@ private:
     void run_nudge(bool presumed);
     // 直近 nudge プロセスの終了をノンブロッキングで確認し、終了していれば終了コードをログへ残す
     void reap_nudge();
+    // push_ が m の 5h/7d より新しければウィンドウ単位で重ね、重ねたら true（result_mutex_ 保持中に呼ぶ。
+    // 待機中セッションの古い値を捨てる判定を含む。詳細は実装側コメント参照）
+    bool overlay_push(ClaudeMetrics& m) const;
     std::string get_token();
 };
+
+// statusline の stdin JSON から 5h/7d を連携ファイルへ書き出す（sysmeters.exe --statusline 用）
+// CLAUDE_CONFIG_DIR が未設定または ~/.claude と一致すればメイン、sub_config_dir と一致すればサブへ書く。
+// どちらでもない、rate_limits の 5h/7d が両方無い、JSON 不正のときは何も書かない。
+// sub_config_dir はサブ無効時に空を渡す
+void write_claude_statusline(const std::string& stdin_json, const std::wstring& sub_config_dir);
 
 // claude.exe のセッション数をメイン/サブで分けて数える
 // `sub_config_dir` が空またはディレクトリ正規化に失敗した場合は全件をメインとして数える。

@@ -1,11 +1,14 @@
 // vim: set ft=cpp fenc=utf-8 ff=unix sw=4 ts=4 et :
+#include "collector_claude.hpp"
 #include "config.hpp"
 #include "logger.hpp"
 #include "window.hpp"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <objbase.h>
+#include <shellapi.h>
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shell32.lib")
 
 #include <filesystem>
 namespace fs = std::filesystem;
@@ -37,7 +40,44 @@ static std::string get_config_path() {
     return out.empty() ? "sysmeters.toml" : out;
 }
 
+// コマンドラインの第 1 引数が --statusline か判定する
+static bool is_statusline_mode() {
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return false;
+    bool hit = (argc >= 2 && wcscmp(argv[1], L"--statusline") == 0);
+    LocalFree(argv);
+    return hit;
+}
+
+// statusline 連携モードの本体：stdin の statusline JSON を連携ファイルへ書き出す
+//
+// Claude Code の statusline が起動し、常駐中の sysmeters がその書き出しを取り込む。
+// 標準出力には何も書かない（statusline の表示は呼び出し元スクリプトの責務）。
+// 書き出し失敗は statusline の表示を妨げないよう常に 0 で終了し、ログも残さない
+// （Claude Code が応答ごとに起動するため、ログ初期化の費用と出力量を避ける）。
+// stdin が無効・1MB 超のときは書かない
+static int run_statusline() {
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+    if (in == nullptr || in == INVALID_HANDLE_VALUE) return 0;
+    static constexpr size_t MAX_STDIN_BYTES = 1 * 1024 * 1024;
+    std::string body;
+    char buf[8192];
+    DWORD read = 0;
+    while (ReadFile(in, buf, sizeof(buf), &read, nullptr) && read > 0) {
+        if (body.size() + read > MAX_STDIN_BYTES) return 0;
+        body.append(buf, read);
+    }
+    AppConfig cfg = load_config(get_config_path());
+    write_claude_statusline(body, cfg.claude_sub.enable ? cfg.claude_sub.config_dir : std::wstring());
+    return 0;
+}
+
 int main() {
+    // statusline 連携モード：stdin の statusline JSON を書き出して即終了する。
+    // 多重起動排他より前に置く（後ろだと常駐中の sysmeters へ WM_CLOSE を送ってしまうため）
+    if (is_statusline_mode()) return run_statusline();
+
     // nudge の CreateProcessW は相対名（例：claude.exe）をコマンドラインで受けるため、
     // 実行ファイル検索順からカレントディレクトリを除外し、CWD に置かれた
     // 偽実行ファイルの起動を防ぐ。この変数は nudge で起動する子プロセスにも継承されるが、

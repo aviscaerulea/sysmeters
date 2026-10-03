@@ -39,6 +39,7 @@ Claude Code のレートリミット使用状況をコンパクトなオーバ�
 - OS：OS 名と連続稼働時間を表示（稼働日数が閾値を超えると警告色）
 - Claude Code：5h / 7d レートリミット使用率とリセット時刻、セッション数を表示
   - メイン / サブの 2 アカウントを同時表示できる
+  - statusline 連携で 5h / 7d を即時反映できる
 - Claude Code nudge：レートリミットのリセット後に消費のない間隙を検知して `claude.exe` を自動起動
 - Claude Code 5h リセット通知：リセット通過を Toast と専用音で知らせる（使用率が閾値以下なら除く）
 - トッププロセス表示：CPU / GPU の面グラフ内に、使用率トップのプロセス名と使用率を表示
@@ -82,11 +83,40 @@ CPU は 0.9 秒間隔で各プロセスの使用時間の増分を測り、シ�
 - 毎時 0 分に最新データを強制取得
 - 5h リセット時刻の通過後、次の取得まで 5h バーを 0%、リセット時刻を `--:--` で表示
 - セッション数は `claude.exe` プロセスの `CLAUDE_CONFIG_DIR` 環境変数で判別し、アカウント別にカウント
-- Sessions ラベルの左に直近の Usage API 取得時刻を同色・同サイズで表示し、表示データの鮮度を確認できる
+- Sessions ラベルの左に、表示中の 5h / 7d データの取得時刻を同色・同サイズで表示する
+  - Usage API と statusline 連携のうち新しい方の時刻で、表示データの鮮度を確認できる
   - 取得時刻は `HH:MM` 形式で、時はゼロ埋めなし
 - Usage API を取得できない間は、プラン名の右に赤字で `Err` を表示
 - 未ログイン（OAuth トークン未取得）の間は取得可否に依らず `Logout` を表示
   - `claude login` での再認証が必要
+
+### Claude Code statusline 連携
+
+Claude Code の statusline から `sysmeters --statusline` へ statusline の入力をそのまま渡すと、5h / 7d の使用率とリセット時刻を応答のたびに即時反映します（Usage API の定期取得より新しい値だけを採用）。上位モデル専用枠、超過料金、プラン名は statusline の入力に含まれないため、従来どおり Usage API から取得します。
+
+statusline を使っていない場合は、Claude Code の `settings.json` に次のように指定します（statusline の表示は空になります）。
+
+```json
+"statusLine": { "type": "command", "command": "sysmeters --statusline" }
+```
+
+ZIP を展開して使う場合は、`sysmeters` の代わりに展開先の `sysmeters.exe` を絶対パスで指定します。
+
+自作の statusline スクリプトがある場合は、受け取った入力を転送する処理を加えます。Python の例です（転送に失敗しても statusline の表示は止めません）。
+
+```python
+raw = sys.stdin.buffer.read()
+try:
+    subprocess.run(["sysmeters", "--statusline"], input=raw, timeout=2)
+except (OSError, subprocess.SubprocessError):
+    pass
+```
+
+- 環境変数 `CLAUDE_CONFIG_DIR` が未設定か `~/.claude` ならメインに反映する
+  - `[claude_sub] config_dir` に一致すればサブに反映する
+  - どちらにも一致しない設定ディレクトリのセッションは反映しない
+- statusline に使用率が届くのは Pro / Max プランのみで、それ以外では何も反映しない
+- `--statusline` 非対応の旧版を呼ぶと常駐中の sysmeters が終了するため、対応版へ更新してから設定する
 
 ### Claude Code nudge
 

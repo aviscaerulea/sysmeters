@@ -72,6 +72,11 @@ static constexpr uint64_t NUDGE_RETRY_INTERVAL_MS = 30 * 60 * 1000;
 // 使い切った間隙は要因解消後も発火せず、アプリ再起動まで nudge が止まる構造が残るため
 static constexpr uint64_t NUDGE_REARM_INTERVAL_MS = 5ULL * 60 * 60 * 1000;
 
+// 5h/7d 履歴サンプルの最小間隔（秒）。apply_result はこれより短い間隔では履歴へ追加しない。
+// statusline 連携の取り込み（最大 1 秒周期）で履歴が膨らみ、保存が毎秒走るのを防ぐ。
+// API 取得周期（60 秒）より短くし、連携が無いときは API 取得ごとに従来どおり追加する
+static constexpr time_t HIST_MIN_INTERVAL_SEC = 30;
+
 // キャッシュ JSON を読む。TTL 内なら内容を返す。期限切れなら null。
 // エラーキャッシュ（"error" フィールドあり）は NEGATIVE_TTL で判定する。
 static json read_cache(const fs::path& path, double ttl) {
@@ -193,14 +198,14 @@ static time_t parse_iso8601_utc(const std::string& iso) {
     return _mkgmtime(&utc_t);
 }
 
-// ISO 8601 UTC 日時文字列を JST に変換して表示文字列に変換する
+// UTC time_t を JST の表示文字列に変換する（負値＝未取得・パース失敗は "-"）
 //
-// _mkgmtime で UTC time_t を求め +9h してから gmtime_s で JST broken-down time を得る。
+// +9h してから gmtime_s で JST broken-down time を得る。
 // mktime（ローカル時刻解釈）を避けることで月またぎ・年またぎを正確に処理する。
 // 曜日は wchar_t 出力で日本語を正しく扱う（char + %hs 変換による文字化けを防ぐ）。
-static void format_reset_time(const std::string& iso, bool include_date, wchar_t* out, int out_len) {
-    time_t utc_ts = parse_iso8601_utc(iso);
-    if (utc_ts == -1) { swprintf_s(out, out_len, L"-"); return; }
+// Usage API（ISO 8601 文字列）と statusline 連携（epoch 秒）の両経路で共用する。
+static void format_reset_ts(time_t utc_ts, bool include_date, wchar_t* out, int out_len) {
+    if (utc_ts < 0) { swprintf_s(out, out_len, L"-"); return; }
 
     // UTC → JST (+9h)、月またぎ・年またぎも正確に処理
     time_t jst_ts = utc_ts + 9 * 3600;
@@ -217,6 +222,21 @@ static void format_reset_time(const std::string& iso, bool include_date, wchar_t
     else {
         swprintf_s(out, out_len, L"%02d:%02d", jst_t.tm_hour, jst_t.tm_min);
     }
+}
+
+// ISO 8601 UTC 日時文字列を JST の表示文字列に変換する（パース失敗時は "-"）
+static void format_reset_time(const std::string& iso, bool include_date, wchar_t* out, int out_len) {
+    format_reset_ts(parse_iso8601_utc(iso), include_date, out, out_len);
+}
+
+// 5h/7d データの取得時刻をローカル時刻 "HH:MM" に整形する
+// 時はゼロ埋めなしの 2 桁右寄せ（1 桁時は先頭に空白）。等幅フォントで桁と直近使用ドットの位置が
+// 時刻に依らず揃うようにするため。ts <= 0（未取得）のときは out を変更しない
+static void format_fetched_at(time_t ts, wchar_t (&out)[8]) {
+    if (ts <= 0) return;
+    struct tm lt{};
+    localtime_s(&lt, &ts);
+    swprintf_s(out, L"%2d:%02d", lt.tm_hour, lt.tm_min);
 }
 
 // TTL 無視で前回キャッシュの内容を返す
@@ -288,7 +308,7 @@ static void load_history_cache(const fs::path& path,
 
 // 5h/7d 履歴キャッシュを直接上書き保存する
 //
-// apply_result が avail 時に毎回呼ぶ。既存の usage/plan キャッシュと同じ流儀で
+// apply_result が履歴を追加した回に呼ぶ。既存の usage/plan キャッシュと同じ流儀で
 // テンポラリ→リネームは行わず ofstream で直接上書きする。（クラッシュ時は次回 parse 失敗となり
 // 復元なしに退化するだけで許容する）
 static void save_history_cache(const fs::path& path,
@@ -331,10 +351,9 @@ static bool json_bool(const nlohmann::json& j, const char* key, bool def) {
 // do_fetch（API/キャッシュ経由）と init（前回キャッシュ復元）で共有する。
 // usage_j が null の場合は何もしない。成功時のみ result.avail を true にし、
 // キャッシュ JSON に付与された "_ts"（do_fetch がキャッシュ保存時に付与、新規取得・
-// キャッシュヒット・起動時復元のいずれでも保持）をローカル時刻 "HH:MM"（時はゼロ埋めなしの
-// 2 桁右寄せ。1 桁時は先頭に空白）に整形して result.fetched_at へ格納する。
-// 等幅フォントで桁と直近使用ドットの位置が時刻に依らず揃うようにするため。
-// （fetched_at は画面表示用の取得時刻鮮度インジケータ）
+// キャッシュヒット・起動時復元のいずれでも保持）を result.usage_ts に入れ、
+// result.fetched_at（画面表示用の取得時刻鮮度インジケータ）へ整形する。
+// usage_ts は statusline 連携値との新旧比較（overlay_push）にも使う
 static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
     if (usage_j == nullptr) return;
     try {
@@ -361,11 +380,8 @@ static void apply_usage_json(const json& usage_j, ClaudeMetrics& result) {
         result.avail = true;
 
         time_t fetched_ts = static_cast<time_t>(json_num(usage_j, "_ts", 0.0));
-        if (fetched_ts > 0) {
-            struct tm lt{};
-            localtime_s(&lt, &fetched_ts);
-            swprintf_s(result.fetched_at, L"%2d:%02d", lt.tm_hour, lt.tm_min);
-        }
+        result.usage_ts = fetched_ts;
+        format_fetched_at(fetched_ts, result.fetched_at);
 
         // 超過料金情報（extra_usage）
         // 呼び出し元は前回値を引き継いだ result を渡すため、判定前に必ず未提供既定値へ
@@ -670,6 +686,12 @@ void ClaudeCollector::do_fetch() {
 
     apply_usage_json(usage_j, result);
     result.fetch_error = (usage_j == nullptr);
+    // キャッシュヒットした古い API 値で、より新しい statusline 連携値を巻き戻さないよう重ね直す。
+    // 後続の nudge 判定も新しい方の 5h resets_ts を見る
+    {
+        std::lock_guard<std::mutex> lock(result_mutex_);
+        overlay_push(result);
+    }
 
     // --- 5h リセット通過の nudge（claude.exe 起動による次ウィンドウの消費促進）---
     // アクティブな 5h ウィンドウ（未来の resets_ts）を監視対象として記憶し、
@@ -793,6 +815,8 @@ void ClaudeCollector::do_fetch() {
 
     {
         std::lock_guard<std::mutex> lock(result_mutex_);
+        // Account API 取得の間に poll_statusline が取り込んだ連携値を、書き戻しで消さないよう重ね直す
+        overlay_push(result);
         pending_ = result;
     }
     // wParam にアカウント識別子を載せる（0=Main, 1=Sub）。受信側は wParam で apply_result の振り分けを行う
@@ -803,6 +827,141 @@ void ClaudeCollector::do_fetch() {
 DWORD WINAPI ClaudeCollector::fetch_thread(LPVOID param) {
     reinterpret_cast<ClaudeCollector*>(param)->do_fetch();
     return 0;
+}
+
+// Claude 関連キャッシュのディレクトリ（%LOCALAPPDATA%\sysmeters）を返す。無ければ作成する
+//
+// テンポラリ（旧保存先）は OS やユーザの掃除で消え、再起動時の履歴復元ができなくなるため
+// 移した。exe ディレクトリ配下にしないのは、Scoop が更新時にバージョンディレクトリを作り直し、
+// manifest の persist 指定なしではキャッシュが消えるため。
+// 旧テンポラリのファイルは移行しない（履歴は 30 分で復帰する）。
+// 常駐側（init）と statusline 連携の書き出し側（write_claude_statusline）が同じ場所を共有する。
+// 取得・作成に失敗したときは空 path を返す
+static fs::path claude_cache_dir() {
+    wchar_t appdata[MAX_PATH] = {};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appdata))) return {};
+    fs::path cache_dir = fs::path(appdata) / L"sysmeters";
+    int dir_err = SHCreateDirectoryExW(nullptr, cache_dir.c_str(), nullptr);
+    if (dir_err != ERROR_SUCCESS && dir_err != ERROR_ALREADY_EXISTS && dir_err != ERROR_FILE_EXISTS)
+        return {};
+    return cache_dir;
+}
+
+// statusline 連携ファイルのパス（claude-statusline{suffix}.json。suffix はメイン ""、サブ "-sub"）
+static fs::path statusline_push_path(const fs::path& cache_dir, const std::string& suffix) {
+    return cache_dir / ("claude-statusline" + suffix + ".json");
+}
+
+// statusline 形式のウィンドウオブジェクト（{"used_percentage": n, "resets_at": epoch}）を読む
+// 両フィールドが数値のときだけ true。欠落・null・型違いは「そのウィンドウの情報なし」として false
+static bool parse_push_window(const json& parent, const char* key, double& pct, double& rts) {
+    auto it = parent.find(key);
+    if (it == parent.end() || !it->is_object()) return false;
+    pct = json_num(*it, "used_percentage", -1.0);
+    rts = json_num(*it, "resets_at", -1.0);
+    return pct >= 0.0 && rts > 0.0;
+}
+
+// 連携値と表示中の値の resets_ts がこの秒数以内の差なら同一ウィンドウとみなす。
+// Usage API の resets_at は秒未満を含み、statusline は epoch 秒のため、同じウィンドウでも数秒ずれ得る
+static constexpr time_t PUSH_SAME_WINDOW_TOLERANCE_SEC = 60;
+
+// 連携値 1 ウィンドウ分を採用してよいか判定する
+//
+// 書き出し時刻（_ts）は「Claude Code が statusline を実行した時刻」で、使用率の観測時刻ではない。
+// 待機中のセッションも権限モード切替などで statusline を再実行し、最後に受けた古い使用率を
+// 新しい _ts 付きで書くため、_ts だけでは並走中の別セッションの新しい値を古い値が上書きし得る。
+// そこで同一ウィンドウ内では使用率が減らない性質を使い、表示中より低い値を捨てる。
+// 終了済み（resets_ts が過去）と、表示中より古いウィンドウの値も採らない。
+// 表示中のウィンドウが不明（cur_rts <= 0）なら、終了済みでない限り採る
+static bool accept_push_window(time_t push_rts, float push_pct, time_t cur_rts, float cur_pct, time_t now) {
+    if (push_rts <= now) return false;
+    if (cur_rts <= 0) return true;
+    time_t diff = push_rts - cur_rts;
+    if (diff > PUSH_SAME_WINDOW_TOLERANCE_SEC) return true;     // 新しいウィンドウ
+    if (diff < -PUSH_SAME_WINDOW_TOLERANCE_SEC) return false;   // 古いウィンドウ
+    return push_pct >= cur_pct;
+}
+
+// statusline 連携値を m へ重ねる（result_mutex_ 保持中に呼ぶ）。1 ウィンドウでも重ねたら true
+//
+// 連携値（push_.ts）が m の 5h/7d データ（m.usage_ts）より新しいときだけ重ねる。
+// Usage API と statusline はどちらも同じサーバ側の使用率を映すため、時刻が新しい方が正しい。
+// ただし待機中セッションの古い値を除くため、ウィンドウごとに accept_push_window で再判定する。
+// ウィンドウ単位で重ねるのは、片方だけ欠ける・片方だけ古い場合があるため（採らないウィンドウは API 値を残す）。
+// Fable 等の専用 7d 枠・超過料金・プラン名・Err 表示は statusline に含まれないため触らない
+bool ClaudeCollector::overlay_push(ClaudeMetrics& m) const {
+    if (push_.ts <= static_cast<double>(m.usage_ts)) return false;
+    time_t now = static_cast<time_t>(now_ts());
+    bool applied = false;
+    if (push_.has5 && accept_push_window(push_.rts5, push_.pct5, m.five_h_resets_ts, m.five_h_pct, now)) {
+        m.five_h_pct       = push_.pct5;
+        m.five_h_resets_ts = push_.rts5;
+        format_reset_ts(push_.rts5, false, m.five_h_reset, _countof(m.five_h_reset));
+        applied = true;
+    }
+    if (push_.has7 && accept_push_window(push_.rts7, push_.pct7, m.seven_d_resets_ts, m.seven_d_pct, now)) {
+        m.seven_d_pct       = push_.pct7;
+        m.seven_d_resets_ts = push_.rts7;
+        format_reset_ts(push_.rts7, true, m.seven_d_reset, _countof(m.seven_d_reset));
+        applied = true;
+    }
+    if (!applied) return false;
+    m.usage_ts = static_cast<time_t>(push_.ts);
+    format_fetched_at(m.usage_ts, m.fetched_at);
+    m.avail = true;
+    return true;
+}
+
+// statusline 連携ファイルの更新を取り込む
+//
+// 更新時刻が前回と変わったときだけ読む（1 秒周期の呼び出しで毎回 parse しないため）。
+// 読めない・_ts が無い・両ウィンドウとも欠落・取り込み済みの値に対して不採用のときは false。
+// pending_ へ重ねられたときだけ true を返す（pending_ への採否は overlay_push が判定する）。書き出し側は一時ファイルからの置換で書くため途中状態は読まない
+bool ClaudeCollector::poll_statusline() {
+    if (cache_push_path_.empty()) return false;
+    std::error_code ec;
+    fs::file_time_type mtime = fs::last_write_time(cache_push_path_, ec);
+    if (ec || mtime == push_mtime_) return false;
+    push_mtime_ = mtime;
+
+    json j = read_cache_raw(cache_push_path_);
+    if (j.is_null()) return false;
+    StatuslinePush p;
+    double pct = 0.0, rts = 0.0;
+    p.ts = json_num(j, "_ts", 0.0);
+    if ((p.has5 = parse_push_window(j, "five_hour", pct, rts))) {
+        p.pct5 = static_cast<float>(pct);
+        p.rts5 = static_cast<time_t>(rts);
+    }
+    if ((p.has7 = parse_push_window(j, "seven_day", pct, rts))) {
+        p.pct7 = static_cast<float>(pct);
+        p.rts7 = static_cast<time_t>(rts);
+    }
+    if (p.ts <= 0.0 || (!p.has5 && !p.has7)) return false;
+
+    // push_ へはウィンドウごとに accept_push_window を通った値だけを入れる。丸ごと置き換えると、
+    // 待機中セッションの古い値が採用済みの新しい値を消し、do_fetch の重ね直し（API キャッシュヒット時）で
+    // 表示が古いキャッシュ値へ巻き戻るため。_ts も 1 ウィンドウ以上採用したときだけ進める
+    // （不採用の書き込みで鮮度表示が進み、古い値が新しく見えるのを防ぐ）
+    std::lock_guard<std::mutex> lock(result_mutex_);
+    time_t now = static_cast<time_t>(now_ts());
+    bool accepted = false;
+    if (p.has5 && accept_push_window(p.rts5, p.pct5, push_.has5 ? push_.rts5 : -1, push_.pct5, now)) {
+        push_.has5 = true;
+        push_.pct5 = p.pct5;
+        push_.rts5 = p.rts5;
+        accepted = true;
+    }
+    if (p.has7 && accept_push_window(p.rts7, p.pct7, push_.has7 ? push_.rts7 : -1, push_.pct7, now)) {
+        push_.has7 = true;
+        push_.pct7 = p.pct7;
+        push_.rts7 = p.rts7;
+        accepted = true;
+    }
+    if (!accepted) return false;
+    if (p.ts > push_.ts) push_.ts = p.ts;
+    return overlay_push(pending_);
 }
 
 void ClaudeCollector::init(HWND notify_wnd, int account_index,
@@ -829,22 +988,14 @@ void ClaudeCollector::init(HWND notify_wnd, int account_index,
             creds_path_ = fs::path(home) / L".claude" / L".credentials.json";
         }
     }
-    // キャッシュディレクトリは %LOCALAPPDATA%\sysmeters。
-    // テンポラリ（旧保存先）は OS やユーザの掃除で消え、再起動時の履歴復元ができなくなるため
-    // 移した。exe ディレクトリ配下にしないのは、Scoop が更新時にバージョンディレクトリを作り直し、
-    // manifest の persist 指定なしではキャッシュが消えるため。
-    // 取得・作成に失敗したときはパスを空のままにし、後段の I/O は静かに失敗させる（既存契約）。
-    // 旧テンポラリのファイルは移行しない（履歴は 30 分で復帰する）
-    wchar_t appdata[MAX_PATH] = {};
-    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appdata))) {
-        fs::path cache_dir = fs::path(appdata) / L"sysmeters";
-        int dir_err = SHCreateDirectoryExW(nullptr, cache_dir.c_str(), nullptr);
-        if (dir_err == ERROR_SUCCESS || dir_err == ERROR_ALREADY_EXISTS || dir_err == ERROR_FILE_EXISTS) {
-            // メインは既存ファイル名と互換になるよう suffix 空を維持する
-            cache_usage_path_ = cache_dir / ("claude-usage-cache"   + cache_suffix + ".json");
-            cache_plan_path_  = cache_dir / ("claude-plan-cache"    + cache_suffix + ".json");
-            cache_hist_path_  = cache_dir / ("claude-history-cache" + cache_suffix + ".json");
-        }
+    // 取得・作成に失敗したときはパスを空のままにし、後段の I/O は静かに失敗させる（既存契約）
+    fs::path cache_dir = claude_cache_dir();
+    if (!cache_dir.empty()) {
+        // メインは既存ファイル名と互換になるよう suffix 空を維持する
+        cache_usage_path_ = cache_dir / ("claude-usage-cache"   + cache_suffix + ".json");
+        cache_plan_path_  = cache_dir / ("claude-plan-cache"    + cache_suffix + ".json");
+        cache_hist_path_  = cache_dir / ("claude-history-cache" + cache_suffix + ".json");
+        cache_push_path_  = statusline_push_path(cache_dir, cache_suffix);
     }
 
     // API 取得完了までの空白を埋めるため、TTL 無視で前回キャッシュを暫定値として読み込む
@@ -992,23 +1143,84 @@ static void strip_trailing_sep(wchar_t* path) {
     }
 }
 
+// .claude ディレクトリのパスを比較用に正規化する（絶対パス化と末尾セパレータ除去）
+// 比較は呼び出し側で _wcsicmp を使う。正規化に失敗したときは空文字を返す
+static std::wstring normalize_dir(const std::wstring& dir) {
+    if (dir.empty()) return {};
+    wchar_t norm[MAX_PATH];
+    DWORD len = GetFullPathNameW(dir.c_str(), MAX_PATH, norm, nullptr);
+    if (len == 0 || len >= MAX_PATH) return {};
+    strip_trailing_sep(norm);
+    return norm;
+}
+
+void write_claude_statusline(const std::string& stdin_json, const std::wstring& sub_config_dir) {
+    // 書き出し先アカウントの判定。statusline の JSON にはアカウントを示すフィールドが無く、
+    // statusline プロセスが Claude Code から引き継ぐ CLAUDE_CONFIG_DIR だけが手掛かりになる。
+    // 未設定はメイン（~/.claude）。どちらにも一致しない設定ディレクトリは sysmeters が表示しない
+    // アカウントのため書かない（誤ったアカウントの表示を上書きしないため）
+    std::string suffix;
+    wchar_t env[MAX_PATH] = {};
+    DWORD env_len = GetEnvironmentVariableW(L"CLAUDE_CONFIG_DIR", env, MAX_PATH);
+    if (env_len >= MAX_PATH) return;
+    if (env_len > 0) {
+        std::wstring env_norm = normalize_dir(env);
+        if (env_norm.empty()) return;
+        std::wstring sub_norm = normalize_dir(sub_config_dir);
+        wchar_t home[MAX_PATH] = {};
+        std::wstring main_norm;
+        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, home)))
+            main_norm = normalize_dir((fs::path(home) / L".claude").wstring());
+        if (!sub_norm.empty() && _wcsicmp(env_norm.c_str(), sub_norm.c_str()) == 0) suffix = "-sub";
+        else if (!main_norm.empty() && _wcsicmp(env_norm.c_str(), main_norm.c_str()) == 0) suffix = "";
+        else return;
+    }
+
+    // rate_limits の 5h/7d だけを抜き出す。両方欠ける（Pro/Max 以外、セッション初回応答前）なら書かない
+    json out;
+    try {
+        json in = json::parse(stdin_json);
+        if (!in.is_object()) return;
+        auto rl = in.find("rate_limits");
+        if (rl == in.end() || !rl->is_object()) return;
+        double pct = 0.0, rts = 0.0;
+        if (parse_push_window(*rl, "five_hour", pct, rts))
+            out["five_hour"] = {{"used_percentage", pct}, {"resets_at", rts}};
+        if (parse_push_window(*rl, "seven_day", pct, rts))
+            out["seven_day"] = {{"used_percentage", pct}, {"resets_at", rts}};
+        if (out.is_null()) return;
+        out["_ts"] = now_ts();
+    }
+    catch (...) { return; }
+
+    fs::path cache_dir = claude_cache_dir();
+    if (cache_dir.empty()) return;
+    fs::path path = statusline_push_path(cache_dir, suffix);
+    // 一時ファイルへ書いてから置換する。常駐側が 1 秒周期で読むため途中状態を見せないのと、
+    // 同一アカウントの複数セッションが同時に書いても一時ファイルが衝突しないよう pid で分ける
+    fs::path tmp = path;
+    tmp += L"." + std::to_wstring(GetCurrentProcessId()) + L".tmp";
+    {
+        std::ofstream ofs(tmp, std::ios::binary | std::ios::trunc);
+        if (!ofs) return;
+        ofs << out.dump();
+        if (!ofs) { ofs.close(); std::error_code ec; fs::remove(tmp, ec); return; }
+    }
+    if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::error_code ec;
+        fs::remove(tmp, ec);
+    }
+}
+
 ClaudeSessionCount count_claude_sessions_split(const std::wstring& sub_config_dir) {
     ClaudeSessionCount result{};
 
     // サブ用パスを事前に正規化しておく
     // 構成済みでも正規化に失敗した場合は sub_norm 空のままになる。検知できない誤分類を避けるため
     // 区別してログに残す
-    std::wstring sub_norm;
-    if (!sub_config_dir.empty()) {
-        wchar_t norm[MAX_PATH];
-        DWORD len = GetFullPathNameW(sub_config_dir.c_str(), MAX_PATH, norm, nullptr);
-        if (len > 0 && len < MAX_PATH) {
-            strip_trailing_sep(norm);
-            sub_norm = norm;
-        }
-        else {
-            log_error("count_claude_sessions_split: GetFullPathNameW failed for sub_config_dir (len=%lu) — all sessions counted as main", len);
-        }
+    std::wstring sub_norm = normalize_dir(sub_config_dir);
+    if (!sub_config_dir.empty() && sub_norm.empty()) {
+        log_error("count_claude_sessions_split: GetFullPathNameW failed for sub_config_dir — all sessions counted as main");
     }
 
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -1021,17 +1233,9 @@ ClaudeSessionCount count_claude_sessions_split(const std::wstring& sub_config_di
             if (_wcsicmp(pe.szExeFile, L"claude.exe") == 0) {
                 bool is_sub = false;
                 if (!sub_norm.empty()) {
-                    std::wstring env_val = read_process_env_var(pe.th32ProcessID, L"CLAUDE_CONFIG_DIR");
-                    if (!env_val.empty()) {
-                        wchar_t norm[MAX_PATH];
-                        DWORD len = GetFullPathNameW(env_val.c_str(), MAX_PATH, norm, nullptr);
-                        if (len > 0 && len < MAX_PATH) {
-                            strip_trailing_sep(norm);
-                            if (_wcsicmp(norm, sub_norm.c_str()) == 0) {
-                                is_sub = true;
-                            }
-                        }
-                    }
+                    std::wstring env_norm = normalize_dir(
+                        read_process_env_var(pe.th32ProcessID, L"CLAUDE_CONFIG_DIR"));
+                    is_sub = !env_norm.empty() && _wcsicmp(env_norm.c_str(), sub_norm.c_str()) == 0;
                 }
                 if (is_sub) ++result.sub_count;
                 else        ++result.main_count;
@@ -1135,22 +1339,31 @@ void ClaudeCollector::apply_result(ClaudeMetrics& out, int delta_window_min, int
     // 保持期間は (delta_window + 1) × 60 秒（N 分前のサンプル参照に必要な分 + バッファ 1 分）。
     // 7d ウィンドウのリセットで履歴はクリアしない。旧ウィンドウの高 pct サンプルが残っても、
     // 描画側の「増加分のみ描画」条件が影響を打ち消す。
-    // avail 時は push_and_trim 直後に cache_hist_path_ へ毎回上書き保存し、アプリ再起動後も
+    // push した回は cache_hist_path_ へ上書き保存し、アプリ再起動後も
     // init() 経由で直近の履歴（7d はデフォルト 12h 分）を復元できるようにする。（クラッシュ耐性優先の設計）
+    // 直前サンプルから HIST_MIN_INTERVAL_SEC 未満なら push も保存も省く。statusline 連携の取り込みで
+    // 本関数が最大 1 秒周期に呼ばれても、サンプル密度と保存頻度を API 取得周期と同程度に保つため。
+    // 直前サンプルが未来時刻（時計の巻き戻り、復元値）のときは間隔判定せず push する（push が止まらないように）
     if (out.avail) {
         time_t now = time(nullptr);
         auto push_and_trim = [now](std::vector<ClaudeHistorySample>& hist, float pct, int win_min) {
+            if (!hist.empty()) {
+                time_t since = now - hist.back().ts;
+                if (since >= 0 && since < HIST_MIN_INTERVAL_SEC) return false;
+            }
             hist.push_back({now, pct});
             time_t cutoff = now - static_cast<time_t>(win_min + 1) * 60;
             auto it = std::find_if(hist.begin(), hist.end(),
                 [cutoff](const ClaudeHistorySample& s) { return s.ts >= cutoff; });
             hist.erase(hist.begin(), it);
+            return true;
         };
-        push_and_trim(out.five_h_history,  out.five_h_pct,  delta_window_min);
-        push_and_trim(out.seven_d_history, out.seven_d_pct, delta_window_7d_min);
-        // 7d 保持上限は (delta_window_7d_min + 1) 分 ≒ 12h、取得サイクル ~60 秒で高々 750
-        // サンプル前後・数十 KB のため、毎回書いても実害がない
-        save_history_cache(cache_hist_path_, out.five_h_history, out.seven_d_history);
+        bool pushed5 = push_and_trim(out.five_h_history,  out.five_h_pct,  delta_window_min);
+        bool pushed7 = push_and_trim(out.seven_d_history, out.seven_d_pct, delta_window_7d_min);
+        // 7d 保持上限は (delta_window_7d_min + 1) 分 ≒ 12h、サンプル間隔の下限 30 秒で高々 1,500
+        // サンプル前後・百 KB 未満のため、push のたびに書いても実害がない
+        if (pushed5 || pushed7)
+            save_history_cache(cache_hist_path_, out.five_h_history, out.seven_d_history);
     }
 }
 

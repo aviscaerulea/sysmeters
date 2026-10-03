@@ -35,7 +35,7 @@ A Toast notification appears the moment any warning threshold is exceeded. Notif
 - Network: Displays aggregated send/receive throughput across all NICs, separated by direction
 - IP: Displays the global IP address (shows NO INTERNET📵 when offline)
 - OS: Displays the OS name and continuous uptime (turns to the warning color once uptime exceeds the threshold)
-- Claude Code: Displays 5h / 7d rate limit usage, reset times, and session counts (main and sub accounts can be displayed simultaneously)
+- Claude Code: Displays 5h / 7d rate limit usage, reset times, and session counts (main and sub accounts can be displayed simultaneously; statusline integration reflects 5h / 7d instantly)
 - Claude Code nudge: Detects the gap after a rate limit reset where consumption has not yet started, and automatically launches `claude.exe`
 - Claude Code 5h reset notification: Announces a reset via Toast and a dedicated notification sound (skipped when usage is at or below the threshold)
 - Top process display: Shows the name and usage of the top process inside the CPU / GPU area charts
@@ -74,9 +74,36 @@ Displays 5h / 7d rate limit usage (horizontal bars), reset times, and session co
 - The latest data is force-fetched at the top of every hour
 - After the 5h reset time has passed, the 5h bar shows 0% and the reset time shows `--:--` until the next fetch
 - Session counts are determined from each `claude.exe` process's `CLAUDE_CONFIG_DIR` environment variable and tallied separately per account
-- To the left of the Sessions label, the timestamp of the most recent Usage API fetch (`HH:MM` format, hour without zero padding) is displayed in the same color and size, so data freshness can be confirmed
+- To the left of the Sessions label, the fetch time of the displayed 5h / 7d data (`HH:MM` format, hour without zero padding) is displayed in the same color and size, so data freshness can be confirmed (the newer of the Usage API and the statusline integration)
 - While the Usage API cannot be fetched, `Err` is displayed in red to the right of the plan name
 - While logged out (no OAuth token), `Logout` is displayed regardless of fetch success, and re-authentication via `claude login` is required
+
+### Claude Code statusline Integration
+
+Passing the Claude Code statusline input as-is to `sysmeters --statusline` reflects 5h / 7d usage and reset times instantly on every response (only values newer than the periodic Usage API fetch are adopted). The dedicated quota for higher-tier models, extra usage charges, and the plan name are not included in the statusline input, so they are still fetched from the Usage API.
+
+If you do not use a statusline, specify the following in Claude Code's `settings.json` (the statusline itself will be empty).
+
+```json
+"statusLine": { "type": "command", "command": "sysmeters --statusline" }
+```
+
+If you extracted the ZIP, specify the absolute path of the extracted `sysmeters.exe` instead of `sysmeters`.
+
+If you have your own statusline script, add a step that forwards the received input. A Python example (a forwarding failure does not stop the statusline output):
+
+```python
+raw = sys.stdin.buffer.read()
+try:
+    subprocess.run(["sysmeters", "--statusline"], input=raw, timeout=2)
+except (OSError, subprocess.SubprocessError):
+    pass
+```
+
+- Unset `CLAUDE_CONFIG_DIR` or `~/.claude` is reflected as the main account, `[claude_sub] config_dir` as the sub
+- Sessions with any other config directory are not reflected
+- Usage arrives in the statusline only for Pro / Max plans; otherwise nothing is reflected
+- An older version without `--statusline` support exits the running sysmeters, so update first
 
 ### Claude Code Nudge
 

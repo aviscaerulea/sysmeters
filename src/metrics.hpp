@@ -166,9 +166,11 @@ struct ClaudeMetrics {
     float seven_d_scoped_pct = -1.f;
     wchar_t account_label[24] = L"Main"; // 描画ヘッダ表示名（TOML name より反映）
     bool  account_enabled    = false; // このアカウントが有効化されているか（サブ未構成時 false）
-    wchar_t fetched_at[8] = L"";      // Usage API 取得時刻（ローカル "HH:MM"、時はゼロ埋めなしの 2 桁右寄せ。未取得時は空文字）
+    // 表示中 5h/7d データの取得時刻（epoch 秒、未取得 0）。Usage API と statusline 連携の新しい方を採る判定に使う
+    time_t usage_ts = 0;
+    wchar_t fetched_at[8] = L"";      // usage_ts のローカル "HH:MM"（時はゼロ埋めなしの 2 桁右寄せ。未取得時は空文字）
     // 5h / 7d 使用率の時系列（各 delta ウィンドウの N+1 分を保持）
-    // apply_result 呼び出し時に push し、保持期間外を先頭から破棄する。
+    // apply_result 呼び出し時に push し（直前サンプルから 30 秒未満なら省く）、保持期間外を先頭から破棄する。
     // 描画側で「現在値」と「N 分前の値」の差分を濃色オーバーレイとして表示する。
     std::vector<ClaudeHistorySample> five_h_history;
     std::vector<ClaudeHistorySample> seven_d_history;

@@ -778,8 +778,9 @@ bool AppWindow::is_fullscreen_app_running() {
 
 // 5h リセット時刻の通過をアカウント別に判定し、条件を満たせば通知する
 //
-// メトリクスを更新するのは 60 秒周期のフェッチ結果だけのため、1 秒周期のこの判定が
-// 「時計が five_h_resets_ts を通過した」瞬間に見る five_h_pct はリセット直前の使用率である。
+// メトリクスを更新するのは 60 秒周期のフェッチ結果と statusline 連携の取り込みだけで、連携は終了済み
+// ウィンドウの値を採らない。そのため 1 秒周期のこの判定が「時計が five_h_resets_ts を通過した」
+// 瞬間に見る five_h_pct はリセット直前の使用率である（キャッシュ由来の過去値は下記の鮮度条件で除く）。
 // これを reset_notify_min_pct と比較し、以下なら通知しない。
 // Usage API 取得失敗（Err）中も前回値が残るため時計比較だけで判定できる。
 // 同じリセット時刻は通知の有無に関わらず 1 回だけ判定する（claude_reset_notified_ts_）。
@@ -1121,6 +1122,9 @@ LRESULT AppWindow::handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // 高速更新（1.0 秒）：Disk/Net
             col_disk_->update(metrics_->disks);
             col_net_->update(metrics_->net);
+            // statusline 連携ファイルの取り込み（5h/7d の即時反映）
+            if (col_claude_main_->poll_statusline()) on_claude_done(0);
+            if (col_claude_sub_ && col_claude_sub_->poll_statusline()) on_claude_done(1);
         }
         else if (wp == TIMER_SLOW) {
             // 低速更新（2.0 秒）：RAM/VRAM
