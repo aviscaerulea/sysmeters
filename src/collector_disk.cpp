@@ -80,14 +80,24 @@ static int get_phys_drive(char drv) {
                            nullptr, OPEN_EXISTING, 0, nullptr);
     if (h == INVALID_HANDLE_VALUE) return -1;
 
-    struct { VOLUME_DISK_EXTENTS vde; DISK_EXTENT extra; } buf{};
+    // まず 2 エクステント分で問い合わせ、足りなければ（ERROR_MORE_DATA）IOCTL が書き戻した
+    // NumberOfDiskExtents 分のバッファで再発行する。動的ディスクのスパン・ストライプ等、
+    // 3 本以上のディスクにまたがるボリュームは固定長バッファでは IOCTL が失敗し、
+    // 実在ドライブを仮想 FS と誤判定して除外していた
+    std::vector<BYTE> buf(sizeof(VOLUME_DISK_EXTENTS) + sizeof(DISK_EXTENT));
     DWORD bytes = 0;
+    BOOL ok = DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                              nullptr, 0, buf.data(), static_cast<DWORD>(buf.size()), &bytes, nullptr);
+    if (!ok && GetLastError() == ERROR_MORE_DATA) {
+        const DWORD n = reinterpret_cast<const VOLUME_DISK_EXTENTS*>(buf.data())->NumberOfDiskExtents;
+        buf.assign(offsetof(VOLUME_DISK_EXTENTS, Extents) + sizeof(DISK_EXTENT) * n, 0);
+        ok = DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                             nullptr, 0, buf.data(), static_cast<DWORD>(buf.size()), &bytes, nullptr);
+    }
     int result = -1;
-    if (DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
-                        nullptr, 0, &buf, sizeof(buf), &bytes, nullptr) &&
-        buf.vde.NumberOfDiskExtents > 0 &&
-        buf.vde.Extents[0].ExtentLength.QuadPart > 0) {
-        result = static_cast<int>(buf.vde.Extents[0].DiskNumber);
+    const auto* vde = reinterpret_cast<const VOLUME_DISK_EXTENTS*>(buf.data());
+    if (ok && vde->NumberOfDiskExtents > 0 && vde->Extents[0].ExtentLength.QuadPart > 0) {
+        result = static_cast<int>(vde->Extents[0].DiskNumber);
     }
     CloseHandle(h);
     return result;
