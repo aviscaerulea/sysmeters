@@ -19,7 +19,7 @@
 // PawnIO IOCTL 定義（pawnio_um.h より）
 //
 // PawnIO ドライバ（\\.\PawnIO）経由で MSR を読み取るための IOCTL コードと定数。
-// デバイスタイプ 41394 は PawnIO が使用する固有の値（k_device_type）。
+// デバイスタイプ 41394 は PawnIO が使用する固有の値（k_pawnio_device_type）。
 static constexpr ULONG k_pawnio_device_type = 41394;
 static constexpr ULONG IOCTL_PIO_LOAD_BINARY =
     CTL_CODE(k_pawnio_device_type, 0x821, METHOD_BUFFERED, FILE_ANY_ACCESS);
