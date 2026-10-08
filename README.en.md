@@ -155,7 +155,7 @@ The Claude Code section has many conditions, so they are organized by color.
 | Yellow | Above the even-pace position (green line) |
 | Red | Usage has reached 100%, or the overshoot beyond the even-pace position is at or above the threshold |
 
-Transitions to yellow and red are accompanied by a per-account alert sound and Toast notification.
+Transitions to red are accompanied by a per-account alert sound and Toast notification (yellow is not notified).
 While the 7d bar is in a warning state, the time remaining until the warning clears is displayed in black at the left edge of the bar. (in minutes such as `-20m` within 60 minutes, in hours such as `-1.1h` beyond 60 minutes; hidden when the filled width is too narrow for the text at low usage)
 
 #### Overage Charge Text

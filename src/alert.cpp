@@ -467,6 +467,16 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
         float uptime_days = static_cast<float>(m.os.uptime_ms) / (1000.f * 86400.f);
         check_once(UPTIME, uptime_days, static_cast<float>(cfg.warn_uptime_days));
     }
+    // Claude 5h/7d の判定値：理想ペース超過率を基本とし、使用率 100% 到達時は警告閾値まで引き上げる。
+    // 描画側の赤判定（100% 到達、または超過率が閾値以上）と発火条件を一致させるため。
+    // ウィンドウ終盤は理想ペースが高く超過率だけでは閾値に届かないが、使い切りは最も知りたい事象だ。
+    // 100% の間は判定値が閾値以上に張り付くため、新ウィンドウで使用率が下がるまで再発火しない。
+    // 黄（ペース超過のみ）では発火しない。
+    auto claude_pace_value = [](float pct, float expected, float warn) {
+        float over = pct - expected;
+        return (pct >= 100.f) ? std::max(over, warn) : over;
+    };
+
     // Claude Main：閾値は両アカウント共通（cfg.warn_claude_*）
     if (m.claude_main.account_enabled && m.claude_main.avail) {
         // 均等消費ペースは描画側と同じ claude_expected_pct で現在時刻基準に算出し、
@@ -475,10 +485,12 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
         float exp5 = claude_expected_pct(m.claude_main.five_h_resets_ts, CLAUDE_WIN_5H_SECS);
         float exp7 = claude_expected_pct(m.claude_main.seven_d_resets_ts, CLAUDE_WIN_7D_SECS);
         if (exp5 > 0.f)
-            check_item(CLAUDE_MAIN_5H, m.claude_main.five_h_pct - exp5,
+            check_item(CLAUDE_MAIN_5H,
+                       claude_pace_value(m.claude_main.five_h_pct, exp5, cfg.warn_claude_5h_pct),
                        cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
         if (exp7 > 0.f)
-            check_item(CLAUDE_MAIN_7D, m.claude_main.seven_d_pct - exp7,
+            check_item(CLAUDE_MAIN_7D,
+                       claude_pace_value(m.claude_main.seven_d_pct, exp7, cfg.warn_claude_7d_pct),
                        cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
         // extra_enabled が無効になっても fired_[CLAUDE_MAIN_OVER] は保持される（check_once はリセットなし）
         if (m.claude_main.extra_enabled)
@@ -493,10 +505,12 @@ uint32_t AlertManager::check(const AllMetrics& m, const AppConfig& cfg, bool mut
         float exp5 = claude_expected_pct(m.claude_sub.five_h_resets_ts, CLAUDE_WIN_5H_SECS);
         float exp7 = claude_expected_pct(m.claude_sub.seven_d_resets_ts, CLAUDE_WIN_7D_SECS);
         if (exp5 > 0.f)
-            check_item(CLAUDE_SUB_5H, m.claude_sub.five_h_pct - exp5,
+            check_item(CLAUDE_SUB_5H,
+                       claude_pace_value(m.claude_sub.five_h_pct, exp5, cfg.warn_claude_5h_pct),
                        cfg.warn_claude_5h_pct, cfg.reset_claude_5h_pct);
         if (exp7 > 0.f)
-            check_item(CLAUDE_SUB_7D, m.claude_sub.seven_d_pct - exp7,
+            check_item(CLAUDE_SUB_7D,
+                       claude_pace_value(m.claude_sub.seven_d_pct, exp7, cfg.warn_claude_7d_pct),
                        cfg.warn_claude_7d_pct, cfg.reset_claude_7d_pct);
         if (m.claude_sub.extra_enabled)
             check_once(CLAUDE_SUB_OVER, m.claude_sub.extra_used_dollars, cfg.warn_claude_over);
