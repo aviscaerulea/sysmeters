@@ -111,7 +111,7 @@ A feature that automatically launches `claude.exe` at the moment it detects the 
 
 If the launched `claude.exe` does not lead to consumption and the gap persists, it launches up to 3 times including the first, at 30-minute intervals. Without retries, a single miss would prevent the nudge from firing again until sysmeters is restarted. If the gap still persists after all 3 attempts, the 3-attempt budget is rearmed every 5 hours after the last launch. The exit code of the launched `claude.exe` is recorded in the log.
 
-Even while a Usage API fetch is failing (`Err` displayed), it fires on an estimate once the known 5h reset time has passed. (because whether a new window has begun cannot be confirmed; for an `Err` caused by expired credentials, launching `claude.exe` can heal the `Err` by refreshing the token)
+Even while a Usage API fetch is failing (`Err` displayed), it fires on an estimate once the known 5h reset time has passed. (it does not fire when the statusline integration has confirmed that a new window began; otherwise it cannot be known whether a new window has begun. For an `Err` caused by expired credentials, launching `claude.exe` can heal the `Err` by refreshing the token)
 
 The launch command is shared between both accounts. When run for the sub account, it is launched with the `CLAUDE_CONFIG_DIR` environment variable temporarily set to the sub account's configuration directory. (the Claude CLI has no `--config-dir` command option; overriding the configuration directory is only possible through the environment variable)
 
