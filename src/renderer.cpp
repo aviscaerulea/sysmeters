@@ -1371,7 +1371,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // モデルスコープ（Fable 等）7d 専用ミニバー
     // 7d バー下端に隙間なく密着する塗り矩形のみ（縦幅は cfg.claude_scoped_bar_px、0 = 非表示）。
     // バー全幅 = スコープ枠の 100%。
-    // テキスト・背景トラック・警告色は持たず、行高（section_h_claude）にも影響しない。
+    // テキスト・背景トラックは持たず、行高（section_h_claude）にも影響しない。
     // 縦幅は config 側で 0〜4 にクランプ済みで、行内のバー下余白 (SECTION_H - BAR_H) / 2 = 4px に
     // 必ず収まるためレイアウト調整は不要。
     // weekly_scoped を返さないアカウントでは非表示（seven_d_scoped_pct < 0）
