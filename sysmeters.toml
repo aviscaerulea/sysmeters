@@ -31,7 +31,7 @@ border = 0x3C3C3C
 # デフォルト: 0xD4D4D4
 text = 0xD4D4D4
 
-# 面グラフ色（CPU 全体 / GPU / VRAM）
+# グラフ・バー色（CPU 全体 / GPU の面グラフ、RAM / VRAM / Disk 容量の使用率バー）
 # デフォルト: 0xCC923E（アンバー）
 graph_fill = 0xCC923E
 
