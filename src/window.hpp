@@ -61,6 +61,11 @@ private:
     // 起動直後にキャッシュから復元した過去のリセット時刻での誤通知を防ぐ。
     // 通常運転では 1 秒周期の判定が通過直後に捕まえるため、スリープ復帰等のタイマー停滞の余裕として 120 秒とする
     static constexpr time_t RESET_NOTIFY_FRESH_SEC = 120;
+    // 5h リセット通知の同一リセット判定の許容差（秒）。
+    // Usage API の resets_at は応答ごとに秒未満が揺れ、秒へ切り捨てた five_h_resets_ts が 1 秒前後する。
+    // 判定済みの値との差がこの秒数以内なら同じリセットとみなし、揺れによる二重通知を防ぐ。
+    // collector 側の statusline 同一ウィンドウ判定（PUSH_SAME_WINDOW_TOLERANCE_SEC）と同値
+    static constexpr time_t RESET_NOTIFY_SAME_TS_TOLERANCE_SEC = 60;
 
     HWND hwnd_         = nullptr;
     HINSTANCE hinst_   = nullptr;
@@ -80,7 +85,8 @@ private:
     bool always_alert_temp_disk_ = DEF_ALWAYS_ALERT_TEMP_DISK;  // ディスク温度（全ドライブ一括）
     // 5h リセット通知の有効/無効（レジストリ保存）
     bool reset_notify_ = DEF_RESET_NOTIFY;
-    // 5h リセット通知の判定済みリセット時刻（添字 0=Main, 1=Sub）。同じリセット時刻で二度判定しない。
+    // 5h リセット通知の判定済みリセット時刻（添字 0=Main, 1=Sub）。
+    // RESET_NOTIFY_SAME_TS_TOLERANCE_SEC 以内の差のリセット時刻は同一とみなし二度判定しない。
     // 通知をスキップした場合も記録し、閾値以下や鮮度切れのリセットを毎秒再判定しない
     time_t claude_reset_notified_ts_[2] = { -1, -1 };
     // 現在フルスクリーン抑制が働いているか（タイトルバー表示の差分検知用。WM_TIMER で更新）

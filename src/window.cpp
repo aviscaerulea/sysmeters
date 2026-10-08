@@ -783,7 +783,8 @@ bool AppWindow::is_fullscreen_app_running() {
 // 瞬間に見る five_h_pct はリセット直前の使用率である（キャッシュ由来の過去値は下記の鮮度条件で除く）。
 // これを reset_notify_min_pct と比較し、以下なら通知しない。
 // Usage API 取得失敗（Err）中も前回値が残るため時計比較だけで判定できる。
-// 同じリセット時刻は通知の有無に関わらず 1 回だけ判定する（claude_reset_notified_ts_）。
+// 判定済みの値と RESET_NOTIFY_SAME_TS_TOLERANCE_SEC 以内の差のリセット時刻は同一とみなし、
+// 通知の有無に関わらず 1 回だけ判定する（claude_reset_notified_ts_）。
 // 通過から RESET_NOTIFY_FRESH_SEC を超えたリセットは通知しない（起動直後にキャッシュから
 // 復元した過去のリセット時刻での誤通知を防ぐ）。
 // reset_notify_ が false でも判定と記録は行い、途中で ON に切り替えても過去分が遡って鳴らないようにする。
@@ -799,7 +800,10 @@ void AppWindow::check_claude_reset_notify() {
         const ClaudeMetrics& m = *accts[i];
         if (!m.account_enabled || !m.avail || m.five_h_resets_ts <= 0) continue;
         if (m.five_h_resets_ts > now) continue;
-        if (m.five_h_resets_ts == claude_reset_notified_ts_[i]) continue;
+        const time_t notified_diff = m.five_h_resets_ts - claude_reset_notified_ts_[i];
+        if (claude_reset_notified_ts_[i] > 0 &&
+            notified_diff >= -RESET_NOTIFY_SAME_TS_TOLERANCE_SEC &&
+            notified_diff <= RESET_NOTIFY_SAME_TS_TOLERANCE_SEC) continue;
         claude_reset_notified_ts_[i] = m.five_h_resets_ts;
 
         if (now - m.five_h_resets_ts > RESET_NOTIFY_FRESH_SEC) {
