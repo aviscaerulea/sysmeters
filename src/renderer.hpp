@@ -30,7 +30,7 @@ struct Visibility {
 
 // Direct2D による描画エンジン
 //
-// WM_PAINT で Paint() を呼び出すと AllMetrics の内容を描画する。
+// WM_PAINT で paint() を呼び出すと AllMetrics の内容を描画する。
 class Renderer {
 public:
     // コンパクト表示の縮小率
