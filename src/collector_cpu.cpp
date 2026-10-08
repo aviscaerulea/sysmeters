@@ -244,7 +244,7 @@ bool CpuCollector::init() {
         return true;  // 温度なしで継続
     }
 
-    // exe と同ディレクトリの IntelMSR.bin を読み込む
+    // exe と同ディレクトリにある、ベンダー別の PawnIO モジュール（Intel：IntelMSR.bin、AMD：AMDFamily17.bin）を読み込む
     wchar_t exe_path[MAX_PATH] = {};
     const DWORD path_len = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
     if (path_len == 0 || path_len >= MAX_PATH) {
@@ -254,7 +254,7 @@ bool CpuCollector::init() {
         impl_->hdev_pawnio = INVALID_HANDLE_VALUE;
         return true;
     }
-    // exe パスの末尾ファイル名を IntelMSR.bin に置換
+    // exe パスの末尾ファイル名をベンダー別のバイナリ名に置換
     wchar_t* last_sep = wcsrchr(exe_path, L'\\');
     if (!last_sep) {
         log_error("PawnIO: failed to resolve exe path");
