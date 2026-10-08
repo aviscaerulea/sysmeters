@@ -226,7 +226,7 @@ bool CpuCollector::init() {
 
     // --- PawnIO ドライバ経由の CPU 温度取得初期化 ---
     //
-    // PawnIO ドライバが未インストールの場合は temp_avail = false のまま（N/A 表示）。
+    // PawnIO ドライバが未インストールの場合は temp_avail = false のまま（--℃ 表示）。
     // NVML パターンと同様に、ドライバが利用可能な場合のみ温度を取得する。
 
     // デバイスオープン（\\.\PawnIO は PawnIO ドライバが作成する DosDevices シンボリックリンク）
