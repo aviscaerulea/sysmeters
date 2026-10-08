@@ -113,7 +113,7 @@ bool GpuCollector::init() {
 
 // GPU 使用率・温度を更新する
 // usage_pct と usage_history を同一サンプルで更新し、描画時の乖離を防ぐ。
-// TDR によるドライバリセット後は needs_reinit フラグを見て再初期化を試みる。
+// TDR によるドライバリセット後は needs_reinit_ フラグを見て再初期化を試みる。
 void GpuCollector::update_gpu(GpuMetrics& gpu) {
     // TDR 後の再初期化
     // init() 失敗時も needs_reinit_ は保持され、次タイマーで再試行を継続する。
