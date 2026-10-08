@@ -184,7 +184,7 @@ claude_7d_pct = 7.14
 reset_claude_7d_pct = 0
 
 # Claude 超過料金の警告閾値（単位：ドル）
-# extra_used_dollars がこの値を超えると "over $X.X" テキストが赤（0xEF5350）になる
+# extra_used_dollars がこの値を超えると "$X.X" テキストが赤（0xEF5350）になる
 # 警告音はこの値を「超えた」時点で 1 回鳴る（0.0 の場合、$0 を超えたとき＝超過発生時）
 # デフォルト: 0.0（$0 超えで即赤表示・警告音）
 claude_over = 0.0
