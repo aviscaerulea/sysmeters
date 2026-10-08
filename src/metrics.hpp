@@ -72,8 +72,11 @@ struct MemMetrics {
     RingBuffer<float, 60> hard_fault_history;  // ハードフォールト履歴（\Memory\Page Reads/sec）
 };
 
-// VRAM：面グラフ + 使用量表示
+// VRAM：横バー + 使用量表示
 struct VramMetrics {
+    // 使用率履歴（%）：警告音の平均判定専用（描画は瞬間値の横バーのみで履歴を使わない）
+    // update_vram() から push される。TIMER_SLOW（2.0 秒）間隔のため、
+    // N サンプルは概ね N × 2 秒の窓に相当する
     RingBuffer<float, 60> usage_history;
     float usage_pct = 0.f;
     float used_gb   = 0.f;
