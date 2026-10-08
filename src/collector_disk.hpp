@@ -9,8 +9,9 @@ public:
     // 監視対象の固定ドライブを列挙する（起動時に 1 回だけ呼ぶ想定。ホットプラグは対象外）
     //
     // 条件：レターが 'C' 以上、GetDriveTypeW == DRIVE_FIXED、かつ物理ディスク実体が存在する
-    // （IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS 成功）。最後の条件は Google ドライブ等、
-    // DRIVE_FIXED を名乗る仮想ファイルシステムを機械的に除外するために設けている。
+    // （IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS が成功し、先頭エクステントの長さが正）。
+    // Google ドライブ等、DRIVE_FIXED を名乗る仮想ファイルシステムは IOCTL には成功するが
+    // 長さ 0 のダミーのエクステントを返すため、最後の条件で機械的に除外できる。
     // レター昇順で最大 max_drives 台を返し、それを超えるドライブはログに記録した上で除外する
     // （超過は AlertManager の警告 ID 予約数の制約による）。
     static std::vector<char> enumerate_fixed_drives(int max_drives);
