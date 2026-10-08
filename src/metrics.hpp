@@ -15,7 +15,7 @@ struct OsMetrics {
     ULONGLONG uptime_ms = 0;
 };
 
-// CPU：全体使用率（面グラフ）+ コア別縦バー + 温度（横バー）+ システム統計
+// CPU：全体使用率（面グラフ）+ コア別縦バー + 温度（面グラフ右上のテキスト。取得不可時は --℃）+ システム統計
 struct CpuMetrics {
     RingBuffer<float, 60> total_history;  // 全体使用率履歴（%）
     float total_pct  = 0.f;
@@ -38,7 +38,7 @@ struct CpuMetrics {
     float   top_proc_pct      = 0.f;
 };
 
-// GPU：使用率（面グラフ）+ 温度（横バー）
+// GPU：使用率（面グラフ）+ 温度（面グラフ右上のテキスト）
 struct GpuMetrics {
     RingBuffer<float, 60> usage_history; // 使用率履歴（%）
     float usage_pct    = 0.f;
