@@ -11,7 +11,7 @@ typedef void* nvmlDevice_t;
 
 struct nvmlUtilization_t {
     unsigned int gpu;    // GPU コア使用率（%）
-    unsigned int memory; // VRAM 使用率（%）
+    unsigned int memory; // メモリコントローラ稼働率（%、直近サンプル期間に VRAM を読み書きしていた時間の割合。容量使用率ではない）
 };
 
 struct nvmlMemory_t {
