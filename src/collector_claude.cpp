@@ -849,7 +849,8 @@ DWORD WINAPI ClaudeCollector::fetch_thread(LPVOID param) {
 // テンポラリ（旧保存先）は OS やユーザの掃除で消え、再起動時の履歴復元ができなくなるため
 // 移した。exe ディレクトリ配下にしないのは、Scoop が更新時にバージョンディレクトリを作り直し、
 // manifest の persist 指定なしではキャッシュが消えるため。
-// 旧テンポラリのファイルは移行しない（履歴は 30 分で復帰する）。
+// 旧テンポラリのファイルは移行しない（履歴は delta_window_min / delta_window_7d_min 分の再蓄積で
+// 復帰する。デフォルトは 5h が 5 分、7d が 12 時間）。
 // 常駐側（init）と statusline 連携の書き出し側（write_claude_statusline）が同じ場所を共有する。
 // 取得・作成に失敗したときは空 path を返す
 static fs::path claude_cache_dir() {
