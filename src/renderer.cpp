@@ -1328,6 +1328,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 現ターンの終端は、5h ウィンドウがアクティブ（five_h_resets_ts が未来）ならそのリセット時刻、
     // 非アクティブ（リセット通過後の間隙）なら「今開始した」と仮定した now + 5h とする。
     // 以降は 5h 刻みで隙間なく開始し続けた場合に開始できるターン数を切り上げで加算する。
+    // 切り上げの前に残り時間を分単位へ丸める。resets_at の秒未満の揺れで 5h の整数倍の境界上で
+    // ceil が往復し、表示が取得のたびに 1 振れるのを防ぐため
     // 7d リセット通過後の未更新データでは 0。（次回フェッチで新ウィンドウの値に置き換わる）
     // 未取得の間は非表示（-1）。取得済みなら残数の大小に依らず常に表示する
     //
@@ -1355,6 +1357,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
                            ? static_cast<double>(m.five_h_resets_ts)
                            : static_cast<double>(now) + CLAUDE_WIN_5H_SECS;
             double after = static_cast<double>(m.seven_d_resets_ts) - cur_end;
+            after = std::round(after / 60.0) * 60.0;
             double turns = 1.0 + (after > 0.0 ? std::ceil(after / CLAUDE_WIN_5H_SECS) : 0.0);
             turns_left = static_cast<int>(std::clamp(turns, 0.0, static_cast<double>(TURNS_MAX)));
         }
