@@ -72,6 +72,11 @@ static constexpr uint64_t NUDGE_RETRY_INTERVAL_MS = 30 * 60 * 1000;
 // 使い切った間隙は要因解消後も発火せず、アプリ再起動まで nudge が止まる構造が残るため
 static constexpr uint64_t NUDGE_REARM_INTERVAL_MS = 5ULL * 60 * 60 * 1000;
 
+// 2 つの resets_ts がこの秒数以内の差なら同一ウィンドウ（同一間隙）とみなす。
+// Usage API の resets_at は応答ごとに秒未満が揺れ、statusline は epoch 秒のため、同じウィンドウでも数秒ずれ得る。
+// statusline 連携の同一ウィンドウ判定（accept_push_window）と nudge の同一間隙判定（claim_nudge）で共用する
+static constexpr time_t PUSH_SAME_WINDOW_TOLERANCE_SEC = 60;
+
 // 5h/7d 履歴サンプルの最小間隔（秒）。apply_result はこれより短い間隔では履歴へ追加しない。
 // statusline 連携の取り込み（最大 1 秒周期）で履歴が膨らみ、保存が毎秒走るのを防ぐ。
 // API 取得周期（60 秒）より短くし、連携が無いときは API 取得ごとに従来どおり追加する
@@ -485,6 +490,10 @@ static void clear_negative_cache(const fs::path& path) {
 // - 再武装：前回発火から NUDGE_REARM_INTERVAL_MS 以上経過していたら新しい間隙とみなす
 // - 新しい間隙（キー変化または再武装）：許可し、発火回数を 1 から数え直す
 // - 同じ間隙の継続：NUDGE_MAX_ATTEMPTS 回まで再発火を許可する
+// キーの異同は PUSH_SAME_WINDOW_TOLERANCE_SEC 以内の差を同一とみなす許容差つきで比較する。
+// 過去の resets_at を返し続ける間隙形式では、応答ごとの秒未満の揺れでキーが ±1 秒ずれ、
+// 完全一致の比較では毎回「新しい間隙」になって発火回数の上限が効かないため。
+// 番兵 1 と実時刻の差は常に許容差を超えるため、番兵と実時刻は同一にならない
 //
 // 再試行を設けた背景：nudge が成功すれば新しい 5h ウィンドウが始まり、呼び出し元が
 // 監視対象を更新して間隙が解消する。しかし claude.exe の起動が空振りすると呼び出し元は
@@ -500,7 +509,11 @@ bool ClaudeCollector::claim_nudge(time_t key) {
     if (last_nudge_tick_ != 0 && tick - last_nudge_tick_ < NUDGE_RETRY_INTERVAL_MS) return false;
 
     bool rearm = (last_nudge_tick_ != 0 && tick - last_nudge_tick_ >= NUDGE_REARM_INTERVAL_MS);
-    if (key != last_nudge_resets_ts_ || rearm) {
+    const time_t key_diff = key - last_nudge_resets_ts_;
+    const bool same_gap = last_nudge_resets_ts_ > 0 &&
+                          key_diff >= -PUSH_SAME_WINDOW_TOLERANCE_SEC &&
+                          key_diff <= PUSH_SAME_WINDOW_TOLERANCE_SEC;
+    if (!same_gap || rearm) {
         last_nudge_resets_ts_ = key;
         nudge_attempts_       = 1;
         last_nudge_tick_      = tick;
@@ -868,10 +881,6 @@ static bool parse_push_window(const json& parent, const char* key, double& pct, 
     rts = json_num(*it, "resets_at", -1.0);
     return pct >= 0.0 && rts > 0.0 && rts < PUSH_RESETS_TS_MAX;
 }
-
-// 連携値と表示中の値の resets_ts がこの秒数以内の差なら同一ウィンドウとみなす。
-// Usage API の resets_at は秒未満を含み、statusline は epoch 秒のため、同じウィンドウでも数秒ずれ得る
-static constexpr time_t PUSH_SAME_WINDOW_TOLERANCE_SEC = 60;
 
 // 連携値 1 ウィンドウ分を採用してよいか判定する
 //
