@@ -852,14 +852,21 @@ static fs::path statusline_push_path(const fs::path& cache_dir, const std::strin
     return cache_dir / ("claude-statusline" + suffix + ".json");
 }
 
+// statusline 連携で受理する resets_at（epoch 秒）の上限（排他）。
+// parse_iso8601_utc の年上限 2200 に揃えた 2201-01-01T00:00:00Z。
+// 範囲外の値は format_reset_ts の gmtime_s を失敗させ、曜日配列の範囲外読み出しに至る。
+// 連携ファイルは同一ユーザの任意プロセスが書けるため、入力値は信用せずここで弾く
+static constexpr double PUSH_RESETS_TS_MAX = 7289654400.0;
+
 // statusline 形式のウィンドウオブジェクト（{"used_percentage": n, "resets_at": epoch}）を読む
-// 両フィールドが数値のときだけ true。欠落・null・型違いは「そのウィンドウの情報なし」として false
+// 両フィールドが数値で resets_at が (0, PUSH_RESETS_TS_MAX) の範囲内のときだけ true。
+// 欠落・null・型違い・範囲外は「そのウィンドウの情報なし」として false
 static bool parse_push_window(const json& parent, const char* key, double& pct, double& rts) {
     auto it = parent.find(key);
     if (it == parent.end() || !it->is_object()) return false;
     pct = json_num(*it, "used_percentage", -1.0);
     rts = json_num(*it, "resets_at", -1.0);
-    return pct >= 0.0 && rts > 0.0;
+    return pct >= 0.0 && rts > 0.0 && rts < PUSH_RESETS_TS_MAX;
 }
 
 // 連携値と表示中の値の resets_ts がこの秒数以内の差なら同一ウィンドウとみなす。
