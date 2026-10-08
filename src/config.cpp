@@ -235,8 +235,10 @@ AppConfig load_config(const std::string& path) {
     cfg.priority_visible_range_pct  = std::clamp(cfg.priority_visible_range_pct,  0, 49);
     cfg.priority_hidden_range_pct   = std::clamp(cfg.priority_hidden_range_pct,   0, 49);
 
-    // Usage API ポーリング間隔のサニティチェック（30〜3600 秒）
-    cfg.claude_usage_interval_sec = std::clamp(cfg.claude_usage_interval_sec, 30, 3600);
+    // Usage API ポーリング間隔のサニティチェック（60〜3600 秒）
+    // 下限 60 は取得要否を判定するタイマー周期（TIMER_CLAUDE_MS）と同値とし、
+    // 60 秒未満を許しても実効間隔は 60 秒に丸まるため、設定の案内と実態を一致させる。
+    cfg.claude_usage_interval_sec = std::clamp(cfg.claude_usage_interval_sec, 60, 3600);
 
     // 5h 増加分濃色オーバーレイのウィンドウ幅サニティチェック（0〜60 分）
     // 上限 60 分は保持メモリの暴走防止と、5h ウィンドウ内で意味のある時間幅。0 は機能無効を意味する
