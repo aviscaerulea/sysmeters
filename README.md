@@ -31,7 +31,7 @@ Claude Code のレートリミット使用状況をコンパクトなオーバ�
   - ハードフォールトとシステム統計（Proc/Thread/Handle）も表示
 - GPU：使用率（面グラフ）と温度を表示（NVIDIA NVML 経由）
 - RAM：使用率（横バー）と使用量/総量、WSL の使用量を表示
-- VRAM：使用率（面グラフ）と使用量/総量を表示（NVIDIA NVML 経由）
+- VRAM：使用率（横バー）と使用量/総量を表示（NVIDIA NVML 経由）
 - Disk I/O：固定ドライブを自動検出し、Read/Write 速度、使用率、使用量/総量をドライブ別に表示
   - 温度と S.M.A.R.T. 書き込み量もドライブ別に表示
 - Network：全 NIC 合算の送信/受信速度を分離して表示

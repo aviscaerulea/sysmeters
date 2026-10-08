@@ -30,7 +30,7 @@ A Toast notification appears the moment any warning threshold is exceeded. Notif
 - CPU: Displays overall usage (area chart), hard faults, per-logical-core usage (vertical bars), temperature, and system statistics (Proc/Thread/Handle)
 - GPU: Displays usage (area chart) and temperature, via NVIDIA NVML
 - RAM: Displays usage (horizontal bar), used/total, and WSL usage
-- VRAM: Displays usage (area chart) and used/total, via NVIDIA NVML
+- VRAM: Displays usage (horizontal bar) and used/total, via NVIDIA NVML
 - Disk I/O: Automatically detects fixed drives and displays read/write throughput, usage, used/total, temperature, and S.M.A.R.T. write volume per drive
 - Network: Displays aggregated send/receive throughput across all NICs, separated by direction
 - IP: Displays the global IP address (shows NO INTERNET📵 when offline)
