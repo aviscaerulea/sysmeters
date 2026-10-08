@@ -1048,15 +1048,17 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 新しい順に走査し、ts <= now - N 分 の最初のサンプルを返す。
     // N 分前のサンプルが無い場合、最古サンプルの経過時間が 60 秒以上なら最古サンプルを返す
     // （起動直後でもおおむねペースが見える効果。1 分未満は誤差が大きいため抑制）
+    // 起点を決められないとき（機能無効・履歴なし・最古サンプルが 1 分未満）は -1 を返す。
+    // 0 は「使用率 0% が起点」という正当な値で、新しいウィンドウで初めて消費した増加分を描くために区別する
     auto calc_delta_start_pct = [&](const std::vector<ClaudeHistorySample>& hist, int win_min) -> float {
-        if (win_min <= 0 || hist.empty()) return 0.f;
+        if (win_min <= 0 || hist.empty()) return -1.f;
         time_t now = time(nullptr);
         time_t target = now - static_cast<time_t>(win_min * 60);
         for (auto it = hist.rbegin(); it != hist.rend(); ++it) {
             if (it->ts <= target) return it->pct;
         }
         if (now - hist.front().ts >= 60) return hist.front().pct;
-        return 0.f;
+        return -1.f;
     };
 
     // Claude レートリミット横バーを 1 本描画する
@@ -1070,7 +1072,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // expected_pct:     均等消費ペースの理想位置（%）。0 のとき計算不可
     // tick_count:       バーの分割数。等分位置に縦線を tick_count - 1 本引く。（0 のとき縦線なし）
     // warn_pct:         理想ペースからの超過率の警告閾値（%）
-    // delta_start_pct:  直近ウィンドウ開始時点の使用率（%）。0 のとき増加分オーバーレイ非表示
+    // delta_start_pct:  直近ウィンドウ開始時点の使用率（%）。負のとき増加分オーバーレイ非表示
     // window_secs:      ウィンドウ長（秒）。0 より大きいとき、パーセンテージが警告色（黄・赤）の間
     //                    バー左端に警告解除までの残り時間を黒字で表示する（7d のみで使用、5h は 0 のまま非表示）
     // turns_left:       5h 残ターン数（7d リセットまでに実行できる 5h ウィンドウ数、現ターン含む）。
@@ -1081,7 +1083,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     static constexpr float PACE_LINE_W = 2.5f;
     auto draw_bar = [&](const wchar_t* lbl, float pct, const wchar_t* reset, bool avail,
                          float expected_pct, int tick_count, float warn_pct,
-                         float delta_start_pct = 0.f,
+                         float delta_start_pct = -1.f,
                          double window_secs = 0.0,
                          int turns_left = -1) {
         static constexpr float CLAUDE_BAR_H = BAR_H;  // VRAM 等と同じバー高さに揃える
@@ -1139,8 +1141,8 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
         }
 
         // 直近 N 分間の増加分を濃色（COL_WSL_MEM）で重ね塗りする
-        // ペース把握用の補助表示。減少時（リセット直後など）は描画しない
-        if (avail && delta_start_pct > 0.f && pct > delta_start_pct) {
+        // ペース把握用の補助表示。起点なし（負）と減少時（リセット直後など）は描画しない
+        if (avail && delta_start_pct >= 0.f && pct > delta_start_pct) {
             float bw = br.right - br.left;
             float xs = br.left + bw * (delta_start_pct / 100.f);
             float xe = br.left + bw * (pct             / 100.f);
@@ -1310,7 +1312,7 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // マルチアカウントで上下のドットが同じ横位置に揃うようにするため
     // ● は取得時刻と同じ font_tiny_・同じ行ボックス（ssr）で描き、縦位置はグリフ設計に任せる
     // （font_small_ では 1px ほど大きく見えた）
-    if (m.avail && five_h_delta_start > 0.f && five_h_disp_pct > five_h_delta_start) {
+    if (m.avail && five_h_delta_start >= 0.f && five_h_disp_pct > five_h_delta_start) {
         constexpr ULONGLONG RECENT_DOT_PERIOD_MS = 2000;  // 明滅周期
         float phase = static_cast<float>(GetTickCount64() % RECENT_DOT_PERIOD_MS)
                     / static_cast<float>(RECENT_DOT_PERIOD_MS);
