@@ -715,22 +715,25 @@ void ClaudeCollector::do_fetch() {
     // 過去の resets_at を返し続ける形式（rts が過去値）。
     // 監視対象は init 時のキャッシュ復元値でも種付けされるため、起動直後の間隙でも発火する。
     // nudge が機能して新ウィンドウが始まれば監視対象の更新側へ入るため、重複発火しない。
-    // フェッチ失敗（ERR）中も、把握済み監視対象のリセット時刻通過は時計だけで確定できるため
-    // 推定発火する（下の else if）。新ウィンドウが既に始まっているかは確認できないが、
-    // 誤発火コストは極小（デフォルト cmd は haiku への極小プロンプト 1 回）で、重複は
-    // claim_nudge が抑止する。401 認証切れ由来の ERR では claude.exe 起動がトークンを更新し
+    // 監視対象の更新は usage_j の成否に依らず result の 5h resets_ts が未来なら行う。
+    // ERR 中でも statusline 連携（上の overlay_push）で新ウィンドウを確認できた場合があり、
+    // そのときは消費が始まっているため発火しない。
+    // フェッチ失敗（ERR）中で新ウィンドウも確認できないときは、把握済み監視対象のリセット時刻通過を
+    // 時計だけで確定できるため推定発火する（下の else if）。新ウィンドウが既に始まっているかは
+    // 確認できないが、誤発火コストは極小（デフォルト cmd は haiku への極小プロンプト 1 回）で、
+    // 重複は claim_nudge が抑止する。401 認証切れ由来の ERR では claude.exe 起動がトークンを更新し
     // ERR 自体を治癒する副次効果もある。監視対象が未観測（-1）の間は根拠が無いため発火しない。
     // 世代ガード：nudge 状態（監視対象・発火記録・nudge_proc_）は排他なしの単一スレッド前提の
     // ため、watchdog に放棄された旧スレッドは触れない（reap_nudge のガードと同じ理由）
     if (my_gen == fetch_gen_.load()) {
-        if (usage_j != nullptr && result.avail) {
-            time_t now = static_cast<time_t>(now_ts());
-            time_t rts = result.five_h_resets_ts;   // -1 = アクティブウィンドウ無し（API null 応答）
-            if (rts > now) {
-                watched_5h_resets_ts_ = rts;
-                nudge_attempts_ = 0;   // 間隙が解消した＝再試行の必要が無くなった
-            }
-            else if (nudge_enable_) {
+        time_t now = static_cast<time_t>(now_ts());
+        time_t rts = result.five_h_resets_ts;   // -1 = アクティブウィンドウ無し（API null 応答）
+        if (rts > now) {
+            watched_5h_resets_ts_ = rts;
+            nudge_attempts_ = 0;   // 間隙が解消した＝再試行の必要が無くなった
+        }
+        else if (usage_j != nullptr && result.avail) {
+            if (nudge_enable_) {
                 // 終了したウィンドウの識別子が不明なケース（null 形式の間隙中に起動し、キャッシュにも
                 // resets_at が残っていない）は固定キー 1 で発火させる。間隙の存在自体は
                 // フェッチ成功データで確認できているため発火が正しく、重複は claim_nudge が抑止できる
@@ -744,7 +747,6 @@ void ClaudeCollector::do_fetch() {
         else if (usage_j == nullptr && nudge_enable_ && watched_5h_resets_ts_ > 0) {
             // ERR 経路：監視対象の時計通過のみを根拠に推定発火する。キーに watched 値を記録する
             // ため、ERR 復旧後の成功フェッチが同じ間隙を検知しても即座には再発火しない
-            time_t now = static_cast<time_t>(now_ts());
             if (watched_5h_resets_ts_ <= now && claim_nudge(watched_5h_resets_ts_)) {
                 run_nudge(true);
             }
