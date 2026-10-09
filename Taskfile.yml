@@ -27,6 +27,14 @@ tasks:
     cmds:
       - rm -rf out
 
+  # AI の作業ディレクトリ temp/ を空にする。引数を取らない固定コマンドにして
+  # Claude Code の許可規則で完全一致させ、rm の引数経由で temp/ 外を消せないようにする
+  clean-temp:
+    desc: temp/ 以下のファイルを削除
+    cmds:
+      - rm -rf temp
+      - mkdir -p temp
+
   gen-hashes:
     desc: PawnIO バイナリの SHA-256 ハッシュヘッダを生成（src/pawnio_hashes.hpp）
     cmds:
