@@ -49,7 +49,9 @@ tasks:
       - cp data/AMDFamily17.bin out/
       - cp data/alert.wav out/
       - cp data/agent_reset.wav out/
-      - cmd: cp -f *.local.* out/
+      # アプリが読む local 設定は sysmeters.local.toml だけなので、CLAUDE.local.md 等の
+      # *.local.* を out/ へ複製しない。gitignore 対象で存在しない環境があるため失敗は無視する
+      - cmd: cp -f {{.APP_NAME}}.local.toml out/
         ignore_error: true
 
   build:
