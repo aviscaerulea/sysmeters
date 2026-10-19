@@ -59,10 +59,14 @@ tasks:
     # パイプの終了コードは sed のものになり、トップレベルの set: [pipefail] は動的変数に効かない
     # ため、コマンド内で pipefail を指定する。代替値で埋めずにタスクを止める。
     # トップレベル vars に置くとタスク起動のたびに評価され、VERSION を使わない test や clean
-    # まで git の失敗で止まるため、参照する build と release のタスク単位で定義する
+    # まで git の失敗で止まるため、参照する build と release のタスク単位で定義する。
+    # タスク単位の vars は CLI の VERSION=x より優先され、指定が黙って無視される。
+    # そのためテンプレートで CLI 指定を優先し、未指定時だけ git describe で求める
+    # （gh-release の規約 task release VERSION=$VERSION を通すため。git 不在の環境でも
+    # VERSION=x を明示すればビルドできる）
     vars:
       VERSION:
-        sh: set -o pipefail; git describe --tags --always --dirty | sed 's/^v//'
+        sh: set -o pipefail; {{if .VERSION}}printf "%s" "{{.VERSION}}"{{else}}git describe --tags --always --dirty | sed 's/^v//'{{end}}
     cmds:
       - mkdir -p out
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Debug
@@ -81,7 +85,7 @@ tasks:
     # build の VERSION と同じ定義。タスク単位に置く理由は build のコメントを参照
     vars:
       VERSION:
-        sh: set -o pipefail; git describe --tags --always --dirty | sed 's/^v//'
+        sh: set -o pipefail; {{if .VERSION}}printf "%s" "{{.VERSION}}"{{else}}git describe --tags --always --dirty | sed 's/^v//'{{end}}
     cmds:
       - mkdir -p out
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
