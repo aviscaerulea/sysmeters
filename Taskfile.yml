@@ -4,8 +4,11 @@ version: "3"
 
 vars:
   APP_NAME: sysmeters
+  # git describe の失敗（.git なし、git 未導入等）で VERSION が空文字のまま続行するのを防ぐ。
+  # パイプの終了コードは sed のものになり、トップレベルの set: [pipefail] は動的変数に効かない
+  # ため、コマンド内で pipefail を指定する。代替値で埋めずにタスクを止める
   VERSION:
-    sh: git describe --tags --always --dirty | sed 's/^v//'
+    sh: set -o pipefail; git describe --tags --always --dirty | sed 's/^v//'
   ARCH: x64
 
 tasks:
