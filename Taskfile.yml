@@ -15,7 +15,9 @@ vars:
 # Task はタスク単位の vars を CLI の VERSION=x より優先し、指定を黙って無視する。
 # そのためテンプレートで CLI 指定を優先し、未指定時だけ git describe で求める
 # （gh-release の規約 task release VERSION=$VERSION を通すため）。git 不在の環境でも
-# VERSION=x を明示すればビルドできる
+# VERSION=x を明示すればビルドできる。
+# Task のテンプレートは CLI 指定と環境変数を区別しないため、環境変数 VERSION も同じく優先する
+# （VERSION 以外の変数名で受けると gh-release の規約から外れるため、この優先は仕様とする）
 x-version: &version
   sh: set -o pipefail; {{if .VERSION}}printf "%s" "{{.VERSION}}"{{else}}git describe --tags --always --dirty | sed 's/^v//'{{end}}
 
