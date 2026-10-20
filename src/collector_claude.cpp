@@ -235,8 +235,8 @@ static void format_reset_time(const std::string& iso, bool include_date, wchar_t
 }
 
 // 5h/7d データの取得時刻をローカル時刻 "HH:MM" に整形する
-// 時はゼロ埋めなしの 2 桁右寄せ（1 桁時は先頭に空白）。等幅フォントで桁と直近使用ドットの位置が
-// 時刻に依らず揃うようにするため。ts <= 0（未取得）のときは out を変更しない
+// 時はゼロ埋めなしの 2 桁右寄せ（1 桁時は先頭に空白）で、等幅フォントで桁が時刻に依らず揃う。
+// ts <= 0（未取得）のときは out を変更しない
 static void format_fetched_at(time_t ts, wchar_t (&out)[8]) {
     if (ts <= 0) return;
     struct tm lt{};

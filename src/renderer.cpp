@@ -1292,38 +1292,13 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
     // 実値（five_h_pct）は通知本文の「直前 N%」と警告判定が参照するため書き換えない。
     // API が旧ウィンドウを返し続けても同じ規則で 0% になるため、表示がちらつかない。
     // nudge（collector_claude.cpp）も rts <= now を「ウィンドウ終了」と扱っており解釈を揃える。
-    // 濃色オーバーレイと直近使用ドットは pct(0) > delta_start が偽になり自然に消える
+    // 濃色オーバーレイは pct(0) > delta_start が偽になり自然に消える
     const bool five_h_ended = m.five_h_resets_ts > 0 && m.five_h_resets_ts <= time(nullptr);
     const float five_h_disp_pct = five_h_ended ? 0.f : m.five_h_pct;
     const wchar_t* five_h_disp_reset = five_h_ended ? L"" : m.five_h_reset;
     const float five_h_disp_expected = five_h_ended ? 0.f
                                      : claude_expected_pct(m.five_h_resets_ts, CLAUDE_WIN_5H_SECS);
 
-    // 直近使用ドット：ヘッダ行右側の取得時刻・Sessions テキストの直前に ● を置き、
-    // 直近 delta_window_min 分以内に 5h 使用率が増えている間だけ明滅させる。
-    // 表示条件は 5h 濃色オーバーレイと同一（1 対 1）。量はバーの濃色、鮮度はこのドットが担う。
-    // 濃色自体を明滅させると「増加分が無い」と誤認するため、鮮度は独立した要素で表す。
-    // 色は濃色と同じ COL_WSL_MEM で「直近消費」の意味を揃え、アルファを 0.25〜1.0 の
-    // 正弦波（周期 2 秒）で明滅させる。位相は GetTickCount64 から都度算出し状態を持たない。
-    // 横位置は sess_buf の最大文字数（"HH:MM  Sessions:NNN" = 19、font_tiny_ の Consolas 等幅）
-    // × TOPPROC_COL_W で右端から逆算し、半文字分の間隔を空けて右詰めする（DirectWrite の実測はしない）。
-    // ● グリフは送り幅より細く左右に余白があるため、半文字分で見た目は約 1 文字分空く。
-    // 実文字数ではなく最大値で固定するのは、時が 1 桁のときや取得時刻が空のときにドットが動かず、
-    // マルチアカウントで上下のドットが同じ横位置に揃うようにするため
-    // ● は取得時刻と同じ font_tiny_・同じ行ボックス（ssr）で描き、縦位置はグリフ設計に任せる
-    // （font_small_ では 1px ほど大きく見えた）
-    if (m.avail && five_h_delta_start >= 0.f && five_h_disp_pct > five_h_delta_start) {
-        constexpr ULONGLONG RECENT_DOT_PERIOD_MS = 2000;  // 明滅周期
-        float phase = static_cast<float>(GetTickCount64() % RECENT_DOT_PERIOD_MS)
-                    / static_cast<float>(RECENT_DOT_PERIOD_MS);
-        float alpha = 0.625f + 0.375f * std::sin(phase * 6.2831853f);
-        constexpr float SESS_MAX_CHARS = 19.f;  // "HH:MM  Sessions:NNN"
-        float dot_right = hsr.right - (SESS_MAX_CHARS + 0.5f) * TOPPROC_COL_W;
-        D2D1_RECT_F dot_r = D2D1::RectF(ssr.left, ssr.top, dot_right, ssr.bottom);
-        set_brush_color(brush_text_, COL_WSL_MEM, alpha);
-        draw_text_aligned(L"●", font_tiny_, dot_r, brush_text_, DWRITE_TEXT_ALIGNMENT_TRAILING);
-        recent_dot_drawn_ = true;
-    }
     // 5h 残ターン数：7d リセットまでに実行できる 5h ウィンドウ数。（進行中の現ターンを含む）
     // 現ターンの終端は、5h ウィンドウがアクティブ（five_h_resets_ts が未来）ならそのリセット時刻、
     // 非アクティブ（リセット通過後の間隙）なら「今開始した」と仮定した now + 5h とする。
@@ -1397,9 +1372,6 @@ float Renderer::draw_claude(const ClaudeMetrics& m, const AppConfig& cfg, float 
 // ---- メイン描画 ----
 
 void Renderer::paint(const AllMetrics& m, const AppConfig& cfg, const Visibility& vis) {
-    // 早期 return より前でクリアする。デバイス生成失敗中に古い true が残ると
-    // TIMER_ANIM がドット明滅のための再描画要求を出し続けてしまう
-    recent_dot_drawn_ = false;  // 今回の paint で描けば draw_claude が立て直す
     if (!render_target_) create_device_resources(cfg);
     if (!render_target_) return;
 
