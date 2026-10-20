@@ -6,6 +6,19 @@ vars:
   APP_NAME: sysmeters
   ARCH: x64
 
+# build と release が共有する VERSION の定義（YAML アンカーで、x- 接頭辞の拡張キーは Task が無視する）。
+# git describe の失敗（.git なし、git 未導入等）で VERSION が空文字のまま続行するのを防ぐ。
+# パイプの終了コードは sed のものになり、トップレベルの set: [pipefail] は動的変数に効かない
+# ため、コマンド内で pipefail を指定する。代替値で埋めずにタスクを止める。
+# トップレベル vars に置くと Task がタスク起動のたびに評価し、VERSION を使わない test や clean
+# まで git の失敗で止まるため、参照する build と release のタスク単位 vars からアンカーで参照する。
+# Task はタスク単位の vars を CLI の VERSION=x より優先し、指定を黙って無視する。
+# そのためテンプレートで CLI 指定を優先し、未指定時だけ git describe で求める
+# （gh-release の規約 task release VERSION=$VERSION を通すため）。git 不在の環境でも
+# VERSION=x を明示すればビルドできる
+x-version: &version
+  sh: set -o pipefail; {{if .VERSION}}printf "%s" "{{.VERSION}}"{{else}}git describe --tags --always --dirty | sed 's/^v//'{{end}}
+
 tasks:
   default:
     desc: クリーンビルドを実行
@@ -55,18 +68,9 @@ tasks:
   build:
     desc: デバッグビルド（out/sysmeters.exe）
     deps: [kill, gen-hashes]
-    # git describe の失敗（.git なし、git 未導入等）で VERSION が空文字のまま続行するのを防ぐ。
-    # パイプの終了コードは sed のものになり、トップレベルの set: [pipefail] は動的変数に効かない
-    # ため、コマンド内で pipefail を指定する。代替値で埋めずにタスクを止める。
-    # トップレベル vars に置くとタスク起動のたびに評価され、VERSION を使わない test や clean
-    # まで git の失敗で止まるため、参照する build と release のタスク単位で定義する。
-    # タスク単位の vars は CLI の VERSION=x より優先され、指定が黙って無視される。
-    # そのためテンプレートで CLI 指定を優先し、未指定時だけ git describe で求める
-    # （gh-release の規約 task release VERSION=$VERSION を通すため。git 不在の環境でも
-    # VERSION=x を明示すればビルドできる）
+    # VERSION の定義と理由は先頭の x-version を参照
     vars:
-      VERSION:
-        sh: set -o pipefail; {{if .VERSION}}printf "%s" "{{.VERSION}}"{{else}}git describe --tags --always --dirty | sed 's/^v//'{{end}}
+      VERSION: *version
     cmds:
       - mkdir -p out
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Debug
@@ -82,10 +86,9 @@ tasks:
   release:
     desc: リリースビルド（デバッグ情報なし＋最適化）と zip 作成
     deps: [clean]
-    # build の VERSION と同じ定義。タスク単位に置く理由は build のコメントを参照
+    # VERSION の定義と理由は先頭の x-version を参照
     vars:
-      VERSION:
-        sh: set -o pipefail; {{if .VERSION}}printf "%s" "{{.VERSION}}"{{else}}git describe --tags --always --dirty | sed 's/^v//'{{end}}
+      VERSION: *version
     cmds:
       - mkdir -p out
       - cmd: pwsh.exe -NoProfile -File build.ps1 -Version "{{.VERSION}}" -Config Release
