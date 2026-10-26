@@ -125,7 +125,11 @@ static bool play_wav_wasapi(const wchar_t* path, const std::atomic<bool>* shutdo
 
             if (memcmp(id, "fmt ", 4) == 0) {
                 DWORD readSize = std::min(chunkSize, (DWORD)sizeof(WAVEFORMATEX));
-                ReadFile(hFile, &fmt, readSize, &nRead, nullptr);
+                // 読み切れないと後続のシーク量が実位置とずれるため、途切れた fmt チャンクは不正として扱う
+                if (!ReadFile(hFile, &fmt, readSize, &nRead, nullptr) || nRead != readSize) {
+                    log_error("alert: truncated fmt chunk");
+                    goto cleanup;
+                }
                 // チャンク末尾＋パディング（偶数バイト境界）までシーク
                 LONG skip = (LONG)(((chunkSize + 1) & ~1u) - readSize);
                 if (skip > 0)
